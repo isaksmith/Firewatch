@@ -383,22 +383,22 @@ React 18 + Vite + TypeScript · `react-map-gl/maplibre` + `maplibre-gl` · `@dec
 
 ### 8.2 Visual language
 
-Dispatch centers run dim rooms and long shifts, so the UI is dark by default with high-contrast status colors. Color is never the only signal: every recommendation also has an icon and a text label.
+Dispatch centers run dim rooms and long shifts, so the UI is a near-black operations console in the style of defense mission software: hairline borders, square corners, uppercase monospace labels, and color reserved for threat level. Color is never the only signal: every recommendation also has a map symbol and a text label.
 
 | Token | Value | Use |
 |---|---|---|
-| `bg` | `#0B0F14` | App background |
-| `panel` | `#121821` | Side panels, cards |
-| `border` | `#243041` | Dividers |
-| `text` / `muted` | `#E6EDF3` / `#8B98A5` | Body / secondary |
-| `escalate` | `#EF4444` + `flame` icon | Score ≥ 70 |
-| `investigate` | `#F59E0B` + `eye` icon | 40–69 |
-| `monitor` | `#64748B` + `circle` icon | < 40 |
-| `degraded` | `#A78BFA` + `alert-triangle` icon | Missing data badge |
-| `sample` | `#38BDF8` | SAMPLE mode banner and badges |
-| Isochrones | `#FDE68A` → `#F97316` → `#B91C1C` | 5 min → 60 min |
+| `void` / `bg` | `#050607` / `#08090B` | Chrome bars, map background / app background |
+| `panel` / `raised` | `#0C0E11` / `#181C21` | Side panels / selected rows, hover |
+| `line` / `line-2` | `#1D2127` / `#2A3038` | Hairline dividers / control borders |
+| `text` / `muted` / `dim` | `#E6E8EB` / `#8B939D` / `#565E68` | Body / secondary / labels |
+| `escalate` | `#FF4B2B`, filled diamond | Score ≥ 70 |
+| `investigate` | `#FFB21A`, open diamond with dot | 40–69 |
+| `monitor` | `#6B7684`, open square | < 40 (suppressed) |
+| `degraded` | `#B18CFF` + `alert-triangle` icon | Missing data badge |
+| `sample` | `#5CC8FF` | SAMPLE REPLAY tag, AOI outline |
+| Isochrones | `#FFD166` → `#FF7A2B` → `#C81E1E` | 5 min → 60 min |
 
-Typography: Inter; tabular numerals for scores and times. Score badge: 40 px circle, recommendation color, bold number.
+Typography: IBM Plex Sans for prose, IBM Plex Mono for every number, label, ID, and timestamp. Both are bundled with the app (`@fontsource`) so the UI renders correctly offline. Events get track IDs (`FW-0001`), times are 24-hour Central, and the top bar shows a UTC clock. Basemap: CARTO Dark Matter (monochrome). Keyboard: `A` acknowledge, `E` escalate, `D` dismiss, `R` reopen, `V` 3D preview, `Esc` close.
 
 ### 8.3 Main dashboard (`/`)
 

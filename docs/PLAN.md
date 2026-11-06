@@ -88,7 +88,7 @@ Key design choice: **alerts are per event, not per pixel.** Detections within ~2
 ### Stack
 
 - **Backend / ML:** Python 3.11+, FastAPI, pandas, numpy, scikit-learn, XGBoost, SQLite, APScheduler for the poller, httpx.
-- **Frontend:** React + Vite + TypeScript, MapLibre GL JS (no token), deck.gl for overlays. Basemap from OpenFreeMap; Esri World Imagery for the 3D view. Mapbox is an option if someone already has a token, but it isn't required.
+- **Frontend:** React + Vite + TypeScript, MapLibre GL JS (no token), deck.gl for overlays. Basemap from CARTO Dark Matter; Esri World Imagery for the 3D view. Mapbox is an option if someone already has a token, but it isn't required.
 - **3D:** the same MapLibre map with terrain enabled and pitched to 60°, so the 2D dashboard and 3D preview share one library. Cesium was rejected because it needs an Ion token and is a second stack to learn. Three.js from scratch was rejected because terrain draping would take too long.
 - **Decided:** React frontend (not Streamlit). Detailed specs live in [DESIGN.md](DESIGN.md).
 - **Hosting:** local + ngrok for the demo; Render or Railway free tier as a stretch.

@@ -1,51 +1,54 @@
 import { AlertTriangle, RotateCcw } from 'lucide-react'
 import type { AlertSummary } from '../api'
-import { REC_META, seenLabel } from '../lib/format'
-import { RecLabel, ScoreBadge, Sparkline, StatusPill } from './ScoreBadge'
+import { REC_META, SUPPRESSION_LABEL, seenLabel, trackId } from '../lib/format'
+import { filterQueue, type QueueTab } from '../lib/queue'
+import { ScoreReadout, Sparkline, StatusTag, TrackGlyph } from './ui'
 
 interface Props {
   alerts: AlertSummary[]
+  tab: QueueTab
+  setTab: (t: QueueTab) => void
   selectedId: number | null
   hoveredId: number | null
   onSelect: (id: number) => void
   onHover: (id: number | null) => void
-  minScore: number
-  setMinScore: (n: number) => void
-  showSuppressed: boolean
-  setShowSuppressed: (b: boolean) => void
-  suppressedTotal: number
 }
 
 export function AlertList(p: Props) {
-  const visible = p.alerts.filter((a) => a.score >= p.minScore || a.recommendation === 'monitor')
+  const visible = filterQueue(p.alerts, p.tab)
+  const tabs: [QueueTab, string][] = [
+    ['active', 'Active'],
+    ['escalate', 'Escalate'],
+    ['suppressed', 'Suppressed'],
+  ]
   return (
-    <aside className="flex w-[340px] shrink-0 flex-col border-r border-line bg-panel">
-      <div className="space-y-2 border-b border-line p-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold tracking-wide">
-            ALERTS <span className="tabular text-muted">({visible.length})</span>
-          </h2>
-          <label className="flex items-center gap-2 text-xs text-muted">
-            Score ≥
-            <input
-              type="number"
-              min={0}
-              max={100}
-              step={10}
-              value={p.minScore}
-              onChange={(e) => p.setMinScore(Number(e.target.value))}
-              className="tabular w-14 rounded border border-line bg-bg px-1.5 py-0.5 text-text"
-            />
-          </label>
-        </div>
-        <label className="flex items-center gap-2 text-xs text-muted">
-          <input type="checkbox" checked={p.showSuppressed} onChange={(e) => p.setShowSuppressed(e.target.checked)} />
-          Show suppressed <span className="tabular">({p.suppressedTotal})</span>
-        </label>
+    <aside className="flex w-[360px] shrink-0 flex-col border-r border-line bg-panel">
+      <div className="flex h-9 items-center justify-between border-b border-line px-4">
+        <span className="label !text-muted">Alert queue</span>
+        <span className="num text-[10px] text-dim">SORT: REC ▸ SCORE</span>
+      </div>
+      <div className="grid grid-cols-3 border-b border-line">
+        {tabs.map(([k, label]) => {
+          const n = filterQueue(p.alerts, k).length
+          const on = p.tab === k
+          return (
+            <button
+              key={k}
+              onClick={() => p.setTab(k)}
+              className={`num relative flex h-9 items-center justify-center gap-2 text-[10px] tracking-[0.14em] uppercase transition-colors ${
+                on ? 'text-text' : 'text-dim hover:text-muted'
+              }`}
+            >
+              {label}
+              <span className={on && k !== 'suppressed' && n > 0 ? 'text-escalate' : ''}>{String(n).padStart(2, '0')}</span>
+              {on && <span className="absolute inset-x-3 bottom-0 h-[2px] bg-text" />}
+            </button>
+          )
+        })}
       </div>
       <ul className="flex-1 overflow-y-auto">
         {visible.map((a) => (
-          <AlertCard
+          <AlertRow
             key={a.id}
             a={a}
             selected={a.id === p.selectedId}
@@ -54,13 +57,18 @@ export function AlertList(p: Props) {
             onHover={p.onHover}
           />
         ))}
-        {visible.length === 0 && <li className="p-6 text-center text-sm text-muted">No alerts match the filters.</li>}
+        {visible.length === 0 && (
+          <li className="flex flex-col items-center gap-2 px-6 py-12 text-center">
+            <span className="label">No tracks</span>
+            <span className="text-[12px] text-dim">Nothing in this queue right now.</span>
+          </li>
+        )}
       </ul>
     </aside>
   )
 }
 
-function AlertCard({ a, selected, hovered, onClick, onHover }: {
+function AlertRow({ a, selected, hovered, onClick, onHover }: {
   a: AlertSummary
   selected: boolean
   hovered: boolean
@@ -69,45 +77,55 @@ function AlertCard({ a, selected, hovered, onClick, onHover }: {
 }) {
   const meta = REC_META[a.recommendation]
   const sources = Object.entries(a.sources).map(([k, v]) => `${k}×${v}`).join(' ')
+  const sub = a.recommendation === 'monitor' && a.suppression ? `Suppressed: ${SUPPRESSION_LABEL[a.suppression]}` : a.top_reason
   return (
     <li
       onClick={onClick}
       onMouseEnter={() => onHover(a.id)}
       onMouseLeave={() => onHover(null)}
-      className={`cursor-pointer border-b border-l-4 border-b-line p-3 transition-colors ${
-        selected ? 'bg-panel-2' : hovered ? 'bg-white/[0.03]' : ''
-      } ${a.recommendation === 'monitor' ? 'opacity-70' : ''}`}
-      style={{ borderLeftColor: selected ? meta.color : 'transparent' }}
+      className={`relative cursor-pointer border-b border-line py-3 pr-4 pl-5 transition-colors ${
+        selected ? 'bg-raised' : hovered ? 'bg-panel-2' : ''
+      }`}
     >
-      <div className="flex gap-3">
-        <ScoreBadge score={a.score} rec={a.recommendation} />
-        <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex items-center justify-between gap-2">
-            <RecLabel rec={a.recommendation} />
-            <div className="flex items-center gap-1.5">
+      <span
+        className="absolute top-0 bottom-0 left-0 w-[3px]"
+        style={{ background: a.recommendation === 'monitor' ? 'transparent' : meta.color, opacity: selected ? 1 : 0.7 }}
+      />
+      {selected && <span className="pointer-events-none absolute inset-0 shadow-[inset_0_0_0_1px_#2a3038]" />}
+      <div className="flex gap-3.5">
+        <div className="flex w-9 shrink-0 flex-col items-start gap-1.5 pt-0.5">
+          <ScoreReadout score={a.score} rec={a.recommendation} />
+          <Sparkline values={a.score_trend} color={meta.color} w={34} h={12} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <TrackGlyph rec={a.recommendation} size={10} />
+            <span className="num text-[10px] font-medium tracking-[0.12em]" style={{ color: meta.color }}>
+              {meta.short}
+            </span>
+            <span className="num text-[10px] tracking-[0.08em] text-dim">{trackId(a.id)}</span>
+            <span className="ml-auto flex items-center gap-2">
               {a.degraded && (
                 <span title="Missing inputs; scored in degraded mode" className="text-degraded">
-                  <AlertTriangle size={13} />
+                  <AlertTriangle size={11} />
                 </span>
               )}
               {a.reraised && (
                 <span title="Re-raised after dismissal" className="text-investigate">
-                  <RotateCcw size={13} />
+                  <RotateCcw size={11} />
                 </span>
               )}
-              <StatusPill status={a.status} />
-            </div>
+              <StatusTag status={a.status} />
+            </span>
           </div>
-          <div className="truncate text-sm font-medium">{a.place_label}</div>
-          <div className="flex items-center justify-between text-xs text-muted">
-            <span className="tabular">{seenLabel(a.first_seen, a.is_sample)}</span>
-            <Sparkline values={a.score_trend} color={meta.color} />
+          <div className={`mt-1 truncate text-[13px] font-medium ${a.recommendation === 'monitor' ? 'text-muted' : 'text-text'}`}>
+            {a.place_label}
           </div>
-          <div className="flex items-center justify-between gap-2 text-xs">
-            <span className="truncate text-muted">{sources}</span>
-            {a.is_sample && <span className="text-[10px] font-semibold uppercase text-sample">sample</span>}
+          <div className="num mt-1 flex items-center justify-between gap-2 text-[10.5px] text-dim">
+            <span>{seenLabel(a.first_seen, a.is_sample)}</span>
+            <span className="truncate">{sources}</span>
           </div>
-          {a.top_reason && <div className="truncate text-xs text-text/80">↑ {a.top_reason}</div>}
+          {sub && <div className="mt-1.5 truncate text-[11.5px] text-muted">{sub}</div>}
         </div>
       </div>
     </li>

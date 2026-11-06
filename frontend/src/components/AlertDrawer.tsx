@@ -1,176 +1,227 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Box, ShieldAlert, X } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useState, type ReactNode } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { api, type ActionName, type AlertDetail } from '../api'
-import { REC_META, centralTime, compass, kmhToMph, seenLabel } from '../lib/format'
+import { REC_META, centralTime, compass, kmhToMph, latLon, pad3, seenLabel, trackId } from '../lib/format'
 import { useOperator } from '../lib/operator'
-import { RecLabel, ScoreBadge, StatusPill } from './ScoreBadge'
+import { KV, RecTag, ScoreReadout, SectionHeader, StatusTag } from './ui'
 
-const QUICK_NOTES = ['Paged VFD', 'Known prescribed burn', 'Industrial site', 'Called landowner']
+const QUICK_NOTES = ['Paged VFD', 'Known Rx burn', 'Industrial site', 'Called landowner']
+
+const DANGER_COLOR: Record<string, string> = {
+  'Low-Moderate': '#3ddc97',
+  High: '#ffd166',
+  'Very High': '#ffb21a',
+  Severe: '#ff7a2b',
+  Extreme: '#ff4b2b',
+}
+
+const isTyping = (e: KeyboardEvent) => {
+  const el = e.target as HTMLElement | null
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+}
 
 export function AlertDrawer({ id, onClose }: { id: number; onClose: () => void }) {
   const q = useQuery({ queryKey: ['alert', id], queryFn: () => api.alert(id), refetchInterval: 15_000 })
-  if (q.isLoading) return <DrawerShell onClose={onClose}><p className="p-4 text-sm text-muted">Loading…</p></DrawerShell>
-  if (q.isError || !q.data) return <DrawerShell onClose={onClose}><p className="p-4 text-sm text-escalate">Could not load alert.</p></DrawerShell>
-  return <DrawerShell onClose={onClose}><DrawerBody a={q.data} /></DrawerShell>
-}
 
-function DrawerShell({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isTyping(e)) onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   return (
-    <aside className="relative flex w-[420px] shrink-0 flex-col overflow-y-auto border-l border-line bg-panel">
-      <button onClick={onClose} className="absolute right-3 top-3 text-muted hover:text-text" aria-label="Close">
-        <X size={18} />
-      </button>
-      {children}
+    <aside className="flex w-[400px] shrink-0 flex-col border-l border-line bg-panel">
+      <div className="flex h-9 shrink-0 items-center justify-between border-b border-line pr-2 pl-4">
+        <span className="label !text-muted">
+          Track <span className="text-text">{trackId(id)}</span>
+        </span>
+        <button onClick={onClose} className="flex h-6 w-6 items-center justify-center text-dim hover:bg-raised hover:text-text" aria-label="Close">
+          <X size={14} />
+        </button>
+      </div>
+      {q.isLoading && <p className="label p-4">Loading…</p>}
+      {(q.isError || (!q.isLoading && !q.data)) && <p className="p-4 text-[12px] text-escalate">Could not load alert.</p>}
+      {q.data && <DrawerBody a={q.data} />}
     </aside>
   )
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) {
   return (
-    <section className="space-y-2 border-b border-line px-4 py-3">
-      <h3 className="text-[11px] font-semibold tracking-widest text-muted">{title}</h3>
-      {children}
+    <section className="border-b border-line">
+      <SectionHeader right={right}>{title}</SectionHeader>
+      <div className="px-4 py-3">{children}</div>
     </section>
   )
 }
 
 function DrawerBody({ a }: { a: AlertDetail }) {
   const w = a.weather
+  const meta = REC_META[a.recommendation]
   const maxAbs = Math.max(1, ...a.reasons.map((r) => Math.abs(r.contribution)))
   return (
     <>
-      {a.degraded && (
-        <div className="flex items-center gap-2 bg-degraded/15 px-4 py-2 text-xs text-degraded">
-          <AlertTriangle size={14} /> Weather inputs missing — scored in degraded mode.
-        </div>
-      )}
-      <div className="space-y-2 border-b border-line p-4 pr-10">
-        <div className="flex items-center gap-3">
-          <ScoreBadge score={a.score} rec={a.recommendation} size={48} />
-          <div>
-            <RecLabel rec={a.recommendation} />
-            <div className="font-semibold">{a.place_label}</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-muted">
-          <span className="tabular">First seen {seenLabel(a.first_seen, a.is_sample)}</span>
-          <span>·</span>
-          <span className="tabular">Last {centralTime(a.last_seen)}</span>
-          <StatusPill status={a.status} />
-          {a.is_sample && <span className="text-[10px] font-semibold uppercase text-sample">sample</span>}
-        </div>
-        {a.guardrail && (
-          <div className="flex items-start gap-2 rounded bg-white/5 p-2 text-xs">
-            <ShieldAlert size={14} className="mt-0.5 shrink-0 text-investigate" /> {a.guardrail}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {a.degraded && (
+          <div className="flex items-center gap-2 border-b border-line border-l-2 border-l-degraded bg-degraded/10 px-4 py-2 text-[11.5px] text-degraded">
+            <AlertTriangle size={13} /> Weather inputs missing. Scored in degraded mode.
           </div>
         )}
-      </div>
 
-      <Section title="WHY THIS SCORE">
-        <ul className="space-y-1.5">
-          {a.reasons.slice(0, 5).map((r) => (
-            <li key={r.feature} className="flex items-center gap-2 text-sm">
-              <span className={`tabular w-9 text-right font-semibold ${r.contribution >= 0 ? 'text-text' : 'text-emerald-400'}`}>
-                {r.contribution > 0 ? '+' : ''}
-                {r.contribution}
-              </span>
-              <span className="flex-1 truncate">{r.label}</span>
-              <span className="h-1.5 w-20 rounded bg-white/5">
-                <span
-                  className="block h-full rounded"
-                  style={{
-                    width: `${(Math.abs(r.contribution) / maxAbs) * 100}%`,
-                    background: r.contribution >= 0 ? REC_META[a.recommendation].color : '#34d399',
-                  }}
-                />
-              </span>
-            </li>
-          ))}
-        </ul>
-        <div className="tabular text-xs text-muted">
-          Score trend {a.score_trend.join(' → ')} · {a.scorer}
-        </div>
-      </Section>
-
-      <Section title="CONDITIONS">
-        {w.wind_kmh != null ? (
-          <div className="grid grid-cols-2 gap-y-1 text-sm">
-            <span>
-              Wind {Math.round(w.wind_kmh)} km/h from {compass(w.wind_dir_deg ?? 0)}
-            </span>
-            <span>Gusts {Math.round(kmhToMph(w.gust_kmh ?? 0))} mph</span>
-            <span>Humidity {Math.round(w.rh_pct ?? 0)}%</span>
-            <span>Temp {Math.round(w.temp_c ?? 0)}°C</span>
-            <span>
-              Fire danger <b>{w.gfdi_band}</b> ({w.gfdi})
-            </span>
-            <span>Rain 72 h: {w.precip_72h_mm ?? 0} mm</span>
+        <div className="scanlines relative border-b border-line px-4 pt-4 pb-4">
+          <span className="absolute top-0 bottom-0 left-0 w-[3px]" style={{ background: meta.color }} />
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-end gap-3">
+              <ScoreReadout score={a.score} rec={a.recommendation} size="lg" />
+            </div>
+            <div className="flex flex-col items-end gap-2 pt-1">
+              <RecTag rec={a.recommendation} />
+              <StatusTag status={a.status} />
+            </div>
           </div>
-        ) : (
-          <p className="text-sm text-muted">No weather available.</p>
-        )}
-        {w.source && <div className="text-[11px] text-muted">Source: {w.source}</div>}
-      </Section>
-
-      <Section title="NEARBY">
-        <ul className="space-y-1 text-sm">
-          {a.nearest_assets.map((n) => (
-            <li key={`${n.kind}-${n.name}`} className="flex justify-between">
+          <div className="mt-3 text-[16px] leading-snug font-semibold">{a.place_label}</div>
+          <div className="num mt-1 text-[10.5px] tracking-[0.04em] text-dim">{latLon(a.lat, a.lon)}</div>
+          <div className="mt-3">
+            <KV k="First seen" v={seenLabel(a.first_seen, a.is_sample)} />
+            <KV k="Last seen" v={centralTime(a.last_seen, a.is_sample)} />
+            <div className="grid grid-cols-2 gap-x-6">
+              <KV k="Scorer" v={a.scorer ?? '—'} />
+              <KV k="Data" v={a.is_sample ? 'SAMPLE' : 'LIVE'} accent={a.is_sample ? '#5cc8ff' : '#3ddc97'} />
+            </div>
+          </div>
+          {a.guardrail && (
+            <div className="mt-3 flex items-start gap-2 border border-line border-l-2 border-l-investigate bg-investigate/5 px-3 py-2 text-[11.5px] text-text">
+              <ShieldAlert size={13} className="mt-[1px] shrink-0 text-investigate" />
               <span>
-                {n.name} <span className="text-xs text-muted">({n.kind.replace('_', ' ')})</span>
+                <span className="label !text-investigate mr-2">Guardrail</span>
+                {a.guardrail}
               </span>
-              <span className="tabular text-muted">{n.distance_km.toFixed(1)} km</span>
-            </li>
-          ))}
-          {a.nearest_assets.length === 0 && <li className="text-muted">Nothing within 30 km.</li>}
-        </ul>
-      </Section>
+            </div>
+          )}
+        </div>
 
-      <Section title="DETECTIONS">
-        <ul className="space-y-1 text-xs">
-          {a.detections.map((d) => (
-            <li key={d.id} className="tabular flex justify-between">
-              <span>
-                {d.satellite} <span className="text-muted">{d.source.split('_')[0]}</span>
-              </span>
-              <span className="text-muted">{centralTime(d.acq_time)}</span>
-              <span>{d.frp_mw?.toFixed(0) ?? '–'} MW</span>
-              <span className="w-14 text-right text-muted">{d.confidence}</span>
-            </li>
-          ))}
-        </ul>
-      </Section>
+        <Section title="Why this score" right={<span className="num text-[10px] text-dim">TREND {a.score_trend.join(' → ')}</span>}>
+          <ul className="space-y-2">
+            {a.reasons.slice(0, 6).map((r) => (
+              <li key={r.feature} className="grid grid-cols-[36px_1fr_72px] items-center gap-3">
+                <span className={`num text-right text-[12px] font-semibold ${r.contribution >= 0 ? 'text-text' : 'text-ok'}`}>
+                  {r.contribution > 0 ? '+' : ''}
+                  {r.contribution}
+                </span>
+                <span className="truncate text-[12.5px] text-text">{r.label}</span>
+                <span className="relative h-[6px] bg-line">
+                  <span
+                    className="absolute inset-y-0 left-0"
+                    style={{
+                      width: `${(Math.abs(r.contribution) / maxAbs) * 100}%`,
+                      background: r.contribution >= 0 ? meta.color : '#3ddc97',
+                    }}
+                  />
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Section>
 
-      <div className="border-b border-line p-4">
-        <Link
-          to={`/alerts/${a.id}/3d`}
-          className="flex w-full items-center justify-center gap-2 rounded bg-white/10 py-2 text-sm font-semibold hover:bg-white/15"
-        >
-          <Box size={16} /> Open 3D spread preview
-        </Link>
+        <Section title="Conditions" right={w.source ? <span className="num text-[10px] text-dim">{w.source.toUpperCase()}</span> : undefined}>
+          {w.wind_kmh != null ? (
+            <>
+              <div className="mb-3 flex items-center justify-between border border-line bg-void px-3 py-2">
+                <span className="label">Fire danger</span>
+                <span className="num text-[12px] font-semibold" style={{ color: DANGER_COLOR[w.gfdi_band ?? ''] ?? '#e6e8eb' }}>
+                  {w.gfdi_band?.toUpperCase()} <span className="font-normal text-dim">GFDI {w.gfdi}</span>
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-6">
+                <KV k="Wind" v={`${Math.round(w.wind_kmh)} KM/H`} />
+                <KV k="From" v={`${pad3(w.wind_dir_deg ?? 0)}° ${compass(w.wind_dir_deg ?? 0)}`} />
+                <KV k="Gust" v={`${Math.round(kmhToMph(w.gust_kmh ?? 0))} MPH`} />
+                <KV k="RH" v={`${Math.round(w.rh_pct ?? 0)}%`} accent={(w.rh_pct ?? 100) < 25 ? '#ffb21a' : undefined} />
+                <KV k="Temp" v={`${Math.round(w.temp_c ?? 0)}°C`} />
+                <KV k="Rain 72H" v={`${w.precip_72h_mm ?? 0} MM`} />
+              </div>
+            </>
+          ) : (
+            <p className="text-[12px] text-dim">No weather available.</p>
+          )}
+        </Section>
+
+        <Section title="Nearby assets">
+          <ul className="space-y-1.5">
+            {a.nearest_assets.map((n) => (
+              <li key={`${n.kind}-${n.name}`} className="flex items-center justify-between gap-3">
+                <span className="min-w-0 truncate text-[12.5px]">{n.name}</span>
+                <span className="flex shrink-0 items-center gap-3">
+                  <span className="label !text-[9px]">{n.kind.replace('_', ' ')}</span>
+                  <span className={`num w-14 text-right text-[12px] ${n.distance_km < 5 ? 'text-investigate' : 'text-text'}`}>
+                    {n.distance_km.toFixed(1)} KM
+                  </span>
+                </span>
+              </li>
+            ))}
+            {a.nearest_assets.length === 0 && <li className="text-[12px] text-dim">Nothing within 30 km.</li>}
+          </ul>
+        </Section>
+
+        <Section title="Detections" right={<span className="num text-[10px] text-dim">{a.detections.length} HITS</span>}>
+          <table className="num w-full text-[11px]">
+            <thead>
+              <tr className="text-left">
+                {['Sat', 'Sensor', 'Time', 'FRP', 'Conf'].map((h, i) => (
+                  <th key={h} className={`label !text-[9px] pb-1.5 font-medium ${i >= 3 ? 'text-right' : ''}`}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {a.detections.map((d) => (
+                <tr key={d.id} className="border-t border-line">
+                  <td className="py-1 text-text">{d.satellite}</td>
+                  <td className="text-muted">{d.source.split('_')[0]}</td>
+                  <td className="text-muted">{centralTime(d.acq_time)}</td>
+                  <td className="text-right text-text">{d.frp_mw?.toFixed(0) ?? '–'} MW</td>
+                  <td className={`text-right uppercase ${d.confidence === 'high' ? 'text-text' : 'text-dim'}`}>{d.confidence}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Section>
+
+        <Section title="Log">
+          <ol className="relative space-y-2 border-l border-line-2 pl-4">
+            {a.actions.map((x, i) => (
+              <li key={i} className="relative text-[11.5px]">
+                <span className="absolute top-[5px] -left-[19.5px] h-[7px] w-[7px] border border-muted bg-panel" />
+                <div className="num text-[10px] text-dim">{centralTime(x.created_at, true)}</div>
+                <div>
+                  <span className="num text-muted uppercase">{x.operator}</span>{' '}
+                  <span className="font-medium">{`${x.action}${x.action.endsWith('e') ? 'd' : 'ed'}`}</span>
+                  {x.note && <span className="text-muted">: {x.note}</span>}
+                </div>
+              </li>
+            ))}
+            <li className="relative text-[11.5px]">
+              <span className="absolute top-[5px] -left-[19.5px] h-[7px] w-[7px] bg-muted" />
+              <div className="num text-[10px] text-dim">{centralTime(a.first_seen, true)}</div>
+              <div className="text-muted">Track opened by pipeline</div>
+            </li>
+          </ol>
+        </Section>
       </div>
 
       <ActionBar a={a} />
-
-      <Section title="HISTORY">
-        <ul className="space-y-1 text-xs">
-          {a.actions.map((x, i) => (
-            <li key={i}>
-              <span className="tabular text-muted">{centralTime(x.created_at)}</span> {x.operator} <b>{x.action}d</b>
-              {x.note && <span className="text-muted"> — {x.note}</span>}
-            </li>
-          ))}
-          {a.actions.length === 0 && <li className="text-muted">No actions yet.</li>}
-        </ul>
-      </Section>
     </>
   )
 }
 
 function ActionBar({ a }: { a: AlertDetail }) {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const operator = useOperator()
   const [note, setNote] = useState('')
   const act = useMutation({
@@ -182,51 +233,63 @@ function ActionBar({ a }: { a: AlertDetail }) {
     },
   })
   const open = ['new', 'acknowledged', 'escalated'].includes(a.status)
+  const can = {
+    acknowledge: open && a.status === 'new',
+    escalate: open && a.status !== 'escalated',
+    dismiss: open,
+    reopen: !open,
+  }
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey || act.isPending) return
+      const key = e.key.toLowerCase()
+      if (key === 'v') navigate(`/alerts/${a.id}/3d`)
+      const map: Record<string, ActionName> = { a: 'acknowledge', e: 'escalate', d: 'dismiss', r: 'reopen' }
+      const action = map[key]
+      if (action && can[action]) act.mutate(action)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
   return (
-    <section className="space-y-2 border-b border-line p-4">
-      <input
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-        placeholder="Note (optional)"
-        className="w-full rounded border border-line bg-bg px-2 py-1.5 text-sm"
-      />
-      <div className="flex flex-wrap gap-1">
-        {QUICK_NOTES.map((n) => (
-          <button key={n} onClick={() => setNote(n)} className="rounded bg-white/5 px-2 py-0.5 text-[11px] text-muted hover:text-text">
-            {n}
-          </button>
-        ))}
-      </div>
-      {open ? (
-        <div className="grid grid-cols-3 gap-2">
-          <button
-            disabled={a.status !== 'new' || act.isPending}
-            onClick={() => act.mutate('acknowledge')}
-            className="rounded border border-line py-2 text-sm hover:bg-white/5 disabled:opacity-40"
-          >
-            Acknowledge
-          </button>
-          <button
-            disabled={a.status === 'escalated' || act.isPending}
-            onClick={() => act.mutate('escalate')}
-            className="rounded bg-escalate py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-40"
-          >
-            Escalate
-          </button>
-          <button
-            disabled={act.isPending}
-            onClick={() => act.mutate('dismiss')}
-            className="rounded border border-line py-2 text-sm text-muted hover:bg-white/5 disabled:opacity-40"
-          >
-            Dismiss
-          </button>
+    <div className="shrink-0 border-t border-line-2 bg-void">
+      <Link to={`/alerts/${a.id}/3d`} className="btn !h-9 w-full !border-x-0 !border-t-0 !border-b-line">
+        <Box size={13} /> 3D spread preview <span className="kbd ml-1">V</span>
+      </Link>
+      <div className="space-y-2 p-3">
+        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="ADD NOTE…" className="field w-full" />
+        <div className="flex flex-wrap gap-1">
+          {QUICK_NOTES.map((n) => (
+            <button
+              key={n}
+              onClick={() => setNote(n)}
+              className={`num h-5 border px-1.5 text-[10px] ${note === n ? 'border-text text-text' : 'border-line-2 text-dim hover:text-muted'}`}
+            >
+              {n}
+            </button>
+          ))}
         </div>
-      ) : (
-        <button onClick={() => act.mutate('reopen')} className="w-full rounded border border-line py-2 text-sm hover:bg-white/5">
-          Reopen
-        </button>
-      )}
-      {act.isError && <p className="text-xs text-escalate">{(act.error as Error).message}</p>}
-    </section>
+        {open ? (
+          <div className="grid grid-cols-[1fr_1.3fr_1fr] gap-1.5">
+            <button disabled={!can.acknowledge || act.isPending} onClick={() => act.mutate('acknowledge')} className="btn !h-9">
+              Ack <span className="kbd">A</span>
+            </button>
+            <button disabled={!can.escalate || act.isPending} onClick={() => act.mutate('escalate')} className="btn btn-danger !h-9">
+              Escalate <span className="kbd">E</span>
+            </button>
+            <button disabled={act.isPending} onClick={() => act.mutate('dismiss')} className="btn !h-9 !text-muted">
+              Dismiss <span className="kbd">D</span>
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => act.mutate('reopen')} disabled={act.isPending} className="btn !h-9 w-full">
+            Reopen <span className="kbd">R</span>
+          </button>
+        )}
+        {act.isError && <p className="num text-[10.5px] text-escalate">{(act.error as Error).message}</p>}
+      </div>
+    </div>
   )
 }
