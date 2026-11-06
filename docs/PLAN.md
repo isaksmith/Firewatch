@@ -90,7 +90,7 @@ Key design choice: **alerts are per event, not per pixel.** Detections within ~2
 - **Backend / ML:** Python 3.11+, FastAPI, pandas, numpy, scikit-learn, XGBoost, SQLite, APScheduler for the poller, httpx.
 - **Frontend:** React + Vite + TypeScript, MapLibre GL JS (no token), deck.gl for overlays. Basemap from OpenFreeMap; Esri World Imagery for the 3D view. Mapbox is an option if someone already has a token, but it isn't required.
 - **3D:** the same MapLibre map with terrain enabled and pitched to 60°, so the 2D dashboard and 3D preview share one library. Cesium was rejected because it needs an Ion token and is a second stack to learn. Three.js from scratch was rejected because terrain draping would take too long.
-- **Fallback if frontend capacity is thin:** Streamlit + pydeck (deck.gl `TerrainLayer`). Decide by Friday 8 pm.
+- **Decided:** React frontend (not Streamlit). Detailed specs live in [DESIGN.md](DESIGN.md).
 - **Hosting:** local + ngrok for the demo; Render or Railway free tier as a stretch.
 
 ### Repo layout
@@ -279,7 +279,7 @@ Assumes 4–6 people. Non-engineering work is half the score per the RFP.
 
 ## 13. Positions on the spec's open questions
 
-- **Primary customer:** Kansas rural fire district dispatch, with the Kansas Forest Service as the statewide operator. Utilities are a secondary persona, served by the same alerts plus the asset overlay.
+- **Primary customer (decided):** Kansas rural fire district dispatch, with the Kansas Forest Service as the statewide operator. Utilities are a secondary persona, served by the same alerts plus the asset overlay.
 - **Satellite latency and gaps:** stated honestly. Polar orbiters pass a few times a day; GOES fills gaps at coarse resolution. This layer complements 911 calls, not replaces them.
 - **Thin labels:** temporal split, a simple model, honest synthetic augmentation, and rules guardrails.
 - **Thresholds dispatchers trust:** start at 70/40, show calibration, let each district tune them, and log every override.
@@ -292,4 +292,3 @@ Assumes 4–6 people. Non-engineering work is half the score per the RFP.
 - [ ] Start downloading FIRMS yearly US VIIRS/MODIS CSVs (~30 MB each; keep them out of git)
 - [ ] Pull Kansas OSM power lines, substations, and towns via Overpass, save as GeoJSON
 - [ ] Confirm Python 3.11+ and Node 20+ on every laptop
-- [ ] Decide React vs Streamlit fallback by Friday 8 pm
