@@ -1,0 +1,75 @@
+{
+  "slug": "dec-2021-wind-event",
+  "title": "Dec 15, 2021 wind-event fire, Russell County",
+  "expected": "escalate",
+  "story": "Winter fire during a historic wind event with hurricane-force gusts across central Kansas.",
+  "approximate": true,
+  "replay_offset_s": 12,
+  "weather": {
+    "wind_kmh": 47.7,
+    "gust_kmh": 91.4,
+    "wind_dir_deg": 188,
+    "rh_pct": 61,
+    "temp_c": 21.3,
+    "precip_72h_mm": 0.0,
+    "thunder_24h": 0,
+    "source": "open-meteo-archive",
+    "valid_time": "2021-12-15T19:00Z"
+  },
+  "passes": [
+    {
+      "offset_s": 0,
+      "detections": [
+        {
+          "source": "GOES_NRT",
+          "satellite": "G16",
+          "lat": 39.05,
+          "lon": -98.95,
+          "acq_time": "2021-12-15T19:00:00Z",
+          "frp_mw": 45.0,
+          "confidence": "nominal",
+          "brightness_k": 320.0,
+          "scan_km": 2.6,
+          "track_km": 2.6,
+          "daynight": "D"
+        }
+      ]
+    },
+    {
+      "offset_s": 10,
+      "detections": [
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 39.058,
+          "lon": -98.944,
+          "acq_time": "2021-12-15T19:25:00Z",
+          "frp_mw": 96.2,
+          "confidence": "high",
+          "brightness_k": 367.0,
+          "scan_km": 0.5,
+          "track_km": 0.41,
+          "daynight": "D"
+        }
+      ]
+    },
+    {
+      "offset_s": 20,
+      "detections": [
+        {
+          "source": "VIIRS_SNPP_NRT",
+          "satellite": "N",
+          "lat": 39.07,
+          "lon": -98.939,
+          "acq_time": "2021-12-15T20:15:00Z",
+          "frp_mw": 210.5,
+          "confidence": "high",
+          "brightness_k": 367.0,
+          "scan_km": 0.55,
+          "track_km": 0.42,
+          "daynight": "D"
+        }
+      ]
+    }
+  ]
+}

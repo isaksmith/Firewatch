@@ -1,0 +1,15 @@
+{
+  "slug": "synthetic-humid-single",
+  "title": "Single weak detection on a humid day, Reno County (synthetic)",
+  "expected": "monitor",
+  "story": "Low-confidence contrast case: one faint pixel after heavy rain.",
+  "approximate": true,
+  "synthetic": true,
+  "replay_offset_s": 9,
+  "weather": {"wind_kmh": 8, "gust_kmh": 14, "wind_dir_deg": 150, "rh_pct": 85, "temp_c": 18, "precip_72h_mm": 15, "thunder_24h": 1, "source": "synthetic"},
+  "passes": [
+    {"offset_s": 0, "detections": [
+      {"source": "VIIRS_SNPP_NRT", "satellite": "N", "lat": 38.000, "lon": -98.300, "acq_time": "2025-06-12T19:20:00Z", "frp_mw": 1.9, "confidence": "low", "brightness_k": 301.0, "scan_km": 0.5, "track_km": 0.41, "daynight": "D"}
+    ]}
+  ]
+}

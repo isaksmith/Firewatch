@@ -46,21 +46,37 @@ docs/       Plan and design
 
 ## Getting started
 
-The app isn't scaffolded yet. Once it is:
+Requires Python 3.12+ and Node 22+.
 
 ```bash
-cp .env.example .env            # add FIRMS_MAP_KEY; MODE=sample works without it
+cp .env.example .env            # add FIRMS_MAP_KEY for MODE=live; MODE=sample works without it
 
-# backend
-cd backend && python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload    # http://localhost:8000
+# backend (http://127.0.0.1:8000, API under /api)
+cd backend
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn app.main:app --reload --port 8000
+.venv/bin/pytest                 # tests
 
-# frontend
-cd frontend && npm install && npm run dev   # http://localhost:5173
+# frontend (http://localhost:5173)
+cd frontend
+npm install && npm run dev
 ```
 
-`MODE=sample` replays historical and synthetic Kansas events through the full pipeline offline, so it's the default for development and demos.
+The Vite dev server proxies `/api` to `http://127.0.0.1:8000` (override with `API_PROXY_TARGET`). It uses `127.0.0.1` rather than `localhost` so it can't hit some other service bound to IPv6 port 8000.
+
+`MODE=sample` replays historical and synthetic Kansas events through the full pipeline offline, so it's the default for development and demos. On first start the backend loads all fixtures from `backend/data/samples/`; **Replay sample** in the top bar re-feeds them pass by pass over 60 seconds. Fixture weather was backfilled from the Open-Meteo archive with `.venv/bin/python -m scripts.backfill_sample_weather`.
+
+The power lines, substations, and refineries in `backend/data/layers/` are hand-drawn placeholders, not real infrastructure.
+
+| Path | What it is |
+|---|---|
+| `backend/app/ingest/` | FIRMS CSV fetch and parse, Open-Meteo weather |
+| `backend/app/features/` | Event clustering (2 km / 12 h) and feature enrichment |
+| `backend/app/scoring/` | Rules scorer v0, guardrails, suppression reasons |
+| `backend/app/sim/` | Grass-fire spread estimate (arrival-time grid → isochrones, impacts) |
+| `backend/app/main.py` | FastAPI routes: alerts, actions, simulate, layers, health, sample replay |
+| `frontend/src/pages/Dashboard.tsx` | Alert list, map, detail drawer, actions |
+| `frontend/src/pages/Spread3D.tsx` | 3D terrain spread preview with wind override |
 
 ## Data attribution
 

@@ -1,0 +1,39 @@
+{
+  "slug": "el-dorado-refinery",
+  "title": "Refinery flare, El Dorado",
+  "expected": "monitor",
+  "story": "Industrial heat source that shows up in FIRMS almost every night.",
+  "approximate": true,
+  "replay_offset_s": 8,
+  "weather": {
+    "wind_kmh": 20.6,
+    "gust_kmh": 38.9,
+    "wind_dir_deg": 199,
+    "rh_pct": 58,
+    "temp_c": 28.5,
+    "precip_72h_mm": 0.7,
+    "thunder_24h": 0,
+    "source": "open-meteo-archive",
+    "valid_time": "2024-07-15T08:00Z"
+  },
+  "passes": [
+    {
+      "offset_s": 0,
+      "detections": [
+        {
+          "source": "VIIRS_SNPP_NRT",
+          "satellite": "N",
+          "lat": 37.797,
+          "lon": -96.871,
+          "acq_time": "2024-07-15T08:10:00Z",
+          "frp_mw": 6.1,
+          "confidence": "nominal",
+          "brightness_k": 305.0,
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "N"
+        }
+      ]
+    }
+  ]
+}

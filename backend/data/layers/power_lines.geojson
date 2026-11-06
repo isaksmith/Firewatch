@@ -1,0 +1,10 @@
+{
+  "type": "FeatureCollection",
+  "name": "power_lines",
+  "note": "Hand-drawn placeholder lines for sample mode. Replace with the OpenStreetMap power=line pull.",
+  "features": [
+    {"type": "Feature", "properties": {"name": "Sample 345 kV (hand-drawn)", "voltage_kv": 345}, "geometry": {"type": "LineString", "coordinates": [[-100.10, 37.095], [-99.75, 37.100], [-99.40, 37.110]]}},
+    {"type": "Feature", "properties": {"name": "Sample 345 kV (hand-drawn)", "voltage_kv": 345}, "geometry": {"type": "LineString", "coordinates": [[-99.80, 38.700], [-99.60, 38.750], [-99.00, 38.950], [-98.60, 39.020]]}},
+    {"type": "Feature", "properties": {"name": "Sample 230 kV (hand-drawn)", "voltage_kv": 230}, "geometry": {"type": "LineString", "coordinates": [[-98.90, 37.150], [-98.70, 37.200], [-98.40, 37.260]]}}
+  ]
+}

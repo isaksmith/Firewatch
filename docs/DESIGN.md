@@ -554,15 +554,19 @@ VITE_API_BASE=http://localhost:8000/api
   "title": "Starbuck fire ignition, Clark County",
   "expected": "escalate",
   "story": "Extreme wind-driven grass fire; largest in Kansas history.",
-  "replay_offset_s": 10,
-  "detections": [
-    {"source": "VIIRS_SNPP_NRT", "satellite": "N", "lat": 0, "lon": 0, "acq_time": "2017-03-06T...", "frp_mw": 0, "confidence": "nominal", "brightness_k": 0, "scan_km": 0.4, "track_km": 0.4, "daynight": "D"}
-  ],
-  "weather": {"wind_kmh": 0, "gust_kmh": 0, "wind_dir_deg": 0, "rh_pct": 0, "temp_c": 0, "precip_72h_mm": 0, "thunder_24h": 0}
+  "approximate": true,
+  "synthetic": false,
+  "replay_offset_s": 0,
+  "weather": {"wind_kmh": 0, "gust_kmh": 0, "wind_dir_deg": 0, "rh_pct": 0, "temp_c": 0, "precip_72h_mm": 0, "thunder_24h": 0, "source": "open-meteo-archive", "valid_time": "2017-03-06T18:00Z"},
+  "passes": [
+    {"offset_s": 0, "detections": [
+      {"source": "VIIRS_SNPP_NRT", "satellite": "N", "lat": 0, "lon": 0, "acq_time": "2017-03-06T...", "frp_mw": 0, "confidence": "nominal", "brightness_k": 0, "scan_km": 0.4, "track_km": 0.4, "daynight": "D"}
+    ]}
+  ]
 }
 ```
 
-Coordinates, times, and weather come from the FIRMS archive and Open-Meteo archive during data prep; placeholders above are zeros on purpose. Weather is stored in the fixture so the demo runs offline.
+Each pass is one satellite overpass; during replay a pass is fed in at `replay_offset_s + offset_s` (scaled to the replay duration), so scores visibly change as passes arrive. `approximate` marks fixtures whose locations and detections are reconstructed rather than copied from the FIRMS archive; `synthetic` marks invented scenarios. Weather is stored in the fixture so the demo runs offline; for non-synthetic fixtures it comes from the Open-Meteo archive (`scripts/backfill_sample_weather.py`).
 
 ## 11. Testing
 

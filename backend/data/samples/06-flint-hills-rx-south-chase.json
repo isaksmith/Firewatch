@@ -1,0 +1,39 @@
+{
+  "slug": "flint-hills-rx-south-chase",
+  "title": "Pasture burn, southern Chase County",
+  "expected": "monitor",
+  "story": "Third prescribed burn on the same April afternoon.",
+  "approximate": true,
+  "replay_offset_s": 5,
+  "weather": {
+    "wind_kmh": 17.4,
+    "gust_kmh": 37.8,
+    "wind_dir_deg": 34,
+    "rh_pct": 26,
+    "temp_c": 20.7,
+    "precip_72h_mm": 0.0,
+    "thunder_24h": 0,
+    "source": "open-meteo-archive",
+    "valid_time": "2024-04-10T20:00Z"
+  },
+  "passes": [
+    {
+      "offset_s": 0,
+      "detections": [
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 38.3,
+          "lon": -96.5,
+          "acq_time": "2024-04-10T19:31:00Z",
+          "frp_mw": 6.4,
+          "confidence": "nominal",
+          "brightness_k": 329.0,
+          "scan_km": 0.41,
+          "track_km": 0.37,
+          "daynight": "D"
+        }
+      ]
+    }
+  ]
+}

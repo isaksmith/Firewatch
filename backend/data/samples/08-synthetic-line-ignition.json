@@ -1,0 +1,15 @@
+{
+  "slug": "synthetic-line-ignition",
+  "title": "Ignition beside a 345 kV line, Ellis County (synthetic)",
+  "expected": "escalate",
+  "story": "Synthetic event for the utility persona: a new fire under a transmission line on a dry, windy November day.",
+  "approximate": true,
+  "synthetic": true,
+  "replay_offset_s": 18,
+  "weather": {"wind_kmh": 45, "gust_kmh": 75, "wind_dir_deg": 190, "rh_pct": 15, "temp_c": 24, "precip_72h_mm": 0, "thunder_24h": 0, "source": "synthetic"},
+  "passes": [
+    {"offset_s": 0, "detections": [
+      {"source": "VIIRS_NOAA21_NRT", "satellite": "N21", "lat": 38.803, "lon": -99.450, "acq_time": "2025-11-02T19:50:00Z", "frp_mw": 12.3, "confidence": "nominal", "brightness_k": 338.0, "scan_km": 0.39, "track_km": 0.36, "daynight": "D"}
+    ]}
+  ]
+}

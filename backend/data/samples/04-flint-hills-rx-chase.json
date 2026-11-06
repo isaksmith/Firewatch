@@ -1,0 +1,52 @@
+{
+  "slug": "flint-hills-rx-chase",
+  "title": "Pasture burn, Chase County",
+  "expected": "monitor",
+  "story": "Typical April prescribed burn in the Flint Hills: small, mild weather, many neighbors burning the same day.",
+  "approximate": true,
+  "replay_offset_s": 3,
+  "weather": {
+    "wind_kmh": 16.5,
+    "gust_kmh": 36.4,
+    "wind_dir_deg": 20,
+    "rh_pct": 25,
+    "temp_c": 21.7,
+    "precip_72h_mm": 0.0,
+    "thunder_24h": 0,
+    "source": "open-meteo-archive",
+    "valid_time": "2024-04-10T19:00Z"
+  },
+  "passes": [
+    {
+      "offset_s": 0,
+      "detections": [
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 38.4,
+          "lon": -96.6,
+          "acq_time": "2024-04-10T19:30:00Z",
+          "frp_mw": 7.9,
+          "confidence": "nominal",
+          "brightness_k": 331.0,
+          "scan_km": 0.4,
+          "track_km": 0.37,
+          "daynight": "D"
+        },
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 38.403,
+          "lon": -96.596,
+          "acq_time": "2024-04-10T19:30:00Z",
+          "frp_mw": 5.2,
+          "confidence": "nominal",
+          "brightness_k": 327.0,
+          "scan_km": 0.4,
+          "track_km": 0.37,
+          "daynight": "D"
+        }
+      ]
+    }
+  ]
+}

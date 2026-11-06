@@ -1,0 +1,88 @@
+{
+  "slug": "starbuck-2017",
+  "title": "Starbuck fire, Clark County",
+  "expected": "escalate",
+  "story": "Extreme wind-driven grass fire on Mar 6, 2017; the largest wildfire in Kansas history.",
+  "approximate": true,
+  "replay_offset_s": 0,
+  "weather": {
+    "wind_kmh": 45.3,
+    "gust_kmh": 76.3,
+    "wind_dir_deg": 223,
+    "rh_pct": 21,
+    "temp_c": 25.5,
+    "precip_72h_mm": 0.0,
+    "thunder_24h": 0,
+    "source": "open-meteo-archive",
+    "valid_time": "2017-03-06T18:00Z"
+  },
+  "passes": [
+    {
+      "offset_s": 0,
+      "detections": [
+        {
+          "source": "VIIRS_SNPP_NRT",
+          "satellite": "N",
+          "lat": 37.05,
+          "lon": -99.86,
+          "acq_time": "2017-03-06T18:30:00Z",
+          "frp_mw": 18.4,
+          "confidence": "nominal",
+          "brightness_k": 335.1,
+          "scan_km": 0.42,
+          "track_km": 0.38,
+          "daynight": "D"
+        }
+      ]
+    },
+    {
+      "offset_s": 14,
+      "detections": [
+        {
+          "source": "MODIS_NRT",
+          "satellite": "Aqua",
+          "lat": 37.058,
+          "lon": -99.852,
+          "acq_time": "2017-03-06T19:05:00Z",
+          "frp_mw": 64.0,
+          "confidence": "high",
+          "brightness_k": 348.0,
+          "scan_km": 1.1,
+          "track_km": 1.0,
+          "daynight": "D"
+        },
+        {
+          "source": "MODIS_NRT",
+          "satellite": "Aqua",
+          "lat": 37.066,
+          "lon": -99.846,
+          "acq_time": "2017-03-06T19:05:00Z",
+          "frp_mw": 41.5,
+          "confidence": "nominal",
+          "brightness_k": 339.2,
+          "scan_km": 1.1,
+          "track_km": 1.0,
+          "daynight": "D"
+        }
+      ]
+    },
+    {
+      "offset_s": 28,
+      "detections": [
+        {
+          "source": "MODIS_NRT",
+          "satellite": "Terra",
+          "lat": 37.08,
+          "lon": -99.838,
+          "acq_time": "2017-03-06T20:10:00Z",
+          "frp_mw": 152.3,
+          "confidence": "high",
+          "brightness_k": 362.4,
+          "scan_km": 1.3,
+          "track_km": 1.1,
+          "daynight": "D"
+        }
+      ]
+    }
+  ]
+}

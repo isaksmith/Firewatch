@@ -1,0 +1,39 @@
+{
+  "slug": "flint-hills-rx-morris",
+  "title": "Pasture burn, southern Morris County",
+  "expected": "monitor",
+  "story": "Second prescribed burn on the same April afternoon.",
+  "approximate": true,
+  "replay_offset_s": 4,
+  "weather": {
+    "wind_kmh": 17.3,
+    "gust_kmh": 37.8,
+    "wind_dir_deg": 21,
+    "rh_pct": 25,
+    "temp_c": 21.6,
+    "precip_72h_mm": 0.0,
+    "thunder_24h": 0,
+    "source": "open-meteo-archive",
+    "valid_time": "2024-04-10T19:00Z"
+  },
+  "passes": [
+    {
+      "offset_s": 0,
+      "detections": [
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 38.48,
+          "lon": -96.45,
+          "acq_time": "2024-04-10T19:30:00Z",
+          "frp_mw": 9.1,
+          "confidence": "nominal",
+          "brightness_k": 333.0,
+          "scan_km": 0.4,
+          "track_km": 0.37,
+          "daynight": "D"
+        }
+      ]
+    }
+  ]
+}

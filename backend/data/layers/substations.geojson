@@ -1,0 +1,9 @@
+{
+  "type": "FeatureCollection",
+  "name": "substations",
+  "note": "Hand-placed placeholders for sample mode. Replace with the OpenStreetMap power=substation pull.",
+  "features": [
+    {"type": "Feature", "properties": {"name": "Sample substation (Clark Co.)"}, "geometry": {"type": "Point", "coordinates": [-99.75, 37.100]}},
+    {"type": "Feature", "properties": {"name": "Sample substation (Ellis Co.)"}, "geometry": {"type": "Point", "coordinates": [-99.30, 38.850]}}
+  ]
+}

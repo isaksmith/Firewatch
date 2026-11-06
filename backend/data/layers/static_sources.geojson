@@ -1,0 +1,10 @@
+{
+  "type": "FeatureCollection",
+  "name": "static_sources",
+  "note": "Approximate locations of known industrial heat sources. Replace with the mask derived from FIRMS history.",
+  "features": [
+    {"type": "Feature", "properties": {"name": "El Dorado refinery (approx.)", "kind": "refinery"}, "geometry": {"type": "Point", "coordinates": [-96.872, 37.796]}},
+    {"type": "Feature", "properties": {"name": "Coffeyville refinery (approx.)", "kind": "refinery"}, "geometry": {"type": "Point", "coordinates": [-95.610, 37.046]}},
+    {"type": "Feature", "properties": {"name": "McPherson refinery (approx.)", "kind": "refinery"}, "geometry": {"type": "Point", "coordinates": [-97.664, 38.346]}}
+  ]
+}

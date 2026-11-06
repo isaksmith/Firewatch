@@ -1,0 +1,173 @@
+"""Simplified grass-fire spread: arrival-time grid + isochrones. See docs/DESIGN.md section 6."""
+
+import heapq
+import math
+from dataclasses import dataclass
+
+import contourpy
+import numpy as np
+
+from ..fire_weather import head_ros_kmh, length_to_breadth
+from ..geo import KM_PER_DEG_LAT, km_per_deg_lon
+from ..layers import load_layer
+from ..terrain import TerrainUnavailable, elevation_grid
+
+GRID_N = 200
+STEP_MINUTES = 5
+MAX_SLOPE_DEG = 20.0
+NEIGHBORS = [
+    (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1),
+    (1, 2), (2, 1), (-1, 2), (-2, 1), (1, -2), (2, -1), (-1, -2), (-2, -1),
+]
+
+
+@dataclass
+class SpreadInput:
+    lat: float
+    lon: float
+    wind_kmh: float
+    wind_from_deg: float
+    temp_c: float
+    rh_pct: float
+    curing_pct: float
+    minutes: int = 60
+    ignitions: list[tuple[float, float]] | None = None  # (lat, lon)
+    use_terrain: bool = True
+
+
+def simulate(inp: SpreadInput) -> dict:
+    ros_kmh = head_ros_kmh(inp.wind_kmh, inp.temp_c, inp.rh_pct, inp.curing_pct)
+    lb = length_to_breadth(inp.wind_kmh)
+    ecc = math.sqrt(1 - 1 / lb**2)
+    downwind = math.radians((inp.wind_from_deg + 180) % 360)
+    run_km = ros_kmh * inp.minutes / 60
+
+    half_km = max(6.0, 0.6 * run_km + 2.0)
+    shift_km = 0.4 * run_km
+    kx, ky = km_per_deg_lon(inp.lat), KM_PER_DEG_LAT
+    c_lat = inp.lat + shift_km * math.cos(downwind) / ky
+    c_lon = inp.lon + shift_km * math.sin(downwind) / kx
+    lats = np.linspace(c_lat - half_km / ky, c_lat + half_km / ky, GRID_N)
+    lons = np.linspace(c_lon - half_km / kx, c_lon + half_km / kx, GRID_N)
+    cell_m = 2 * half_km * 1000 / (GRID_N - 1)
+
+    terrain_note = "flat (terrain disabled)"
+    elev = None
+    if inp.use_terrain:
+        try:
+            elev = elevation_grid(lats, lons)
+            terrain_note = "AWS Terrain Tiles z12"
+        except TerrainUnavailable:
+            terrain_note = "flat (terrain tiles unavailable)"
+
+    head_m_per_min = ros_kmh * 1000 / 60
+    dir_ros = []
+    for di, dj in NEIGHBORS:
+        bearing = math.atan2(dj, di)  # i = north (lat index), j = east (lon index)
+        cos_t = math.cos(bearing - downwind)
+        ros = head_m_per_min * (1 - ecc) / (1 - ecc * cos_t)
+        dir_ros.append((di, dj, math.hypot(di, dj) * cell_m, ros))
+
+    arrival = np.full((GRID_N, GRID_N), np.inf)
+    heap: list[tuple[float, int, int]] = []
+    for ilat, ilon in inp.ignitions or [(inp.lat, inp.lon)]:
+        i = int(np.clip(np.searchsorted(lats, ilat), 0, GRID_N - 1))
+        j = int(np.clip(np.searchsorted(lons, ilon), 0, GRID_N - 1))
+        arrival[i, j] = 0.0
+        heap.append((0.0, i, j))
+    heapq.heapify(heap)
+
+    limit = float(inp.minutes)
+    while heap:
+        t, i, j = heapq.heappop(heap)
+        if t > arrival[i, j] or t > limit:
+            continue
+        for di, dj, dist, ros in dir_ros:
+            ni, nj = i + di, j + dj
+            if not (0 <= ni < GRID_N and 0 <= nj < GRID_N):
+                continue
+            rate = ros
+            if elev is not None:
+                slope = math.degrees(math.atan2(elev[ni, nj] - elev[i, j], dist))
+                rate *= math.exp(0.069 * max(-MAX_SLOPE_DEG, min(MAX_SLOPE_DEG, slope)))
+            nt = t + dist / rate
+            if nt < arrival[ni, nj]:
+                arrival[ni, nj] = nt
+                heapq.heappush(heap, (nt, ni, nj))
+
+    isochrones = _isochrones(arrival, lats, lons, inp.minutes, cell_m)
+    impacts = _impacts(arrival, lats, lons, inp.minutes)
+
+    return {
+        "assumptions": {
+            "wind_kmh": round(inp.wind_kmh, 1),
+            "wind_from_deg": round(inp.wind_from_deg % 360),
+            "temp_c": round(inp.temp_c, 1),
+            "rh_pct": round(inp.rh_pct),
+            "curing_pct": round(inp.curing_pct),
+            "fuel": "grassland",
+            "model": "CSIRO grassland + elliptical + slope",
+            "terrain": terrain_note,
+        },
+        "head_ros_kmh": round(ros_kmh, 2),
+        "length_to_breadth": round(lb, 2),
+        "isochrones": isochrones,
+        "impacts": impacts,
+        "wind_vector": {"from_deg": round(inp.wind_from_deg % 360), "kmh": round(inp.wind_kmh, 1)},
+        "grid": {"cell_m": round(cell_m, 1), "n": GRID_N},
+    }
+
+
+def _isochrones(arrival: np.ndarray, lats: np.ndarray, lons: np.ndarray, minutes: int, cell_m: float) -> dict:
+    z = np.where(np.isfinite(arrival), arrival, 1e6)
+    gen = contourpy.contour_generator(lons, lats, z, line_type=contourpy.LineType.Separate)
+    cell_ha = (cell_m**2) / 10_000
+    features = []
+    for m in range(STEP_MINUTES, minutes + 1, STEP_MINUTES):
+        rings = []
+        for line in gen.lines(m):
+            if len(line) < 4:
+                continue
+            coords = [[round(float(x), 6), round(float(y), 6)] for x, y in line]
+            if coords[0] != coords[-1]:
+                coords.append(coords[0])
+            rings.append([coords])
+        if not rings:
+            continue
+        features.append({
+            "type": "Feature",
+            "properties": {"minutes": m, "area_ha": round(float((arrival <= m).sum()) * cell_ha, 1)},
+            "geometry": {"type": "MultiPolygon", "coordinates": rings},
+        })
+    return {"type": "FeatureCollection", "features": features}
+
+
+def _arrival_at(arrival: np.ndarray, lats: np.ndarray, lons: np.ndarray, lat: float, lon: float) -> float | None:
+    if not (lats[0] <= lat <= lats[-1] and lons[0] <= lon <= lons[-1]):
+        return None
+    i = int(np.abs(lats - lat).argmin())
+    j = int(np.abs(lons - lon).argmin())
+    return float(arrival[i, j])
+
+
+def _impacts(arrival: np.ndarray, lats: np.ndarray, lons: np.ndarray, minutes: int) -> list[dict]:
+    out = []
+    for kind, layer in (("town", "towns"), ("substation", "substations")):
+        for feat in load_layer(layer)["features"]:
+            lon, lat = feat["geometry"]["coordinates"]
+            t = _arrival_at(arrival, lats, lons, lat, lon)
+            if t is not None and t <= minutes:
+                out.append({"kind": kind, "name": feat["properties"]["name"], "minutes": round(t)})
+    for feat in load_layer("power_lines")["features"]:
+        geom = feat["geometry"]
+        lines = [geom["coordinates"]] if geom["type"] == "LineString" else geom["coordinates"]
+        best = math.inf
+        for coords in lines:
+            for (x1, y1), (x2, y2) in zip(coords, coords[1:]):
+                for s in np.linspace(0, 1, 200):
+                    t = _arrival_at(arrival, lats, lons, y1 + s * (y2 - y1), x1 + s * (x2 - x1))
+                    if t is not None:
+                        best = min(best, t)
+        if best <= minutes:
+            out.append({"kind": "power_line", "name": feat["properties"]["name"], "minutes": round(best)})
+    return sorted(out, key=lambda a: a["minutes"])
