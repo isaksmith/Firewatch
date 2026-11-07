@@ -269,14 +269,67 @@ def test_high_danger_failure_not_cached(monkeypatch):
 
 
 # ---- Merge, replay ----
-def test_merge_keeps_post_event_id():
+def test_merge_moves_posts_to_the_kept_event():
     from app.features import cluster
     with connect() as conn:
-        a = mk(conn)
+        a, b = mk(conn), mk(conn)
         r1 = posts.create(conn, a, a["phone"], "fire", "fire", False, NOW, True, at=HERE)
-        assert "posts" in open(cluster.__file__).read()
-        row = conn.execute("SELECT event_id FROM posts WHERE id = ?", (r1["post_id"],)).fetchone()
-        assert row[0] == r1["event_id"]
+        r2 = posts.create(conn, b, b["phone"], "fire", "fire", False, NOW, True, at=(HERE[0] + 1, HERE[1]))
+        assert r1["event_id"] != r2["event_id"]
+        cluster._merge(conn, keep=r1["event_id"], drop=r2["event_id"])
+        assert conn.execute("SELECT event_id FROM posts WHERE id = ?", (r2["post_id"],)).fetchone()[0] == r1["event_id"]
+
+
+def test_free_text_smoke_from_a_member_stays_smoke_on_the_board():
+    with connect() as conn:
+        a = mk(conn)
+        notify.handle_inbound(conn, a["phone"], "smoke over the ridge", NOW, is_sample=True)
+        assert conn.execute("SELECT category FROM posts ORDER BY id DESC LIMIT 1").fetchone()[0] == "smoke"
+
+
+class _Rows:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def fetchone(self):
+        return self.rows[0] if self.rows else None
+
+
+class _Stale:
+    """Answers one query from a snapshot, like a read taken just before another writer committed."""
+
+    def __init__(self, conn, sql, rows):
+        self.conn, self.sql, self.rows, self.used = conn, sql, rows, False
+
+    def execute(self, q, *a):
+        if q.startswith(self.sql) and not self.used:
+            self.used = True
+            return _Rows(self.rows)
+        return self.conn.execute(q, *a)
+
+    def __getattr__(self, name):
+        return getattr(self.conn, name)
+
+
+def test_two_taps_at_once_count_once():
+    with connect() as conn:
+        s, m = mk(conn, registered=0), mk(conn)
+        p = posts.create(conn, s, s["phone"], "smoke here", "smoke", False, NOW, True, at=HERE)["post_id"]
+        assert posts.confirm(conn, p, m, "see", NOW, True)["counted"]
+        before = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+        r = posts.confirm(_Stale(conn, "SELECT * FROM post_confirms", []), p, m, "see", NOW, True)
+        assert r["duplicate"] and conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0] == before
+
+
+def test_two_people_at_once_do_not_double_the_posters_signal():
+    with connect() as conn:
+        s, m1, m2 = mk(conn, registered=0), mk(conn), mk(conn)
+        p = posts.create(conn, s, s["phone"], "smoke here", "smoke", False, NOW, True, at=HERE)["post_id"]
+        snap = conn.execute("SELECT * FROM posts WHERE id = ?", (p,)).fetchone()
+        posts.confirm(conn, p, m1, "see", NOW, True)
+        posts.confirm(_Stale(conn, "SELECT * FROM posts WHERE id", [snap]), p, m2, "see", NOW, True)
+        n = conn.execute("SELECT COUNT(*) FROM signals WHERE source LIKE ?", (f"%:post:{p}",)).fetchone()[0]
+        assert n == 1, "the poster's signal is written once, by whichever confirm opened the event"
 
 
 def test_replay_clears_posts():

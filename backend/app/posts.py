@@ -107,10 +107,10 @@ def create(
 
 def record(
     conn: sqlite3.Connection, contact, phone: str, body: str, pt, estimated: bool, event_id: int | None, now: datetime,
-    is_sample: bool, channel: str,
+    is_sample: bool, channel: str, category: str = "fire",
 ) -> int:
     """Store the board row for a FIRE text the FIRE branch already handled. Sends nothing."""
-    return _insert(conn, contact, phone, channel, "fire", body, pt, estimated, False, False, None, event_id, is_sample, now)
+    return _insert(conn, contact, phone, channel, category, body, pt, estimated, False, False, None, event_id, is_sample, now)
 
 
 def _result(row) -> dict:
@@ -161,11 +161,17 @@ def confirm(
         reason = "too_far"
     else:
         counted = 1
-    conn.execute(
-        "INSERT INTO post_confirms(post_id, contact_id, kind, channel, lat, lon, ip_hash, counted, reason, created_at) "
+    cur = conn.execute(
+        "INSERT OR IGNORE INTO post_confirms(post_id, contact_id, kind, channel, lat, lon, ip_hash, counted, reason, created_at) "
         "VALUES (?,?,?,?,?,?,?,?,?,?)",
         (post_id, contact["id"], kind, channel, pos[0] if pos else None, pos[1] if pos else None, ip_hash, counted, reason, iso(now)),
     )
+    if cur.rowcount == 0:  # the same person tapped twice at once and the other tap won
+        row = conn.execute("SELECT * FROM post_confirms WHERE post_id = ? AND contact_id = ?", (post_id, contact["id"])).fetchone()
+        r = _result(row)
+        r.update(count=_count(conn, post_id), event_id=post["event_id"], level=_level(conn, post["event_id"]))
+        return r
+    post = _post(conn, post_id)  # re-read under the write lock: another confirm may have opened the event
     eid = post["event_id"]
     if counted and post["category"] in FIRE_LIKE:
         if eid is None:

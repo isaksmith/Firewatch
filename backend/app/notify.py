@@ -537,16 +537,18 @@ def handle_inbound(
         ).fetchone()
         return r["event_id"] if r else None
 
-    def fire_report(rest_text: str):
+    def fire_report(rest_text: str, category: str = "fire"):
         w = parse_where(rest_text)
         at_pt, join_km, reply = here, None, "Firewatch: report received. The duty officer is being told."
         if w:
             at_pt, join_km = point_from(*here, w), ESTIMATE_JOIN_KM
             reply = f"Firewatch: placed {w.label} of you. The duty officer is being told. Wrong? Text FIRE again."
+        elif rest_text:
+            reply += " " + t_place_hint()
         eid = add_signal(conn, "report", *at_pt, iso(now), f"{channel}:{phone}", rest_text or None,
                          contact["id"] if contact else None, is_sample, join_radius_km=join_km)
         evaluate_event(conn, eid, None, now)
-        posts_mod.record(conn, contact, phone, body, at_pt, bool(w), eid, now, is_sample, channel)
+        posts_mod.record(conn, contact, phone, body, at_pt, bool(w), eid, now, is_sample, channel, category)
         ev = _event(conn, eid)
         if not d.contains(ev["lat"], ev["lon"]):
             # The ladder only alerts for in-district events, so tell the duty officer directly.
@@ -651,7 +653,7 @@ def handle_inbound(
         if text and word not in RESERVED:
             cat = classify(text)
             if (contact and contact["registered"] and not cat.hearsay and cat.category in ("fire", "smoke") and here):
-                eid, reply = fire_report(text)
+                eid, reply = fire_report(text, cat.category)
                 out.update(action="report", event_id=eid, reply=reply)
             else:
                 r = posts_mod.create(conn, contact, phone, text, cat.category, cat.hearsay, now, is_sample, channel, at=here)

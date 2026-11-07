@@ -80,7 +80,9 @@ def test_report_without_bearing_behaves_as_before():
         sig = _reports(conn)[1]
     assert (sig["lat"], sig["lon"]) == far
     assert a["event_id"] != b["event_id"], "7 km apart stays two events without a bearing"
-    assert b["reply"] == "Firewatch: report received. The duty officer is being told."
+    assert a["reply"] == "Firewatch: report received. The duty officer is being told.", "bare FIRE needs no hint"
+    assert b["reply"] == "Firewatch: report received. The duty officer is being told. " + notify.t_place_hint()
+    assert len(b["reply"]) <= notify.SMS_MAX
 
 
 def _fyi(conn):
