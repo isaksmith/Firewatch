@@ -63,3 +63,18 @@ Earlier: 209 matched Kansas wildfires, 2016 to 2025, median 8 minutes after disc
 5. Kansas sample is only 56 fires and 37 matches; one season; Oklahoma adds volume but a different region.
 6. Lead is measured at scan time (`acq_date_time`) at roughly 5 to 10 minute scan cadence, so resolution is coarse.
 7. Matching uses detection centroid distance only, with no size or growth check.
+
+## Read this first: sensitivity check added after review
+
+The medians above include detections up to 3 hours before discovery, and many of those may be an earlier, unrelated burn at the same spot. Dropping detections more than 60 minutes before discovery flips the sign:
+
+| Group | Fires | Seen | Median, all matches | Median, early matches dropped | Before discovery | 0 to 30 min after | Later |
+|---|---|---|---|---|---|---|---|
+| Kansas | 56 | 37 (66%) | -9.7 | +9.8 (n 24) | 42% | 17% | 42% |
+| KS + OK | 1,399 | 497 (36%) | -18.7 | +6.3 (n 321) | 41% | 25% | 35% |
+| Under 10 ac | 821 | 103 (13%) | -33.7 | +26.3 (n 63) | 29% | 22% | 49% |
+| 10 to 100 ac | 280 | 149 (53%) | -8.7 | +1.3 (n 110) | 46% | 26% | 27% |
+| 100 to 1,000 ac | 227 | 178 (78%) | -33.7 | +1.3 (n 106) | 47% | 23% | 30% |
+| Over 1,000 ac | 59 | 56 (95%) | -24.7 | +36.3 (n 33) | 27% | 21% | 52% |
+
+Quote the dropped-early column. Fair summary: NGFS arrives about when a fire is reported, not clearly ahead of it, and it misses most fires under 10 acres (87% unseen). The 60 minute cutoff is a judgment call, and it may also drop some real early detections, so the true figure lies between the two columns. Discovery times here are mostly fires near people. The scenario's fire has nobody within four miles, which this data does not measure.
