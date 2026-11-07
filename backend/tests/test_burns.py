@@ -180,3 +180,12 @@ def test_public_app_serves_burns_and_rate_limits(pub):
 
 def test_public_app_has_no_admin_burns(pub):
     assert pub.get("/api/board/admin/burns").status_code == 404
+
+
+def test_public_reports_nearby_uses_rounded_points_only(monkeypatch):
+    """A public smoke post at a chosen exact point must not reveal more than the rounded burn point.
+    0.023 degrees north is about 2.56 km exactly (outside 1.5 + 1), but 37.79 against 37.77 rounded is 2.22 km."""
+    burn(central(9, 0))
+    near_post("smoke", dlat=0.023)
+    assert get(TestClient(app))[0]["reports_nearby"] is True
+    assert _admin(monkeypatch)[0]["reports_nearby"] is False

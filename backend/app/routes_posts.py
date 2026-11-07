@@ -213,7 +213,8 @@ def _clock_time(dt) -> str:
 
 def _burns(conn, now, is_sample: bool, admin: bool):
     """Today's burn notices (Central date of the board clock), newest first, at most 100. The public view
-    is rounded to 2 decimals and carries no identity; `reports_nearby` is worked out here from exact points."""
+    is rounded to 2 decimals and carries no identity. Its `reports_nearby` uses only the rounded burn and post
+    points, which are public anyway: from exact points, anyone could post at chosen spots and close in on the burn."""
     today = now.astimezone(CENTRAL).date().isoformat()
     rows = conn.execute(
         "SELECT b.*, c.name FROM burn_notices b JOIN contacts c ON c.id = b.contact_id "
@@ -229,10 +230,12 @@ def _burns(conn, now, is_sample: bool, admin: bool):
     ).fetchall()
     out = []
     for b in rows:
-        near = any(haversine_km(b["lat"], b["lon"], p["lat"], p["lon"]) <= b["radius_km"] + BURN_NEAR_KM for p in posts_)
+        pt = (b["lat"], b["lon"]) if admin else (round(b["lat"], 2), round(b["lon"], 2))
+        near = any(haversine_km(*pt, *((p["lat"], p["lon"]) if admin else (round(p["lat"], 2), round(p["lon"], 2))))
+                   <= b["radius_km"] + BURN_NEAR_KM for p in posts_)
         row = {
-            "lat": b["lat"] if admin else round(b["lat"], 2),
-            "lon": b["lon"] if admin else round(b["lon"], 2),
+            "lat": pt[0],
+            "lon": pt[1],
             "radius_km": b["radius_km"],
             "registered_at": _clock_time(parse_iso(b["created_at"])),
         }
