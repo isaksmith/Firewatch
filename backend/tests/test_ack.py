@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+import pytest
+
 from app import notify, posts
 from app.confirm import evaluate_event
 from app.db import connect, iso, loads, parse_iso
@@ -361,3 +363,97 @@ def test_actions_route_requires_token_when_set(monkeypatch):
             assert ev(conn, top["id"])["ack_until"] is None
         r = client.post(f"/api/alerts/{top['id']}/actions", json=body, headers={"X-Firewatch-Token": "s3cret"})
         assert r.status_code == 200
+
+
+def _held_via_route(role, level_rec="escalate"):
+    """A line-fault event held now by `role`; a rise to level_rec was swallowed by the hold."""
+    from app.db import utcnow
+
+    with connect() as conn:
+        sync_roster(conn)
+        eid = add_signal(conn, "line_fault", *FIRE, iso(utcnow()), "coop:feeder-4", "lockout", is_sample=True)
+        notify.acknowledge(conn, event_id=eid, by="Hold", role=role, now=utcnow())
+        conn.execute("UPDATE events SET recommendation = ? WHERE id = ?", (level_rec, eid))
+        notify.on_level(conn, eid, level_rec, utcnow())
+        assert not out(conn, "duty_escalate", eid)
+    return eid
+
+
+def _act(client, eid, action, **kw):
+    return client.post(f"/api/alerts/{eid}/actions", json={"action": action, "operator": "Dispatch 2", **kw})
+
+
+@pytest.mark.parametrize("action", ["dismiss", "escalate", "reopen"])
+def test_dismiss_escalate_reopen_clear_the_hold(action):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        eid = _held_via_route("duty_officer", "monitor")
+        assert _act(client, eid, action).status_code == 200
+        with connect() as conn:
+            row = ev(conn, eid)
+            assert row["ack_until"] is None and row["ack_level"] is None
+
+
+@pytest.mark.parametrize("action", ["escalate", "reopen"])
+def test_escalate_and_reopen_fire_the_swallowed_rise(action):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        eid = _held_via_route("duty_officer")
+        assert _act(client, eid, action).status_code == 200
+        with connect() as conn:
+            assert out(conn, "duty_escalate", eid)
+
+
+def test_refused_acknowledge_is_409_and_changes_nothing(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    monkeypatch.setattr(notify, "acknowledge", lambda *a, **k: {"ok": False, "refused": "closed"})
+    with TestClient(app) as client:
+        with connect() as conn:
+            eid = add_signal(conn, "line_fault", *FIRE, iso(T0), "coop:feeder-4", "lockout", is_sample=True)
+            before = ev(conn, eid)["status"]
+        r = _act(client, eid, "acknowledge")
+        assert r.status_code == 409 and "closed" in r.json()["detail"]
+        with connect() as conn:
+            assert ev(conn, eid)["status"] == before
+            assert not conn.execute("SELECT 1 FROM actions WHERE event_id = ?", (eid,)).fetchone()
+
+
+def test_one_acknowledge_one_action_row_with_the_note():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        with connect() as conn:
+            sync_roster(conn)
+            eid = add_signal(conn, "line_fault", *FIRE, iso(T0), "coop:feeder-4", "lockout", is_sample=True)
+        r = _act(client, eid, "acknowledge", note="crew rolling")
+        assert r.status_code == 200
+        with connect() as conn:
+            rows = conn.execute("SELECT * FROM actions WHERE event_id = ? AND action = 'acknowledge'", (eid,)).fetchall()
+            assert len(rows) == 1 and rows[0]["note"] == "crew rolling"
+            assert ev(conn, eid)["status"] == "acknowledged"
+
+
+def test_operator_acknowledge_upgrades_a_crowd_hold_and_repeat_is_200():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        eid = _held_via_route("volunteer", "monitor")
+        with connect() as conn:
+            assert ev(conn, eid)["ack_level"] == "crowd"
+        assert _act(client, eid, "acknowledge").status_code == 200
+        with connect() as conn:
+            assert ev(conn, eid)["ack_level"] == "ladder"
+        assert _act(client, eid, "acknowledge").status_code == 200

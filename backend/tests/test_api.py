@@ -21,7 +21,7 @@ def test_alert_flow():
         assert r.status_code == 200 and r.json()["status"] == "acknowledged"
 
         r = client.post(f"/api/alerts/{top['id']}/actions", json={"action": "acknowledge", "operator": "Dispatch 2"})
-        assert r.status_code == 400
+        assert r.status_code == 200  # a repeat acknowledge re-holds, idempotent
 
         sim = client.get(f"/api/alerts/{top['id']}/simulate", params={"wind_kmh": 30, "wind_from_deg": 270}).json()
         assert sim["overridden"] and sim["isochrones"]["features"]

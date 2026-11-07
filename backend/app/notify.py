@@ -407,7 +407,7 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
         if state.get("decision") == "page":
             return state
         state.update(decision="page", decision_by=by, decision_at=iso(now), page_at=iso(now))
-        _clear_hold(conn, event_id)
+        clear_hold(conn, event_id)
         plan = plan_response(conn, ev, now)
         state["plan"] = plan
         dispatch = _one(conn, "dispatch")
@@ -429,7 +429,7 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
             )
         conn.execute("UPDATE events SET status = 'escalated' WHERE id = ? AND status IN ('new', 'acknowledged')", (event_id,))
     elif action == "no":
-        _clear_hold(conn, event_id)
+        clear_hold(conn, event_id)
         state.update(decision="no", decision_by=by, decision_at=iso(now))
         conn.execute("UPDATE events SET status = 'dismissed' WHERE id = ?", (event_id,))
     elif action == "send":
@@ -455,12 +455,12 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
 HOLD_COLS = "ack_level = NULL, ack_by = NULL, ack_at = NULL, ack_until = NULL, ack_mark_det = NULL, ack_mark_sig = NULL"
 
 
-def _clear_hold(conn, event_id: int) -> None:
+def clear_hold(conn, event_id: int) -> None:
     conn.execute(f"UPDATE events SET {HOLD_COLS} WHERE id = ?", (event_id,))
 
 
 def acknowledge(conn: sqlite3.Connection, *, event_id: int | None = None, post_id: int | None = None, by: str, role: str,
-                now: datetime) -> dict:
+                now: datetime, note: str | None = None) -> dict:
     """Mark an item known: stop repeat texts, expire on its own. Refusals: not_allowed, no_target, not_found, closed."""
     level = "ladder" if role in LADDER_ROLES or role == "operator" else "crowd" if role == "volunteer" else None
     if level is None:
@@ -495,11 +495,11 @@ def acknowledge(conn: sqlite3.Connection, *, event_id: int | None = None, post_i
     sig = conn.execute("SELECT COALESCE(MAX(id), 0) m FROM signals").fetchone()["m"]
     conn.execute(
         "UPDATE events SET ack_level = ?, ack_by = ?, ack_at = ?, ack_until = ?, ack_mark_det = ?, ack_mark_sig = ?, "
-        "status = CASE WHEN status = 'new' THEN 'acknowledged' ELSE status END WHERE id = ?",
-        (level, by, iso(now), until, det, sig, event_id),
+        "status = CASE WHEN status = 'new' THEN 'acknowledged' ELSE status END, updated_at = ? WHERE id = ?",
+        (level, by, iso(now), until, det, sig, iso(now), event_id),
     )
     conn.execute("INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, 'acknowledge', ?, ?, ?)",
-                 (event_id, by, f"{level} hold {minutes} min", iso(now)))
+                 (event_id, by, note or f"{level} hold {minutes} min", iso(now)))
     return {"ok": True, "level": level, "until": until, "by": by, "repeat": False, "event_id": event_id}
 
 
@@ -529,22 +529,32 @@ def hold_tick(conn: sqlite3.Connection, now: datetime, is_sample: bool | None = 
             continue
         sample = bool(ev["is_sample"])
         duty = _ladder(conn)
-        _clear_hold(conn, ev["id"])
+        clear_hold(conn, ev["id"])
         if why and duty:
             send(conn, duty[0], t_hold_broken(ev, why), "hold_broken", ev["id"], now, sample)
         elif ev["ack_level"] == "ladder" and duty:
             send(conn, duty[0], t_hold_expired(ev), "hold_expired", ev["id"], now, sample)
         conn.execute("INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, 'system', ?, ?)",
                      (ev["id"], "hold_broken" if why else "hold_expired", why or "clock", iso(now)))
-        ev = _event(conn, ev["id"])
-        if ev["status"] in ("dismissed",) or ev["recommendation"] in (None, "monitor"):
-            continue
-        on_level(conn, ev["id"], ev["recommendation"], now)
-        state = _state(_event(conn, ev["id"]))
-        if state.pop("asks_skipped", None):
-            asked = ask_neighbors(conn, _event(conn, ev["id"]), now)
-            state["asked"] = [a["contact_id"] for a in asked]
-            _save(conn, ev["id"], state)
+        resume(conn, ev["id"], now)
+
+
+def resume(conn: sqlite3.Connection, event_id: int, now: datetime) -> None:
+    """Replay the level a hold swallowed: fire on_level and any asks it skipped."""
+    ev = _event(conn, event_id)
+    if ev["status"] in ("dismissed",) or ev["recommendation"] in (None, "monitor"):
+        return
+    on_level(conn, event_id, ev["recommendation"], now)
+    state = _state(_event(conn, event_id))
+    if state.pop("asks_skipped", None):
+        asked = ask_neighbors(conn, _event(conn, event_id), now)
+        state["asked"] = [a["contact_id"] for a in asked]
+        _save(conn, event_id, state)
+
+
+def release_hold(conn: sqlite3.Connection, event_id: int, now: datetime) -> None:
+    clear_hold(conn, event_id)
+    resume(conn, event_id, now)
 
 
 def _draft_mutual_aid(conn, ev, state: dict, reason: str, now: datetime) -> None:

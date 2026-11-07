@@ -152,7 +152,7 @@ api = APIRouter(prefix="/api")
 
 RECOMMENDATION_ORDER = {"escalate": 0, "investigate": 1, "monitor": 2}
 TRANSITIONS = {
-    "acknowledge": ({"new"}, "acknowledged"),
+    "acknowledge": ({"new", "acknowledged", "escalated"}, "acknowledged"),
     "escalate": ({"new", "acknowledged"}, "escalated"),
     "dismiss": ({"new", "acknowledged", "escalated"}, "dismissed"),
     "reopen": ({"acknowledged", "escalated", "dismissed", "closed"}, "new"),
@@ -363,14 +363,21 @@ def act_on_alert(event_id: int, body: ActionIn):
         ev = _get_event(conn, event_id)
         if ev["status"] not in allowed_from:
             raise HTTPException(400, f"cannot {body.action} an alert that is {ev['status']}")
-        now = iso(utcnow())
+        clock = (scenario.clock_now(ev["sample_slug"]) if ev["is_sample"] else None) or utcnow()
         if body.action == "acknowledge":
-            notify.acknowledge(conn, event_id=event_id, by=body.operator, role="operator", now=utcnow())
-        conn.execute(
-            "INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, ?, ?, ?)",
-            (event_id, body.action, body.operator, body.note, now),
-        )
-        conn.execute("UPDATE events SET status = ?, updated_at = ? WHERE id = ?", (new_status, now, event_id))
+            r = notify.acknowledge(conn, event_id=event_id, by=body.operator, role="operator", now=clock, note=body.note)
+            if not r["ok"]:
+                raise HTTPException(409, f"cannot acknowledge: {r['refused']}")
+        else:
+            conn.execute(
+                "INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, ?, ?, ?)",
+                (event_id, body.action, body.operator, body.note, iso(clock)),
+            )
+            conn.execute("UPDATE events SET status = ?, updated_at = ? WHERE id = ?", (new_status, iso(clock), event_id))
+            if body.action == "dismiss":
+                notify.clear_hold(conn, event_id)
+            else:
+                notify.release_hold(conn, event_id, clock)
     return get_alert(event_id)
 
 

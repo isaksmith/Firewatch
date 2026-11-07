@@ -482,7 +482,7 @@ function ActionBar({ a }: { a: AlertDetail }) {
   })
   const open = ['new', 'acknowledged', 'escalated'].includes(a.status)
   const can = {
-    acknowledge: open && a.status === 'new',
+    acknowledge: open,
     escalate: open && a.status !== 'escalated',
     dismiss: open,
     reopen: !open,
