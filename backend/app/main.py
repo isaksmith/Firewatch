@@ -1024,6 +1024,12 @@ async def run_scenario(slug: str, seconds_per_minute: float | None = Query(None,
     return {"status": "started", "slug": slug}
 
 
+@api.post("/scenario/stop", dependencies=[Depends(require_admin)])
+async def stop_scenario():
+    """Stop the running replay where it is."""
+    return {"status": "stopped" if scenario.stop() else "not_running"}
+
+
 @api.post("/scenario/{slug}/load", dependencies=[Depends(require_admin)])
 async def load_scenario_now(slug: str):
     """Run the whole scenario instantly (no animation)."""

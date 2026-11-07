@@ -767,7 +767,7 @@ Query: `minutes` (default 60, max 120), optional `wind_kmh`, `wind_from_deg`. Re
 - `GET /api/contacts` → the roster (phone numbers masked except the last 4 digits).
 - `GET /api/district` → district settings and boundary GeoJSON (drawn on the map).
 - `POST /api/alerts/{id}/decision` → `{action: page | no | send, operator}`; the console's equivalent of a duty officer's reply.
-- `GET /api/scenario/{slug}` → scenario timeline: baseline milestones, Firewatch milestones as they happen, the fire's growth curve, and size at first truck on scene. `POST /api/scenario/{slug}/run` replays it; `POST /api/scenario/{slug}/load` runs it instantly.
+- `GET /api/scenario/{slug}` → scenario timeline: baseline milestones, Firewatch milestones as they happen, the fire's growth curve, and size at first truck on scene. `POST /api/scenario/{slug}/run` replays it; `POST /api/scenario/{slug}/load` runs it instantly; `POST /api/scenario/stop` stops a running replay at its current minute and keeps its events.
 
 When `API_TOKEN` is set, the endpoints that can text people (`/signals`, `/sms/simulate`, `/alerts/{id}/decision`) require it in `X-Firewatch-Token`.
 

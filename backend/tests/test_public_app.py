@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -18,6 +19,7 @@ TOKEN_ROUTES = [
     ("POST", "/api/sample/load"),
     (("POST"), f"/api/scenario/{SLUG}/run"),
     ("POST", f"/api/scenario/{SLUG}/load"),
+    ("POST", "/api/scenario/stop"),
     ("GET", "/api/contacts"),
     ("POST", "/api/sms/inbound"),
 ]
@@ -52,6 +54,27 @@ def test_run_now_writes_clock_row():
     with connect() as conn:
         row = conn.execute("SELECT * FROM replay_clock").fetchone()
     assert row["slug"] == SLUG and row["t_min"] == 3 and row["running"] == 0
+
+
+def test_stop_halts_replay_where_it_is():
+    async def run():
+        scenario.start(SLUG, 0.05)
+        for _ in range(400):
+            if (scenario._clock.get("t_min") or -1) >= 2:
+                break
+            await asyncio.sleep(0.01)
+        assert scenario.stop() is True
+        stopped_at = scenario._clock["t_min"]
+        await asyncio.sleep(0.3)
+        return stopped_at
+
+    stopped_at = asyncio.run(run())
+    st = scenario.status(SLUG)
+    assert not st["running"] and st["t_min"] == stopped_at
+    assert st["t_min"] < scenario.load_scenario(SLUG)["duration_min"]
+    with connect() as conn:
+        assert conn.execute("SELECT running FROM replay_clock").fetchone()["running"] == 0
+    assert scenario.stop() is False
 
 
 def test_running_now_reads_row_in_other_process(monkeypatch):

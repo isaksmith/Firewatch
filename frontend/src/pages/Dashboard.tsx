@@ -85,6 +85,10 @@ export function Dashboard() {
       setTimeout(() => qc.invalidateQueries(), 400)
     },
   })
+  const stopScenario = useMutation({
+    mutationFn: api.stopScenario,
+    onSuccess: () => qc.invalidateQueries(),
+  })
   const fireId = scenario.data?.events[0]?.id
   useEffect(() => {
     if (running && fireId && !autoSelected.current) {
@@ -108,7 +112,9 @@ export function Dashboard() {
     <div className="flex h-full flex-col bg-bg">
       <TopBar
         onRunScenario={() => runScenario.mutate()}
+        onStopScenario={() => stopScenario.mutate()}
         scenarioRunning={running || runScenario.isPending}
+        scenarioStopping={stopScenario.isPending}
         scenarios={scenarios.data}
         scenarioSlug={slug}
         onPickScenario={setSlug}

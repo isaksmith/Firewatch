@@ -288,6 +288,16 @@ def start(slug: str, seconds_per_minute: float | None = None) -> None:
     _task = asyncio.create_task(_replay(slug, seconds_per_minute or get_settings().scenario_seconds_per_minute))
 
 
+def stop() -> bool:
+    """Stop the running replay at its current minute. Its events stay, so the console still shows how far it got."""
+    if not _task or _task.done():
+        return False
+    _task.cancel()
+    _set_clock(running=False)
+    _clock.pop("waiting", None)
+    return True
+
+
 def clock_now(slug: str | None, t_min: int | None = None) -> datetime | None:
     """The scenario's current time, so console actions on its events land on its timeline."""
     if t_min is None:

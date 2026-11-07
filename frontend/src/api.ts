@@ -600,6 +600,7 @@ export const api = {
   scenarios: () => request<ScenarioSummary[]>('/scenarios'),
   scenario: (slug: string) => request<ScenarioStatus>(`/scenario/${slug}`),
   runScenario: (slug: string) => request<{ status: string }>(`/scenario/${slug}/run`, { method: 'POST' }),
+  stopScenario: () => request<{ status: 'stopped' | 'not_running' }>('/scenario/stop', { method: 'POST' }),
   alertForecast: (id: number) => request<AlertForecast>(`/alerts/${id}/forecast`),
   options: (id: number) => request<Playbook>(`/alerts/${id}/options`),
   chooseOption: (id: number, optionId: string, operator: string) =>

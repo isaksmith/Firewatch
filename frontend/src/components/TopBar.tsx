@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Box, ClipboardList, Flame, MessageSquare, Play, RefreshCw, Wifi } from 'lucide-react'
+import { Box, ClipboardList, Flame, MessageSquare, Play, RefreshCw, Square, Wifi } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { api, type ScenarioSummary, type SourceHealth } from '../api'
@@ -76,7 +76,9 @@ const Divider = () => <span className="h-4 w-px shrink-0 bg-line-2" />
 
 export function TopBar({
   onRunScenario,
+  onStopScenario,
   scenarioRunning,
+  scenarioStopping,
   scenarios,
   scenarioSlug,
   onPickScenario,
@@ -88,7 +90,9 @@ export function TopBar({
   onToggleBoard,
 }: {
   onRunScenario?: () => void
+  onStopScenario?: () => void
   scenarioRunning?: boolean
+  scenarioStopping?: boolean
   scenarios?: ScenarioSummary[]
   scenarioSlug?: string
   onPickScenario?: (slug: string) => void
@@ -219,15 +223,26 @@ export function TopBar({
             ))}
           </select>
         )}
-        {onRunScenario && (
+        {onRunScenario && scenarioRunning && onStopScenario ? (
           <button
-            onClick={onRunScenario}
-            disabled={scenarioRunning}
-            aria-label={scenarioRunning ? 'Scenario running' : 'Run scenario'}
-            className="btn btn-danger !h-8 !px-3.5 !text-[12.5px]"
+            onClick={onStopScenario}
+            disabled={scenarioStopping}
+            title="Stop the scenario where it is. Its alerts stay on screen; Run scenario starts it over."
+            className="btn !h-8 !border-escalate !px-3.5 !text-[12.5px] !text-escalate"
           >
-            <Flame size={14} /> {scenarioRunning ? 'Scenario running' : 'Run scenario'}
+            <Square size={13} fill="currentColor" /> {scenarioStopping ? 'Stopping' : 'Stop scenario'}
           </button>
+        ) : (
+          onRunScenario && (
+            <button
+              onClick={onRunScenario}
+              disabled={scenarioRunning}
+              aria-label={scenarioRunning ? 'Scenario running' : 'Run scenario'}
+              className="btn btn-danger !h-8 !px-3.5 !text-[12.5px]"
+            >
+              <Flame size={14} /> {scenarioRunning ? 'Scenario running' : 'Run scenario'}
+            </button>
+          )
         )}
         {mode === 'sample' && (
           <button
