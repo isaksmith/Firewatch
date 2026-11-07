@@ -34,6 +34,7 @@ from .signals import add_signal
 from .sim.spread import SpreadInput, simulate
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # INFO logs full URLs, and the FIRMS key is in the path
 log = logging.getLogger("firewatch")
 
 _tasks: list[asyncio.Task] = []

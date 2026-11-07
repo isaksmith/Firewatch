@@ -5,11 +5,9 @@ Needs the free FIRMS map key. UNTESTED LIVE: written against the documented CSV.
 import csv
 import io
 
-import httpx
-
 from ..config import get_settings
 from .feedlib import run_feed
-from .firms import AREA_URL
+from .firms import AREA_URL, fetch_text
 
 
 def parse(text: str) -> list[dict]:
@@ -30,9 +28,8 @@ def poll() -> dict:
         raise RuntimeError("FIRMS_MAP_KEY not set")
     w, so, e, n = s.bbox_tuple
     url = AREA_URL.format(key=s.firms_map_key, source="LANDSAT_NRT", bbox=f"{w},{so},{e},{n}", days=1)
-    r = httpx.get(url, timeout=30)
-    r.raise_for_status()
-    if "latitude" not in r.text[:300] and r.text.strip():
-        raise ValueError(r.text.strip()[:120])  # FIRMS returns plain-text errors with HTTP 200
-    pts = parse(r.text)
+    text = fetch_text(url, "LANDSAT_NRT")
+    if "latitude" not in text[:300] and text.strip():
+        raise ValueError(text.strip()[:120])  # FIRMS returns plain-text errors with HTTP 200
+    pts = parse(text)
     return run_feed("landsat_nrt", {"count": len(pts), "points": pts})

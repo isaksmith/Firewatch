@@ -204,6 +204,9 @@ def loads(s: str | None, default=None):
 
 def mark_source(conn: sqlite3.Connection, source: str, ok: bool, error: str | None = None) -> None:
     now = iso(utcnow())
+    key = get_settings().firms_map_key
+    if error and key:
+        error = error.replace(key, "***")  # health is unauthenticated; never store a key
     if ok:
         conn.execute(
             "INSERT INTO source_health(source, last_ok) VALUES (?, ?) "

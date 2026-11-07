@@ -90,3 +90,35 @@ def test_health_lists_every_source():
         text = str(h)
         for n in get_settings().source_intervals:
             assert n in text
+
+
+def _deny(url, timeout=None):
+    req = httpx.Request("GET", url)
+    raise httpx.HTTPStatusError(f"403 for url {url}", request=req, response=httpx.Response(403, request=req))
+
+
+def test_firms_errors_never_carry_the_key(monkeypatch):
+    from app.ingest import firms
+
+    monkeypatch.setattr(firms.httpx, "get", _deny)
+    with pytest.raises(RuntimeError) as e:
+        firms.fetch_area("SECRETKEY123", "VIIRS_SNPP_NRT", (0, 0, 1, 1))
+    assert "SECRETKEY123" not in str(e.value)
+    assert "403" in str(e.value)
+    assert e.value.__suppress_context__
+
+
+def test_mark_source_redacts_the_key(monkeypatch):
+    from types import SimpleNamespace
+
+    from app import db
+
+    monkeypatch.setattr(db, "get_settings", lambda: SimpleNamespace(firms_map_key="SECRETKEY123"))
+    calls = []
+
+    class Conn:
+        def execute(self, sql, params):
+            calls.append(params)
+
+    db.mark_source(Conn(), "firms", ok=False, error="failed at /csv/SECRETKEY123/VIIRS")
+    assert "SECRETKEY123" not in calls[0][1]
