@@ -348,7 +348,7 @@ export function Board() {
           <Mark size={16} />
           <span className="num text-[13px] font-semibold tracking-[0.28em]">FIREWATCH</span>
           <span className="label">Community board</span>
-          <Link to="/" className="num ml-auto py-3 text-[10px] tracking-[0.14em] text-dim uppercase hover:text-muted">
+          <Link to="/" className="num ml-auto inline-flex min-h-11 items-center text-[10px] tracking-[0.14em] text-dim uppercase hover:text-muted">
             Console
           </Link>
         </div>
