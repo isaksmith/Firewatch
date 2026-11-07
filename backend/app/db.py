@@ -171,13 +171,44 @@ CREATE TABLE IF NOT EXISTS burn_notices (
   is_sample   INTEGER NOT NULL DEFAULT 0,
   created_at  TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS posts (
+  id INTEGER PRIMARY KEY, contact_id INTEGER REFERENCES contacts(id), phone TEXT,
+  channel TEXT NOT NULL,
+  category TEXT NOT NULL,
+  body TEXT NOT NULL, lat REAL, lon REAL,
+  estimated INTEGER NOT NULL DEFAULT 0,
+  hearsay INTEGER NOT NULL DEFAULT 0, flagged INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'open',
+  event_id INTEGER REFERENCES events(id), parent_id INTEGER REFERENCES posts(id),
+  duty_told_at TEXT, ack_level TEXT, ack_by TEXT, ack_at TEXT, ack_until TEXT,
+  is_sample INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS post_confirms (
+  id INTEGER PRIMARY KEY, post_id INTEGER NOT NULL REFERENCES posts(id),
+  contact_id INTEGER NOT NULL REFERENCES contacts(id),
+  kind TEXT NOT NULL,
+  channel TEXT NOT NULL, lat REAL, lon REAL, ip_hash TEXT,
+  counted INTEGER NOT NULL DEFAULT 0, reason TEXT, created_at TEXT NOT NULL,
+  UNIQUE(post_id, contact_id)
+);
+CREATE TABLE IF NOT EXISTS post_devices (
+  token_hash TEXT PRIMARY KEY, contact_id INTEGER NOT NULL REFERENCES contacts(id),
+  created_at TEXT NOT NULL, last_seen_at TEXT
+);
+CREATE TABLE IF NOT EXISTS post_asks (
+  id INTEGER PRIMARY KEY, post_id INTEGER NOT NULL REFERENCES posts(id),
+  contact_id INTEGER NOT NULL REFERENCES contacts(id), asked_at TEXT NOT NULL, answered_at TEXT,
+  UNIQUE(post_id, contact_id)
+);
 """
 
 # Columns added after the first release; ALTER them onto older databases.
 MIGRATIONS = {
-    "events": {"evidence_json": "TEXT", "level_reason": "TEXT", "response_json": "TEXT"},
+    "events": {"evidence_json": "TEXT", "level_reason": "TEXT", "response_json": "TEXT",
+               "ack_level": "TEXT", "ack_by": "TEXT", "ack_at": "TEXT", "ack_until": "TEXT",
+               "ack_mark_det": "INTEGER", "ack_mark_sig": "INTEGER"},
     "contacts": {"mesh_id": "TEXT"},
-    "messages": {"channel": "TEXT NOT NULL DEFAULT 'sms'"},
+    "messages": {"channel": "TEXT NOT NULL DEFAULT 'sms'", "post_id": "INTEGER"},
 }
 POST_MIGRATION = """
 CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_mesh ON contacts(mesh_id);

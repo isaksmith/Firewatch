@@ -14,7 +14,7 @@ from .layers import _point_in_ring
 
 DISTRICTS_DIR = DATA_DIR / "districts"
 LADDER_ROLES = ("duty_officer", "chief")
-NEIGHBOR_ROLES = ("rancher", "pumper", "water_truck", "disc")
+NEIGHBOR_ROLES = ("rancher", "pumper", "water_truck", "disc", "spotter")
 VOLUNTEER_ROLES = ("duty_officer", "chief", "volunteer")
 
 

@@ -17,5 +17,14 @@
   "smoke_pm25_rise": 50,
   "smoke_fine_ratio": 0.6,
   "smoke_regional_share": 0.5,
-  "smoke_repeat_min": 60
+  "smoke_repeat_min": 60,
+  "confirm_radius_mi": 15,
+  "post_timer_minutes": 5,
+  "post_timer_min_gfdi": 12,
+  "post_timer_max_day": 10,
+  "post_hazard_max_day": 5,
+  "ask_member_max_day": 3,
+  "ack_minutes": 30,
+  "post_join_km": 3,
+  "demo_gfdi": 20
 }
