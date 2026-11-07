@@ -10,11 +10,17 @@ import {
   setDeviceToken,
   type BoardCategory,
   type BoardPost,
+  type NewPostBody,
+  type PostResult,
   type ConfirmKind,
   type StationAction,
 } from '../api'
+import { CompassPicker, type Pointing } from '../components/CompassPicker'
 import { Mark } from '../components/ui'
-import { burnCoords, burnDistanceText, kmAndBearing, plainAge, threadLine } from '../lib/board'
+import { WaitingBox } from '../components/WaitingBox'
+import { compassPostIds, DISTRICT_TEXT_NUMBER, newClientKey, rememberCompassPost, saveRecord, type Saved } from '../lib/outbox'
+import { useOutbox } from '../lib/useOutbox'
+import { burnCoords, burnDistanceText, kmAndBearing, plainAge, sentLateText, threadLine } from '../lib/board'
 
 const CATEGORIES: { key: BoardCategory; label: string }[] = [
   { key: 'fire', label: 'Fire' },
@@ -182,7 +188,7 @@ function BurnsToday({
   )
 }
 
-function NewPost({ onPosted, onVideoSaved }: { onPosted: () => void; onVideoSaved: (postId: number, url: string) => void }) {
+function NewPost({ onPosted, onVideoSaved, onQueued }: { onPosted: () => void; onVideoSaved: (postId: number, url: string) => void; onQueued: () => void }) {
   const [category, setCategory] = useState<BoardCategory>('fire')
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
@@ -191,6 +197,7 @@ function NewPost({ onPosted, onVideoSaved }: { onPosted: () => void; onVideoSave
   const [photo, setPhoto] = useState<{ blob: Blob; url: string } | null>(null)
   const [video, setVideo] = useState<string | null>(null)
   const [retry, setRetry] = useState<{ postId: number; blob: Blob; base: string } | null>(null)
+  const [pointing, setPointing] = useState<Pointing>({ bearing: null, miles: null })
   const photoInput = useRef<HTMLInputElement>(null)
   const videoInput = useRef<HTMLInputElement>(null)
   const live = useRef<{ photo: string | null; video: string | null }>({ photo: null, video: null })
@@ -269,7 +276,56 @@ function NewPost({ onPosted, onVideoSaved }: { onPosted: () => void; onVideoSave
     setRetry(null)
     try {
       const pos = attach ? await getPosition() : null
-      const r = await boardApi.post({ category, body: body.trim(), lat: pos?.lat ?? null, lon: pos?.lon ?? null, attach_location: attach })
+      const aimed = pointing.bearing != null && pointing.miles != null
+      const useAim = aimed && attach && !!pos
+      const key = newClientKey()
+      const req: NewPostBody = {
+        category,
+        body: body.trim(),
+        lat: pos?.lat ?? null,
+        lon: pos?.lon ?? null,
+        attach_location: attach,
+        client_key: key,
+        ...(useAim ? { bearing: pointing.bearing!, miles: pointing.miles! } : {}),
+      }
+      const noAim = aimed || pointing.bearing != null ? ' Turn on location to place smoke by direction.' : ''
+      let r: (PostResult & { reissued: boolean }) | null = null
+      if (navigator.onLine !== false) {
+        try {
+          r = await boardApi.post(req)
+        } catch (e) {
+          if (e instanceof BoardError) throw e
+        }
+      }
+      if (!r) {
+        const rec: Saved = {
+          key,
+          category,
+          body: req.body,
+          lat: req.lat,
+          lon: req.lon,
+          attach,
+          bearing: req.bearing,
+          miles: req.miles,
+          compass: useAim,
+          savedAt: Date.now(),
+          photo: photo?.blob ?? null,
+          textSent: false,
+          postId: null,
+        }
+        const stored = await saveRecord(rec)
+        let t = 'No signal. Saved on this phone. It sends by itself when signal comes back, while this page is open.'
+        if (!stored) t += ' Saved for now. Keep this page open.'
+        if (DISTRICT_TEXT_NUMBER) t += ` Texts often get through when data does not: text FIRE and what you see to ${DISTRICT_TEXT_NUMBER}.`
+        setMsg({ text: t + noAim })
+        setBody('')
+        setPointing({ bearing: null, miles: null })
+        if (photo) clearPhoto()
+        onQueued()
+        return
+      }
+      if (useAim) rememberCompassPost(r.post_id)
+      setPointing({ bearing: null, miles: null })
       let text: string
       if (r.known) text = 'This one is already known and being watched.'
       else if (r.flagged && r.asked > 0) text = 'Posted. Neighbors nearby are being asked.'
@@ -279,6 +335,7 @@ function NewPost({ onPosted, onVideoSaved }: { onPosted: () => void; onVideoSave
       else text = 'Posted to the board.'
       if (r.used_home) text += ' We could not get your location, so we used your home address on file.'
       else if (attach && !pos) text += ' This post has no location, because we could not get yours.'
+      text += noAim
       if (r.reissued) text += ' Your sign-in had expired, so this went in as a community post.'
       if (video) {
         text += ' Video saved on this phone. It sends when you have better signal.'
@@ -338,6 +395,7 @@ function NewPost({ onPosted, onVideoSaved }: { onPosted: () => void; onVideoSave
           <span className="block text-[12px] text-muted">Helps the fire district find it. The public sees it rounded to about a kilometer.</span>
         </span>
       </label>
+      <CompassPicker value={pointing} onChange={setPointing} disabled={busy} />
       <div className="mt-3 grid grid-cols-2 gap-1.5">
         <button type="button" className="btn !h-11" disabled={busy} onClick={() => photoInput.current?.click()}>
           Add photo
@@ -494,7 +552,11 @@ function PostCard({
         </span>
         {post.flagged && <span className="num bg-escalate px-1.5 py-[1px] text-[10px] font-semibold tracking-[0.14em] text-white uppercase">Flagged</span>}
         {post.unconfirmed && <span className="num border border-line-2 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-muted uppercase">Unconfirmed</span>}
-        {post.estimated && <span className="num text-[10px] tracking-[0.14em] text-investigate uppercase">Estimated location</span>}
+        {post.estimated && (
+          <span className="num text-[10px] tracking-[0.14em] text-investigate uppercase">
+            {compassPostIds().includes(post.id) ? 'Location estimated from direction' : 'Estimated location'}
+          </span>
+        )}
         {post.hearsay && <span className="num text-[10px] tracking-[0.14em] text-investigate uppercase">Secondhand</span>}
         {station && post.held && <span className="num text-[10px] tracking-[0.14em] text-degraded uppercase">Held</span>}
         {station && post.event_status && <span className="num text-[10px] tracking-[0.14em] text-sample uppercase">Event: {post.event_status}</span>}
@@ -532,6 +594,7 @@ function PostCard({
         {post.author ?? 'A neighbor'} <span className="text-dim">·</span> {plainAge(post)} <span className="text-dim">·</span>{' '}
         <span className="text-text">{seeText(post.confirms)}</span>
       </p>
+      {sentLateText(post.sent_late_min) && <p className="mt-1 text-[12px] text-muted">{sentLateText(post.sent_late_min)}</p>}
 
       {threadLine(post) && <p className="mt-2 text-[12px] text-muted">{threadLine(post)}</p>}
 
@@ -694,6 +757,7 @@ export function Board() {
   const station = !!me.data?.station
   const canPage = me.data?.role === 'duty_officer' || me.data?.role === 'chief'
 
+  const outbox = useOutbox(() => refresh())
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['board-posts'] })
     qc.invalidateQueries({ queryKey: ['board-me'] })
@@ -736,9 +800,11 @@ export function Board() {
           </p>
         )}
 
-        <NewPost onPosted={refresh} onVideoSaved={(id, url) => setVideos((v) => ({ ...v, [id]: url }))} />
+        <NewPost onPosted={refresh} onVideoSaved={(id, url) => setVideos((v) => ({ ...v, [id]: url }))} onQueued={() => void outbox.reload()} />
 
         {burnList && <BurnsToday burns={burnList} posts={list} position={position} locState={locState} onAskLocation={() => void askLocation()} />}
+
+        <WaitingBox rows={outbox.rows} flashes={outbox.flashes} stateOf={outbox.stateOf} onSend={(k) => void outbox.send(k)} onDelete={(k) => void outbox.remove(k)} />
 
         <section className="flex flex-col gap-3" aria-label="Posts">
           <h2 className="label">Last 24 hours</h2>

@@ -517,6 +517,7 @@ export interface BoardPost {
   has_photo?: boolean
   thread_size?: number
   age_min?: number
+  sent_late_min?: number | null
 }
 
 export interface AdminPost extends BoardPost {
@@ -568,6 +569,7 @@ export interface PostResult {
   known: boolean
   used_home: boolean
   alerted: boolean
+  duplicate?: boolean
 }
 
 export interface ConfirmResult {
@@ -634,6 +636,18 @@ async function uploadPhoto(postId: number, blob: Blob): Promise<void> {
   }
 }
 
+export interface NewPostBody {
+  category: BoardCategory
+  body: string
+  lat: number | null
+  lon: number | null
+  attach_location: boolean
+  client_key?: string
+  queued_min?: number
+  bearing?: number
+  miles?: number
+}
+
 export const boardApi = {
   uploadPhoto,
   /** With no token there is no identity to look up, so no request goes out. */
@@ -644,7 +658,7 @@ export const boardApi = {
   },
   posts: () => boardRequest<BoardPost[]>('/posts'),
   burns: () => boardRequest<Burn[]>('/burns'),
-  post: (b: { category: BoardCategory; body: string; lat: number | null; lon: number | null; attach_location: boolean }) =>
+  post: (b: NewPostBody) =>
     withDevice(() => boardRequest<PostResult>('/posts', { method: 'POST', body: JSON.stringify(b) })),
   confirm: (id: number, b: { kind: ConfirmKind; lat: number | null; lon: number | null }) =>
     withDevice(() => boardRequest<ConfirmResult>(`/posts/${id}/confirm`, { method: 'POST', body: JSON.stringify(b) })),

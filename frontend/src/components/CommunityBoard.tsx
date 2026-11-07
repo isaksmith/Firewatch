@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, BOARD_ADMIN_KEY, boardAdminPhotoUrl, type AdminPost, type PendingMember, type StationAction } from '../api'
-import { catMeta, postAge, threadLine, useBoardPosts } from '../lib/board'
+import { catMeta, postAge, sentLateText, threadLine, useBoardPosts } from '../lib/board'
 import { useOperator } from '../lib/operator'
 
 const PENDING_KEY = ['members-pending'] as const
@@ -89,6 +89,7 @@ function PostRow({ post, child, focused }: { post: AdminPost; child?: boolean; f
       <p className="num mt-1 text-[10px] text-dim">
         {post.author ?? 'Unknown'} · {postAge(post)} · {post.confirms} confirms · {post.notes ?? 0} notes
       </p>
+      {sentLateText(post.sent_late_min) && <p className="mt-1 text-[12px] text-muted">{sentLateText(post.sent_late_min)}</p>}
       {threadLine(post) && <p className="mt-1 text-[12px] text-muted">{threadLine(post)}</p>}
 
       {open && (

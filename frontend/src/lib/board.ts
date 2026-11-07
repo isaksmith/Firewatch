@@ -85,3 +85,6 @@ export function burnDistanceText(me: { lat: number; lon: number }, burn: { lat: 
 }
 
 export const burnCoords = (b: { lat: number; lon: number }) => `Near ${b.lat.toFixed(2)}, ${b.lon.toFixed(2)}`
+
+/** "Sent 12 min late (no signal)", or null when the post went out on time. */
+export const sentLateText = (min: number | null | undefined) => (min ? `Sent ${min} min late (no signal)` : null)
