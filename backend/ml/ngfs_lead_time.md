@@ -6,7 +6,7 @@ Script: `backend/ml/ngfs_lead_time.py` (cached, paced at 1 request per second). 
 
 - Kansas alone: 56 wildfires since 2026-02-01, 37 matched, 19 unmatched (34%). Median lead -10 min, 62% detected before discovery, 8% within 15 min after. Sample is small (37); treat as indicative.
 - Kansas plus Oklahoma: 1,399 fires, 497 matched, 902 unmatched (64%). Median lead -19 min, 62% before discovery, 10% within 15 min after.
-- The unmatched share is the main story: 64% of KS+OK fires (and 76% of the 821 fires under 10 acres) have no NGFS detection near them in the window. NGFS does not see most small grass fires. Lead times below apply only to the fires it does see, which skew large.
+- The unmatched share is the main story: 64% of KS+OK fires (and 87% of the 821 fires under 10 acres) have no NGFS detection near them in the window. NGFS does not see most small grass fires. Lead times below apply only to the fires it does see, which skew large.
 - NGFS history: earliest item in both CONUS collections is 2025-04-29T19:01:17Z, so no fire from 2026-02-01 onward was excluded for lack of history. (The brief assumed 2026-02-17; the archive goes back further.)
 
 ## Kansas + Oklahoma by size (10 km)
@@ -57,7 +57,7 @@ Earlier: 209 matched Kansas wildfires, 2016 to 2025, median 8 minutes after disc
 ## Limitations
 
 1. WFIGS discovery times are often rounded, estimated, or entered late. A negative lead may just mean a late-entered record. This is not evidence that NGFS beats a 911 call or a human report.
-2. Most fires (64% KS+OK, 76% of under-10-acre fires) are not detected at all. The lead stats are survivorship-biased toward larger fires.
+2. Most fires (64% KS+OK, 87% of under-10-acre fires) are not detected at all. The lead stats are survivorship-biased toward larger fires.
 3. Possible circularity with WFIGS points and times (see above), unproven either way.
 4. Early detections may be unrelated burns (see above). No same-fire verification.
 5. Kansas sample is only 56 fires and 37 matches; one season; Oklahoma adds volume but a different region.
