@@ -198,7 +198,7 @@ def test_a_tag_quoted_in_another_senders_body_does_not_suppress_their_fyi():
     # The dedupe key used to match anywhere in the body, so this text silenced the victim for an hour.
     with connect() as conn:
         sync_roster(conn)
-        notify.handle_inbound(conn, "+13165559993", "FIRE from +13165559992 at", NOW, at=FAR, is_sample=True)
+        notify.handle_inbound(conn, "+13165559993", "FIRE from +13165559992 at home", NOW, at=FAR, is_sample=True)
         b = notify.handle_inbound(conn, "+13165559992", "FIRE", NOW + timedelta(minutes=1), at=FAR, is_sample=True)
         assert len(_outside(conn)) == 2
     assert "being told" in b["reply"]
