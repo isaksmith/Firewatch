@@ -85,8 +85,9 @@ export function Spread3D() {
     <div className="flex h-full flex-col bg-void">
       <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-void px-3 sm:gap-4">
         <Link to={`/alerts/${id}`} className="btn !h-6 !px-2">
-          <ChevronLeft size={12} /> Back
+          <ChevronLeft size={12} /> Back to map
         </Link>
+        <span className="num border border-investigate/60 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-investigate">3D VIEW</span>
         <span className="label hidden !text-muted sm:inline">
           Spread preview · <span className="text-text">{trackId(id)}</span>
         </span>
