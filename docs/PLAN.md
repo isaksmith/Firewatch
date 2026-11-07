@@ -105,7 +105,7 @@ flowchart LR
 | Signal | Latency | Cost to district | Works on one bar? | Notes |
 |---|---|---|---|---|
 | **Electric co-op line fault / outage** | Seconds (feeder lockout, smart-meter "last gasp") to ~15 min (public outage map) | $0; needs a data-sharing agreement with the co-op | Server-side, yes | The scenario's ignition is a line down. A lockout on a fire-weather day in grass is the earliest signal that exists. Many Kansas co-ops already publish outage maps; a direct feed is better. |
-| **GOES-East fire detection** | Scans every 5 min; ~2 km pixels | Free | Server-side | Sees growing fires between polar passes; can't see small ones. NOAA's Next Generation Fire System builds alerts on this (public access to verify). Latency for Kansas grass fires to be measured. |
+| **GOES-East fire detection** | Scans every 5 min; ~2 km pixels | Free | Server-side | Sees growing fires between polar passes; can't see small ones. Read directly from NOAA open-data S3 (`noaa-goes19`, `noaa-goes18`, product `ABI-L2-FDCC`), about 3.5 min after scan start when measured. NOAA's Next Generation Fire System builds alerts on this (public access to verify). |
 | **VIIRS / MODIS** (FIRMS) | <1 min to ~3 h after an overpass; ~6–8 looks a day, clustered early afternoon and around 1–2 am | Free | Server-side | Sharp (375 m) but sparse in time. Day passes land around 12:30–2:30 pm, which overlaps afternoon fire weather. Our ML score runs on these. |
 | **Texted reports** | Human speed | ~1¢ per message | Yes (SMS) | Keyword `FIRE` plus a road or landmark. Ranchers and lease pumpers drive the district daily. Reports from unregistered numbers count, but can't page alone. |
 | **Burn notices** | Before the burn | Same | Yes | Keyword `BURN` registers a burn area and day. This is a *negative* signal that cuts false alarms; many Kansas counties already expect a call to dispatch before a burn. |
@@ -227,7 +227,7 @@ A grass-fire arrival-time grid (CSIRO grassland rate of spread, elliptical shape
 | Need | Source | Key? | Notes |
 |---|---|---|---|
 | Hotspots (polar) | NASA FIRMS: VIIRS S-NPP, NOAA-20, NOAA-21, MODIS | Free `MAP_KEY` | Area API; yearly country CSVs for training (no key) |
-| Hotspots (geostationary) | FIRMS GOES; NOAA Next Generation Fire System | Free | GOES-East scans the US every 5 min; NGFS public access to verify |
+| Hotspots (geostationary) | Direct from NOAA open-data S3 (FIRMS Area API has no GOES source); NOAA Next Generation Fire System | Free | GOES-East scans the US every 5 min; NGFS public access to verify |
 | Line faults / outages | The district's electric co-op: public outage map, or a direct feed | Agreement | Varies by co-op; sample mode uses a synthetic feed |
 | Texts in and out | Twilio (or any SMS gateway) | Account | ~1¢ per message; simulated in sample mode |
 | Weather, live + historical | Open-Meteo forecast and archive | None | Same variables for training and serving |

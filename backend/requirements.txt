@@ -7,3 +7,4 @@ contourpy>=1.2
 pillow>=10.4
 xgboost>=3.0
 pytest>=8.3
+netCDF4>=1.7

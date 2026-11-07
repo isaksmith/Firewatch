@@ -132,7 +132,7 @@ Status values:
 | METAR via aviationweather.gov (backup: Iowa Mesonet ASOS) | Temperature, dew point, pressure, wind at 54 Kansas stations | Measured humidity | Hourly plus specials, about 6 min old when sampled | No | Free, US government | on map |
 | NOAA SPC fire weather outlooks | Official dry thunderstorm and wind/RH risk areas | Official risk areas | A few issues a day | No | Free, NOAA does not endorse this app | on map |
 | NOAA HMS fire points | Analyst-checked fire detections | Cross-check detections | Last update 80 min old when sampled | No | Free, NOAA open data | on map |
-| GOES-19 and GOES-18 fire detection (`ABI-L2-FDCC`, `noaa-goes19`, `noaa-goes18` on S3) | Geostationary fire pixels | Fastest free fire signal | Every 5 min, 3 min after scan | No | Free, NOAA open data | planned |
+| GOES-19 and GOES-18 fire detection (`ABI-L2-FDCC`, `noaa-goes19`, `noaa-goes18` on S3) | Geostationary fire pixels | Fastest free fire signal | Every 5 min, 3.5 min after scan start when sampled (fetch about 1 s) | No | Free, NOAA open data | on map |
 | GOES lightning (`GLM-L2-LCFA`, `noaa-goes19`) | Lightning flashes | Near-instant ignition clue | 20-second files, about 30 seconds after | No | Free, NOAA open data | planned |
 | GOES smoke (`ABI-L2-ADPC`, `noaa-goes19`) | Smoke mask | Smoke detection, daytime only | Every 5 min, 4.4 min after scan | No | Free, NOAA open data | planned |
 | RTMA-RU 2.5 km (`noaa-rtma-pds`) | Gridded near-surface analysis | Freshest dry-air map, blends real observations | Every 15 min, about 17 min after | No | Free, NOAA open data | planned |

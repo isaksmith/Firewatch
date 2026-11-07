@@ -27,7 +27,7 @@ from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
 from .district import boundary_geojson, load_district, sync_roster
 from .fire_weather import default_curing, gfdi_band
-from .ingest import hms, landsat_nrt, lsr, metar, nws, risk_grid, spc, wfigs
+from .ingest import goes_fire, hms, landsat_nrt, lsr, metar, nws, risk_grid, spc, wfigs
 from .layers import LAYER_NAMES, load_layer, nearest_assets, segment_index
 from .pipeline import poll_firms_once
 from .signals import add_signal
@@ -69,6 +69,7 @@ def poll_jobs() -> dict:
         "open_meteo": risk_grid.poll,
         "spc": spc.poll,
         "hms": hms.poll,
+        "goes_fire": goes_fire.poll,
     }
     if get_settings().firms_map_key:
         jobs["landsat_nrt"] = landsat_nrt.poll
