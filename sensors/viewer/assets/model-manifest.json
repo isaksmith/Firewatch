@@ -1,0 +1,19 @@
+{
+  "source": "sensors/cad/firewatch_revision2.blend",
+  "units": "meters",
+  "blenderToGltf": "x,z,-y",
+  "meshCounts": {
+    "enclosure": 23,
+    "backplate": 5,
+    "power": 4,
+    "pcb": 128,
+    "gas": 53,
+    "particulate": 84,
+    "wiring": 2,
+    "solar": 122,
+    "mount": 56
+  },
+  "totalMeshes": 477,
+  "bytes": 4484880,
+  "notes": "Evaluated geometry including labels; studio, pole, ground and clearance guides excluded. Explode vectors are Blender-space meters."
+}

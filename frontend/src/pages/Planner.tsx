@@ -11,6 +11,7 @@ const DEFAULT_REGION = 'district:cottonwood-creek'
 const MONTHS = 'JFMAMJJASOND'
 const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
 const pct = (x: number) => `${Math.round(x * 100)}%`
+const pct1 = (x: number) => `${(x * 100).toFixed(1)}%`
 const KM_PER_MI = 1.609344
 
 // Classes by rank within the region, since scores are normalized per region and only compare inside it.
@@ -651,8 +652,14 @@ export function Planner() {
                 <KV k="Rich nodes" v={p.summary.rich} />
                 <KV k="Hardware" v={usd(p.bom.hardware)} />
                 <KV k="+10% spares" v={usd(p.bom.total)} accent="#e6e8eb" />
-                <KV k="Priority watched" v={pct(p.summary.priority_covered)} accent="#3ddc97" />
+                <KV k="Priority watched" v={pct1(p.summary.priority_covered)} accent="#3ddc97" />
                 <KV k="Max relays" v={p.summary.max_hops ?? '—'} />
+              </div>
+              <div className="border-b border-line px-4 py-2.5 text-[11.5px] leading-snug text-muted">
+                Smoke from the {p.summary.rich} rich nodes watches {pct1(p.summary.watched_by_rich)} of the risk; gas from the {p.summary.bare} bare
+                nodes watches {pct1(p.summary.watched_by_bare)}. A bare node only senses its own {p.params.plot_acres}-acre plot and{' '}
+                {p.params.bare_fetch_km} km upwind, so the bare count changes cost and how surely a fire inside the plot is confirmed, not where plots
+                go. Rich nodes' smoke range decides placement.
               </div>
               {p.params.budget_usd != null && (
                 <div className="border-b border-line px-4 py-2.5 text-[11.5px] leading-snug text-muted">

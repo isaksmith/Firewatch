@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     mesh_gateway: str = "off"  # off | serial | tcp: a Meshtastic radio attached to the server
     mesh_device: str = ""  # serial port (first Meshtastic port when blank) or the radio's host for tcp
     mesh_channel_index: int = 0
+    mesh_channel_feed: bool = True  # copy every mesh text to the district channel as well as the person's radio
     scenario_seconds_per_minute: float = 2.0
     api_token: str = ""  # when set, required (X-Firewatch-Token) on endpoints that can text people
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"

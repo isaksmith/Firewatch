@@ -510,15 +510,15 @@ Everything is in acres, so the trade reads plainly: "a false page costs us about
    - days below the PM sensor's −10 °C limit;
    - the share of foggy fire-season mornings.
 
-   For Cottonwood Creek: 116 High+ hours a year, 75% from the SSW and 24% from the NW behind cold fronts, almost all in March and April. The cached summaries in `data/climate/` are committed so planning works offline.
+   For Cottonwood Creek (the Coldwater stand-in): 221 High+ hours a year, 61% from the SSW and 36% from the NNW behind cold fronts, mostly in March and April. The cached summaries in `data/climate/` are committed so planning works offline.
 4. **Detection model.** A sensor only smells a fire it is downwind of, so a plot's catchment is a wedge upwind of it, weighted by the wind rose:
    - **Rich nodes:** 3 km, ±20° plume half-width, 0.8 chance a node in the plume catches it.
-   - **Bare nodes:** the plot itself plus 0.4 km of fetch upwind. Dryad's 100 m spacing is the only reference.
+   - **Bare nodes:** the plot itself plus 0.4 km of fetch upwind, with a 0.3 chance per node of catching a fire there. Dryad's 100 m spacing is the only reference. That footprint is a small fraction of a 1 km cell, so bare nodes barely move the watched share (about 0.1–0.2% in Cottonwood Creek) and never move plots: they add confirmation inside the plot, while the rich nodes' smoke range decides placement. The page states this split under the summary.
 
    These are planning guesses, because the README is explicit that no node has a proven detection radius. They are request parameters so the detection trial's numbers can replace them.
 5. **Siting.** The top 400 cells by priority are candidates. A cell crossed by a power line puts its plot on the line, at the co-op's right of way; otherwise the plot goes at the cell center. Plots are chosen greedily by marginal priority covered, at least 3 km apart. The page plots the coverage curve up to twice the requested count, so a county can see what each extra plot buys. A budget can replace the plot count; the planner then fits plots, relays, the station and 10% spares under it.
-6. **Plot layout.** Nodes go on a 4 × 4 lattice across the 15-acre square (~82 m spacing).
-   - Rich nodes take the corner farthest downwind of each fire-wind direction, one per direction. In Cottonwood Creek that puts one on the NE corner for SSW winds and one on the SE corner for post-frontal NW winds.
+6. **Plot layout.** Nodes go on a 4 × 4 lattice across the 15-acre square (~82 m spacing). The lattice grows to 5 × 5 or 6 × 6 when a plot has more than 16 nodes.
+   - Rich nodes take the corner farthest downwind of each fire-wind direction, one per direction. In Cottonwood Creek that puts one on the NE corner for SSW winds and one on the SE corner for post-frontal NNW winds.
    - Bare nodes fill the next most-downwind positions.
 7. **Mesh.** Relay candidates are:
    - town elevators and water towers (30 m, mains power);
@@ -533,7 +533,7 @@ Everything is in acres, so the trade reads plainly: "a false page costs us about
 8. **Power check.** Daily energy made (panel W × worst-week sun-hours × 0.6, the README's yield) is compared with need:
    - **Need:** 1.5 Wh/day base load (an assumption until the bench trial measures it), plus 3 Wh/day for a rich node's PM sensor at 25% duty.
    - **Output:** days on the pack when there's a deficit, and the highest PM duty the fire-season worst week supports.
-   - **Cottonwood Creek:** both tiers break even in fire season. In the worst winter week, a rich node runs a 1 Wh/day deficit that its 24.4 Wh pack covers for about 20 days.
+   - **Cottonwood Creek:** both tiers break even in fire season. In the worst winter week, a rich node runs a 0.2 Wh/day deficit that its 24.4 Wh pack covers for about 108 days.
 9. **Site checks.** Each plot gets the README's nuisance list applied to its location:
    - a substation within 0.5 km means mains power, so the PM fan can run continuously;
    - a town within 1 km moves the gas baseline (exhaust, heating);
@@ -556,7 +556,7 @@ Everything is in acres, so the trade reads plainly: "a false page costs us about
 - GeoJSON for the priority grid (with each cell's rank and factor shares), nodes and links;
 - the assumptions, and any warnings.
 
-For Cottonwood Creek's 446 sq mi, the default 10 plots (70 bare, 20 rich) need 8 relays and come to about $19,700 with spares. They watch about 10% of the priority-weighted ground. That's the honest number: plots add evidence where fires are most likely, and satellites, line faults and neighbor reports cover the rest.
+For Cottonwood Creek's 446 sq mi, the default 10 plots (70 bare, 20 rich) need 5 relays and come to about $19,400 with spares. They watch about 17% of the priority-weighted ground. That's the honest number: plots add evidence where fires are most likely, and satellites, line faults and neighbor reports cover the rest.
 
 **Limits.**
 - OpenStreetMap has transmission lines only. The co-op's distribution feeders, where most line fires start, should replace them in a real assessment.

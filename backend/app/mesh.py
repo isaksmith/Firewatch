@@ -7,7 +7,9 @@ the server's radio or a relay.
 """
 
 import logging
+import re
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 from . import sensors
@@ -21,6 +23,14 @@ POSITION_FRESH = timedelta(minutes=30)
 QUIET_MIN = 15
 ACK_RETRY_S = 2.0
 ACK_RETRIES = 3
+BROADCAST = 0xFFFFFFFF
+BROADCAST_ID = "^all"
+FEED_REPEAT_S = 60
+TX_GAP_S = 2.0
+# The channel is also people talking ("no idea", "fire looks bigger"), so there a reply word must be the whole
+# message, and FIRE/BURN/JOIN with details must be typed in capitals.
+CHANNEL_REPLIES = {"PAGE", "NO", "SEND", "R", "STOP", "START", "1", "2", "3", "FIRE", "BURN", "JOIN"}
+CHANNEL_REPORTS = ("FIRE", "BURN", "JOIN")
 
 _bridge: "MeshBridge | None" = None
 _error: str | None = None
@@ -28,6 +38,18 @@ _error: str | None = None
 
 def node_id(num: int) -> str:
     return f"!{num:08x}"
+
+
+def _fit(body: str) -> str:
+    raw = body.encode()
+    return raw[:MESH_MAX_BYTES].decode(errors="ignore") if len(raw) > MESH_MAX_BYTES else body
+
+
+def _is_keyword(text: str) -> bool:
+    words = re.findall(r"[A-Za-z0-9]+", text)
+    if len(words) == 1:
+        return words[0].upper() in CHANNEL_REPLIES
+    return bool(words) and words[0] in CHANNEL_REPORTS
 
 
 class MeshBridge:
@@ -42,18 +64,51 @@ class MeshBridge:
         self.connected = True
         self.last_packet_at: str | None = None
         self._lock = threading.Lock()
+        self._next_tx = 0.0
+        self._posted_lock = threading.Lock()
+        self._posted: dict[str, float] = {}
+        self.spawn = lambda fn, *args: threading.Thread(target=fn, args=args, daemon=True).start()
 
     @property
     def node_id(self) -> str | None:
         return node_id(self.my_num) if self.my_num is not None else None
 
     def send(self, to: str, body: str) -> str:
-        raw = body.encode()
-        if len(raw) > MESH_MAX_BYTES:
-            body = raw[:MESH_MAX_BYTES].decode(errors="ignore")
-        with self._lock:
-            pkt = self.iface.sendText(body, destinationId=to, wantAck=True, channelIndex=get_settings().mesh_channel_index)
+        body = _fit(body)
+        pkt = self._transmit(body, to, want_ack=True)
+        if get_settings().mesh_channel_feed:
+            self.spawn(self._post_quietly, body)
         return f"mesh-{pkt.id}"
+
+    def post(self, body: str) -> None:
+        """Broadcast on the district channel, once per text per minute (a page goes to many radios at once)."""
+        body = _fit(body)
+        now = time.monotonic()
+        with self._posted_lock:
+            self._posted = {b: t for b, t in self._posted.items() if now - t < FEED_REPEAT_S}
+            if body in self._posted:
+                return
+            self._posted[body] = now
+        # want_ack on a broadcast makes the radio resend it until it hears a neighbour repeat it.
+        pkt = self._transmit(body, BROADCAST_ID, want_ack=True)
+        log.info("mesh channel post %s: %s", pkt.id, body[:40])
+
+    def _post_quietly(self, body: str) -> None:
+        try:
+            self.post(body)
+        except Exception as e:
+            log.warning("mesh channel post failed: %s", e)
+
+    def _transmit(self, body: str, to: str, want_ack: bool):
+        # The T1000-E drops a packet handed to it within about a second of the previous one.
+        with self._lock:
+            wait = self._next_tx - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+            try:
+                return self.iface.sendText(body, destinationId=to, wantAck=want_ack, channelIndex=get_settings().mesh_channel_index)
+            finally:
+                self._next_tx = time.monotonic() + TX_GAP_S
 
     # pubsub listeners: the signature must match what meshtastic publishes, and every bridge hears every
     # interface's topics, so each ignores interfaces that aren't its own (an old one closing after a reconnect).
@@ -133,12 +188,17 @@ def handle_packet(conn, packet: dict, my_num: int | None) -> str | None:
         return "telemetry"
     if port == "ROUTING_APP" and decoded.get("requestId") is not None:
         return _ack(conn, decoded, num, my_num)
-    if port == "TEXT_MESSAGE_APP" and num != my_num and packet.get("to") == my_num:
+    if port == "TEXT_MESSAGE_APP" and num != my_num:
         text = decoded.get("text")
         if text is None:
             text = bytes(decoded.get("payload") or b"").decode(errors="ignore")
-        _inbound(conn, nid, text)
-        return "text"
+        if packet.get("to") == my_num:
+            _inbound(conn, nid, text)
+            return "text"
+        on_our_channel = packet.get("channel", 0) == get_settings().mesh_channel_index
+        if packet.get("to") == BROADCAST and on_our_channel and _is_keyword(text):
+            _inbound(conn, nid, text)
+            return "channel_text"
     return None
 
 

@@ -70,6 +70,16 @@ function Lane({ label, items, x, now, color, projectFrom }: {
   )
 }
 
+function WaitingBanner({ w }: { w: NonNullable<ScenarioStatus['waiting']> }) {
+  return (
+    <div className="num absolute top-1/2 left-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center gap-2 border border-ok/60 bg-void/95 px-3 py-1.5 text-[11px] whitespace-nowrap text-ok">
+      <span className="blink h-1.5 w-1.5 rotate-45 bg-ok" />
+      CLOCK HELD · WAITING FOR {w.name.toUpperCase()} TO REPLY {w.reply} ON RADIO {w.mesh_id}
+      <span className="text-dim">· SCRIPT IN {w.seconds_left}S</span>
+    </div>
+  )
+}
+
 export function ScenarioStrip({ s, onClose, onReplay, replaying }: {
   s: ScenarioStatus
   onClose: () => void
@@ -116,6 +126,7 @@ export function ScenarioStrip({ s, onClose, onReplay, replaying }: {
           <Lane label="Firewatch" items={s.firewatch} x={x} now={now} color={(m) => FW_COLOR[m.key] ?? '#e6e8eb'} projectFrom={pageT} />
           <div className="absolute top-0 bottom-0 w-px bg-text/70" style={{ left: x(now) }} />
           <span className="label absolute bottom-0 -left-[86px] w-[78px] text-right !text-[9px]">Fire size</span>
+          {s.waiting && <WaitingBanner w={s.waiting} />}
         </div>
       </div>
 
@@ -129,7 +140,7 @@ export function ScenarioStrip({ s, onClose, onReplay, replaying }: {
           </div>
           <div className="flex gap-1">
             <button onClick={onReplay} disabled={replaying} className="btn !h-6 !px-2 text-[10px]">
-              {s.running ? 'Running' : 'Replay'}
+              {s.running ? 'Running' : 'Run again'}
             </button>
             <button onClick={onClose} className="flex h-6 w-6 items-center justify-center text-dim hover:bg-raised hover:text-text" aria-label="Hide scenario">
               <X size={13} />

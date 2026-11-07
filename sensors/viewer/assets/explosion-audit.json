@@ -1,0 +1,64 @@
+{
+  "bare/band": {
+    "samples": 101,
+    "baseline_contacts": {
+      "carrier/backplate": 260,
+      "carrier/body": 41,
+      "solar/body": 401,
+      "solar/mount": 355,
+      "gas_hood/gas_base": 15,
+      "backplate/body": 232,
+      "body/gas_base": 32,
+      "body/mount": 64
+    },
+    "new_or_increased_intersections": []
+  },
+  "rich/band": {
+    "samples": 101,
+    "baseline_contacts": {
+      "carrier/backplate": 260,
+      "carrier/body": 41,
+      "solar/body": 401,
+      "solar/mount": 355,
+      "gas_hood/gas_base": 15,
+      "pm_hood/pm_base": 39,
+      "backplate/body": 232,
+      "body/gas_base": 32,
+      "body/pm_base": 32,
+      "body/mount": 64
+    },
+    "new_or_increased_intersections": []
+  },
+  "bare/stake": {
+    "samples": 101,
+    "baseline_contacts": {
+      "carrier/backplate": 260,
+      "carrier/body": 41,
+      "solar/body": 401,
+      "solar/mount": 355,
+      "gas_hood/gas_base": 15,
+      "backplate/body": 232,
+      "body/gas_base": 32,
+      "body/mount": 64
+    },
+    "new_or_increased_intersections": []
+  },
+  "rich/stake": {
+    "samples": 101,
+    "baseline_contacts": {
+      "carrier/backplate": 260,
+      "carrier/body": 41,
+      "solar/body": 401,
+      "solar/mount": 355,
+      "gas_hood/gas_base": 15,
+      "pm_hood/pm_base": 39,
+      "backplate/body": 232,
+      "body/gas_base": 32,
+      "body/pm_base": 32,
+      "body/mount": 64
+    },
+    "new_or_increased_intersections": []
+  },
+  "method": "Triangle BVH overlap between rigid assemblies, using actual exported GLB. Existing CAD contacts recorded separately. Rigid view rotations do not alter intersections.",
+  "result": "PASS"
+}

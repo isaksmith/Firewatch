@@ -162,3 +162,18 @@ def test_plan_explains_each_site_and_relay(plan):
         assert r["why"] and r["serves"]
     cell = plan["geojson"]["cells"]["features"][0]["properties"]
     assert {"rank", "history", "burns", "lines", "people", "tallgrass", "downwind"} <= cell.keys()
+
+
+def test_every_requested_node_is_placed_past_sixteen():
+    p = planner.plan_region(planner.resolve_region(DISTRICT), {"sites": 2, "bare_per_site": 14, "rich_per_site": 4},
+                            fetch_climate=False)
+    assert all(s["bare"] == 14 and s["rich"] == 4 for s in p["sites"])
+    assert len({(n["lon"], n["lat"]) for s in p["sites"] for n in s["nodes"]}) == 2 * 18
+
+
+def test_more_bare_nodes_never_watch_less():
+    region = planner.resolve_region(DISTRICT)
+    watched = [planner.plan_region(region, {"sites": 3, "bare_per_site": b}, fetch_climate=False)["summary"]
+               for b in (0, 3, 7, 12)]
+    assert all(a["watched_by_bare"] <= b["watched_by_bare"] for a, b in pairwise(watched))
+    assert watched[0]["watched_by_bare"] == 0
