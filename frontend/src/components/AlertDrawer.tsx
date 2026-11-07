@@ -35,7 +35,7 @@ export function AlertDrawer({ id, onClose }: { id: number; onClose: () => void }
   }, [onClose])
 
   return (
-    <aside className="flex w-[400px] shrink-0 flex-col border-l border-line bg-panel">
+    <aside className="absolute inset-0 z-20 flex w-full flex-col bg-panel md:static md:inset-auto md:z-auto md:w-[400px] md:shrink-0 md:border-l md:border-line">
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-line pr-2 pl-4">
         <span className="label !text-muted">
           Track <span className="text-text">{trackId(id)}</span>
@@ -300,7 +300,7 @@ function ResponseSection({ a }: { a: AlertDetail }) {
           <div className="flex justify-between">
             <span className="label">Next hour</span>
             <span className="num text-text">
-              ~{r.plan.acres_60} AC · WIND {r.plan.wind.from} {r.plan.wind.mph} MPH
+              UP TO {r.plan.acres_60} AC · WIND {r.plan.wind.from} {r.plan.wind.mph} MPH
             </span>
           </div>
           {r.plan.downwind.length > 0 && (
@@ -308,7 +308,7 @@ function ResponseSection({ a }: { a: AlertDetail }) {
               {r.plan.downwind.map((d) => (
                 <li key={d.contact_id} className="flex justify-between">
                   <span>{d.name}</span>
-                  <span className="num text-investigate">~{d.eta_min} MIN</span>
+                  <span className="num text-investigate">AS SOON AS {d.eta_min} MIN</span>
                 </li>
               ))}
             </ul>

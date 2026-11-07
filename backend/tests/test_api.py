@@ -38,6 +38,27 @@ def test_health_lists_every_source_with_interval():
     with TestClient(app) as client:
         h = client.get("/api/health").json()
         for name in ("firms", "nws_alerts", "lsr", "wfigs_incidents", "wfigs_perimeters",
-                     "metar", "open_meteo", "spc", "hms"):
+                     "metar", "open_meteo", "spc", "hms", "ngfs"):
             assert name in h["sources"], name
             assert h["sources"][name]["interval_s"] > 0
+
+
+def test_live_alerts_hide_fixtures_but_keep_scenario_replay(monkeypatch):
+    from app import sample, scenario
+    from app.config import get_settings
+    from app.main import app
+    from fastapi.testclient import TestClient
+
+    sample.load_all_now()
+    scenario.run_now("cottonwood-creek")
+    monkeypatch.setenv("MODE", "sample")
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        before = client.get("/api/alerts?include_monitor=true&since_hours=1").json()["alerts"]
+        slugs = {a["sample_slug"] for a in before}
+        assert "cottonwood-creek" in slugs and len(slugs) > 1, "sample mode shows fixtures and scenario"
+    monkeypatch.setenv("MODE", "live")
+    get_settings.cache_clear()
+    with TestClient(app) as client:
+        live = client.get("/api/alerts?include_monitor=true&since_hours=1").json()["alerts"]
+        assert live and {a["sample_slug"] for a in live} == {"cottonwood-creek"}

@@ -12,7 +12,7 @@ BASE_RADIUS_KM = 2.0
 # Line faults and texted reports are located to a feeder section or a road, not a pixel.
 SIGNAL_RADIUS_KM = 3.0
 SIGNAL_WINDOW = timedelta(hours=6)
-LOCATING_SIGNALS = ("line_fault", "report", "camera_smoke", "sensor_smoke")
+LOCATING_SIGNALS = ("line_fault", "report", "camera_smoke", "ngfs", "sensor_smoke")
 # A smoke sensor sits downwind of the fire, not on it: it joins events farther out and only places an event
 # when nothing else does.
 SENSOR_SIGNALS = ("sensor_smoke",)

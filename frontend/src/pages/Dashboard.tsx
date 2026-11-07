@@ -19,10 +19,12 @@ export function Dashboard() {
   const [hoveredId, setHoveredId] = useState<number | null>(null)
   const [tab, setTab] = useState<QueueTab>('active')
   const [scenarioHidden, setScenarioHidden] = useState(false)
+  const [slug, setSlug] = useState(SCENARIO)
 
+  const scenarios = useQuery({ queryKey: ['scenarios'], queryFn: api.scenarios, staleTime: Infinity })
   const scenario = useQuery({
-    queryKey: ['scenario', SCENARIO],
-    queryFn: () => api.scenario(SCENARIO),
+    queryKey: ['scenario', slug],
+    queryFn: () => api.scenario(slug),
     refetchInterval: (q) => (q.state.data?.running ? 1_000 : 10_000),
     retry: false,
   })
@@ -35,10 +37,11 @@ export function Dashboard() {
   // Follow the scenario's fire once it appears, so the drawer shows the texts as they go out.
   const autoSelected = useRef(false)
   const runScenario = useMutation({
-    mutationFn: () => api.runScenario(SCENARIO),
+    mutationFn: () => api.runScenario(slug),
     onSuccess: () => {
       setScenarioHidden(false)
       autoSelected.current = false
+      navigate('/') // the open alert belongs to the replay just cleared
       setTimeout(() => qc.invalidateQueries(), 400)
     },
   })
@@ -63,7 +66,15 @@ export function Dashboard() {
 
   return (
     <div className="flex h-full flex-col bg-bg">
-      <TopBar onRunScenario={() => runScenario.mutate()} scenarioRunning={running || runScenario.isPending} />
+      <TopBar
+        onRunScenario={() => runScenario.mutate()}
+        scenarioRunning={running || runScenario.isPending}
+        scenarios={scenarios.data}
+        scenarioSlug={slug}
+        onPickScenario={setSlug}
+        threeDId={selectedId ?? onMap[0]?.id ?? null}
+        threeDSelected={selectedId != null}
+      />
       {showStrip && (
         <ScenarioStrip
           s={scenario.data!}
@@ -72,7 +83,7 @@ export function Dashboard() {
           replaying={running || runScenario.isPending}
         />
       )}
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1 flex-col md:flex-row">
         <AlertList
           alerts={all}
           tab={tab}

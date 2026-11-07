@@ -112,7 +112,7 @@ def poll_firms_once() -> dict:
         all_dets = []
         for source in s.firms_source_list:
             try:
-                dets = firms.fetch_area(s.firms_map_key, source, s.bbox_tuple, days=1)
+                dets = firms.fetch_area(s.firms_map_key, source, s.bbox_tuple, days=s.firms_days)
                 mark_source(conn, "firms", ok=True)
                 summary["sources"][source] = len(dets)
                 all_dets.extend(dets)

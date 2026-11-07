@@ -294,5 +294,7 @@
         "kind": "simulated"
       }
     }
-  ]
+  ],
+  "confirm_red_flag": false,
+  "confirm_red_flag_note": "The forecast and the playbook read red_flag; the confirmation rules don't, so this replay keeps its neighbor-confirm chain (escalate at T+8, page at T+9). The packet replays (cottonwood-creek-packet*.json) apply the Red Flag line-fault rule and escalate at minute 0. Merge decision to review: one story should be picked for the pitch."
 }

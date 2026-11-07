@@ -9,9 +9,11 @@ from functools import lru_cache
 
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
+from .redflag import replay_red_flag
 from .db import connect, iso, loads, parse_iso
 from .district import load_district, sync_roster
 from .fire_weather import default_curing, gfdi, gfdi_band
+from .ngfs_signal import add_ngfs_signals
 from .notify import handle_inbound, tick
 from .pipeline import process_detections
 from .signals import add_signal
@@ -40,10 +42,16 @@ def list_scenarios() -> list[dict]:
     return out
 
 
-def clear(slug: str) -> None:
-    """Remove this scenario's events and all sample signals, messages, and burn notices."""
+def clear() -> None:
+    """Remove every scenario's events and all sample signals, messages, and burn notices, keeping sample fixtures.
+    One replay lives in the database at a time: the packet replays share a place and a clock, so another
+    replay's open event would swallow this one's signals."""
+    slugs = [s["slug"] for s in list_scenarios()]
     with connect() as conn:
-        ids = [r["id"] for r in conn.execute("SELECT id FROM events WHERE is_sample = 1 AND (sample_slug = ? OR sample_slug IS NULL)", (slug,))]
+        ids = [r["id"] for r in conn.execute(
+            f"SELECT id FROM events WHERE is_sample = 1 AND (sample_slug IS NULL OR sample_slug IN ({','.join('?' * len(slugs))}))",
+            slugs,
+        )]
         for table in ("scores", "actions", "detections", "signals", "messages"):
             conn.executemany(f"DELETE FROM {table} WHERE event_id = ?", [(i,) for i in ids])
         conn.executemany("DELETE FROM events WHERE id = ?", [(i,) for i in ids])
@@ -61,6 +69,16 @@ def _apply(conn, sc: dict, step: dict, now: datetime) -> None:
     elif kind == "detections":
         dets = [{**d, "acq_time": iso(now)} for d in step["detections"]]
         process_detections(conn, dets, is_sample=True, weather=sc["weather"], now=now)
+    elif kind == "ngfs":
+        # Each ngfs step is one scan of one tracked feature; the snapshot is every scan so far.
+        pts = [
+            {"lat": s["lat"], "lon": s["lon"], "feature_tracking_id": s["feature_tracking_id"],
+             "type_description": s.get("type_description"),
+             "acq_date_time": iso(parse_iso(sc["t0"]) + timedelta(minutes=s["t"] - s.get("lag_min", 0)))}
+            for s in sc["timeline"] if s["type"] == "ngfs" and s["t"] <= step["t"]
+        ]
+        for eid in add_ngfs_signals(conn, pts, now, is_sample=True):
+            evaluate_event(conn, eid, sc["weather"], now)
     else:
         raise ValueError(f"unknown step type {kind!r}")
     conn.execute("UPDATE events SET sample_slug = ? WHERE is_sample = 1 AND sample_slug IS NULL", (sc["slug"],))
@@ -69,10 +87,16 @@ def _apply(conn, sc: dict, step: dict, now: datetime) -> None:
 def _minute(conn, sc: dict, t: int) -> None:
     t0 = parse_iso(sc["t0"])
     now = t0 + timedelta(minutes=t)
-    for step in sc["timeline"]:
-        if step["t"] == t:
-            _apply(conn, sc, step, now)
-    tick(conn, now, is_sample=True)
+    # "confirm_red_flag" lets a replay keep its forecast red flag without the confirmation rule that escalates a
+    # line fault on its own on a Red Flag day; it defaults to the scenario's red_flag.
+    token = replay_red_flag.set(bool(sc.get("confirm_red_flag", sc.get("red_flag", False))))
+    try:
+        for step in sc["timeline"]:
+            if step["t"] == t:
+                _apply(conn, sc, step, now)
+        tick(conn, now, is_sample=True)
+    finally:
+        replay_red_flag.reset(token)
 
 
 def _pre_steps(sc: dict) -> list[int]:
@@ -82,7 +106,7 @@ def _pre_steps(sc: dict) -> list[int]:
 def run_now(slug: str, until: int | None = None) -> None:
     """Run the whole scenario synchronously (tests, and the instant 'load' button)."""
     sc = load_scenario(slug)
-    clear(slug)
+    clear()
     end = sc["duration_min"] if until is None else until
     with connect() as conn:
         sync_roster(conn, sc["district"])
@@ -93,7 +117,7 @@ def run_now(slug: str, until: int | None = None) -> None:
 
 async def _replay(slug: str, seconds_per_minute: float) -> None:
     sc = load_scenario(slug)
-    await asyncio.to_thread(clear, slug)
+    await asyncio.to_thread(clear)
 
     def setup():
         with connect() as conn:
@@ -166,7 +190,7 @@ def status(slug: str) -> dict:
 
     cfg = load_district(sc["district"]).settings
     turnout, drive = cfg.get("turnout_min", 13), cfg.get("drive_min", 18)
-    events, firewatch = [], []
+    events, firewatch, escalated_seen = [], [], False
     with connect() as conn:
         rows = conn.execute("SELECT * FROM events WHERE sample_slug = ? ORDER BY first_seen", (slug,)).fetchall()
         n_out = conn.execute(
@@ -183,7 +207,9 @@ def status(slug: str) -> dict:
                     "SELECT COUNT(*) n FROM messages WHERE event_id = ? AND direction = 'out'", (ev["id"],)
                 ).fetchone()["n"],
             })
-            if state.get("investigate_at"):
+            # one timeline: the first event that got a text, unless a later one escalated
+            if state.get("investigate_at") and (not firewatch or (state.get("escalate_at") and not escalated_seen)):
+                escalated_seen = bool(state.get("escalate_at"))
                 page_t = minutes(state.get("page_at"))
                 firewatch = [
                     {"key": "signal", "t": minutes(ev["first_seen"]), "label": "First signal"},

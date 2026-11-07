@@ -140,3 +140,9 @@ def test_init_db_scrubs_old_errors_and_recovery_clears_them(tmp_path):
         assert conn.execute("SELECT last_error FROM source_health WHERE source='firms'").fetchone()[0] is None
         db.mark_source(conn, "nws_alerts", ok=True)
         assert conn.execute("SELECT last_error FROM source_health WHERE source='nws_alerts'").fetchone()[0] is None
+
+
+def test_firms_window_spans_utc_midnight():
+    """FIRMS day range 1 means the current UTC date only, which is empty each evening in Kansas."""
+    from app.config import Settings
+    assert Settings().firms_days >= 2

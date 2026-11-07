@@ -1,0 +1,1054 @@
+{
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "Firewatch System Map",
+  "locale": "en",
+  "output": "firewatch-map.html",
+  "viewBox": [
+   1240,
+   736
+  ]
+ },
+ "components": [
+  {
+   "id": "danger",
+   "type": "external",
+   "label": "Fire danger",
+   "sublabel": "Red Flag, SPC, GFDI",
+   "pos": [
+    24,
+    44
+   ],
+   "size": [
+    134,
+    46
+   ]
+  },
+  {
+   "id": "records",
+   "type": "external",
+   "label": "District records",
+   "sublabel": "roster, burns",
+   "pos": [
+    24,
+    104
+   ],
+   "size": [
+    134,
+    46
+   ]
+  },
+  {
+   "id": "fault",
+   "type": "external",
+   "label": "Line faults",
+   "sublabel": "electric co-ops",
+   "pos": [
+    24,
+    164
+   ],
+   "size": [
+    134,
+    46
+   ]
+  },
+  {
+   "id": "people",
+   "type": "external",
+   "label": "Texts, radios",
+   "sublabel": "FIRE, replies, mesh",
+   "pos": [
+    24,
+    224
+   ],
+   "size": [
+    134,
+    46
+   ]
+  },
+  {
+   "id": "sensor",
+   "type": "external",
+   "label": "Smoke sensors",
+   "sublabel": "tower nodes",
+   "pos": [
+    24,
+    284
+   ],
+   "size": [
+    134,
+    46
+   ]
+  },
+  {
+   "id": "board",
+   "type": "external",
+   "label": "Community board",
+   "sublabel": "posts, I see it too",
+   "pos": [
+    24,
+    344
+   ],
+   "size": [
+    134,
+    46
+   ]
+  },
+  {
+   "id": "geo",
+   "type": "external",
+   "label": "Geostationary",
+   "sublabel": "NGFS, GOES fire",
+   "pos": [
+    24,
+    404
+   ],
+   "size": [
+    134,
+    46
+   ]
+  },
+  {
+   "id": "sat",
+   "type": "external",
+   "label": "Hotspot satellites",
+   "sublabel": "FIRMS: VIIRS, MODIS",
+   "pos": [
+    24,
+    474
+   ],
+   "size": [
+    134,
+    46
+   ]
+  },
+  {
+   "id": "weather",
+   "type": "external",
+   "label": "Weather",
+   "sublabel": "Open-Meteo, RTMA",
+   "pos": [
+    24,
+    544
+   ],
+   "size": [
+    134,
+    46
+   ]
+  },
+  {
+   "id": "land",
+   "type": "external",
+   "label": "Land and grid",
+   "sublabel": "OSM, terrain, fuels",
+   "pos": [
+    24,
+    604
+   ],
+   "size": [
+    134,
+    46
+   ]
+  },
+  {
+   "id": "feeds",
+   "type": "external",
+   "label": "Agency feeds",
+   "sublabel": "WFIGS, HMS, LSR",
+   "pos": [
+    24,
+    664
+   ],
+   "size": [
+    134,
+    46
+   ]
+  },
+  {
+   "id": "ffilter",
+   "type": "backend",
+   "label": "Fault filter",
+   "sublabel": "lockout, GFDI 12+",
+   "pos": [
+    190,
+    164
+   ],
+   "size": [
+    122,
+    46
+   ]
+  },
+  {
+   "id": "read",
+   "type": "backend",
+   "label": "Read the text",
+   "sublabel": "parser, location",
+   "pos": [
+    190,
+    224
+   ],
+   "size": [
+    122,
+    46
+   ]
+  },
+  {
+   "id": "smoke",
+   "type": "backend",
+   "label": "Smoke rule",
+   "sublabel": "PM2.5 jump, not dust",
+   "pos": [
+    190,
+    284
+   ],
+   "size": [
+    122,
+    46
+   ]
+  },
+  {
+   "id": "sort",
+   "type": "backend",
+   "label": "Sort posts",
+   "sublabel": "keywords, confirms",
+   "pos": [
+    190,
+    344
+   ],
+   "size": [
+    122,
+    46
+   ]
+  },
+  {
+   "id": "ngfs",
+   "type": "backend",
+   "label": "NGFS check",
+   "sublabel": "wildland, two scans",
+   "pos": [
+    190,
+    404
+   ],
+   "size": [
+    122,
+    46
+   ]
+  },
+  {
+   "id": "group",
+   "type": "backend",
+   "label": "Group hotspots",
+   "sublabel": "2 km, 12 h",
+   "pos": [
+    190,
+    474
+   ],
+   "size": [
+    122,
+    46
+   ]
+  },
+  {
+   "id": "ctx",
+   "type": "backend",
+   "label": "Add context",
+   "sublabel": "weather, land",
+   "pos": [
+    190,
+    544
+   ],
+   "size": [
+    122,
+    46
+   ]
+  },
+  {
+   "id": "score",
+   "type": "backend",
+   "label": "Score it",
+   "sublabel": "XGBoost, 0 to 100",
+   "pos": [
+    340,
+    544
+   ],
+   "size": [
+    118,
+    46
+   ]
+  },
+  {
+   "id": "guard",
+   "type": "security",
+   "label": "Guardrails",
+   "sublabel": "towns, lines, flares",
+   "pos": [
+    340,
+    474
+   ],
+   "size": [
+    118,
+    46
+   ]
+  },
+  {
+   "id": "event",
+   "type": "messagebus",
+   "label": "One event",
+   "sublabel": "per fire",
+   "pos": [
+    340,
+    164
+   ],
+   "size": [
+    118,
+    286
+   ]
+  },
+  {
+   "id": "hold",
+   "type": "backend",
+   "label": "Hold",
+   "sublabel": "no page request",
+   "pos": [
+    688,
+    104
+   ],
+   "size": [
+    122,
+    46
+   ]
+  },
+  {
+   "id": "burn",
+   "type": "security",
+   "label": "Registered burn?",
+   "sublabel": "today, near here",
+   "pos": [
+    490,
+    194
+   ],
+   "size": [
+    126,
+    46
+   ]
+  },
+  {
+   "id": "escaped",
+   "type": "security",
+   "label": "Escaped?",
+   "sublabel": "evidence only",
+   "pos": [
+    688,
+    194
+   ],
+   "size": [
+    122,
+    46
+   ]
+  },
+  {
+   "id": "rf",
+   "type": "security",
+   "label": "Red Flag fault?",
+   "sublabel": "line fault alone",
+   "pos": [
+    490,
+    284
+   ],
+   "size": [
+    126,
+    46
+   ]
+  },
+  {
+   "id": "esc",
+   "type": "backend",
+   "label": "Escalate",
+   "sublabel": "ask for a page",
+   "pos": [
+    688,
+    284
+   ],
+   "size": [
+    122,
+    46
+   ]
+  },
+  {
+   "id": "count",
+   "type": "security",
+   "label": "Two sources?",
+   "sublabel": "or strong satellite",
+   "pos": [
+    490,
+    374
+   ],
+   "size": [
+    126,
+    46
+   ]
+  },
+  {
+   "id": "inv",
+   "type": "backend",
+   "label": "Investigate",
+   "sublabel": "FYI, check first",
+   "pos": [
+    688,
+    374
+   ],
+   "size": [
+    122,
+    46
+   ]
+  },
+  {
+   "id": "mon",
+   "type": "backend",
+   "label": "Monitor",
+   "sublabel": "texts nobody",
+   "pos": [
+    490,
+    464
+   ],
+   "size": [
+    126,
+    46
+   ]
+  },
+  {
+   "id": "ring",
+   "type": "backend",
+   "label": "Ask neighbors",
+   "sublabel": "see smoke? 1, 2, 3",
+   "pos": [
+    688,
+    464
+   ],
+   "size": [
+    122,
+    46
+   ]
+  },
+  {
+   "id": "page",
+   "type": "backend",
+   "label": "Page",
+   "sublabel": "by text reply",
+   "pos": [
+    842,
+    104
+   ],
+   "size": [
+    136,
+    46
+   ]
+  },
+  {
+   "id": "duty",
+   "type": "frontend",
+   "label": "Duty officer",
+   "sublabel": "a person decides",
+   "pos": [
+    842,
+    284
+   ],
+   "size": [
+    136,
+    46
+   ]
+  },
+  {
+   "id": "plan",
+   "type": "database",
+   "label": "Playbook",
+   "sublabel": "lowest expected loss",
+   "pos": [
+    842,
+    444
+   ],
+   "size": [
+    136,
+    46
+   ]
+  },
+  {
+   "id": "fcast",
+   "type": "database",
+   "label": "Spread forecast",
+   "sublabel": "where, when, acres",
+   "pos": [
+    842,
+    594
+   ],
+   "size": [
+    136,
+    46
+   ]
+  },
+  {
+   "id": "live",
+   "type": "frontend",
+   "label": "Live map",
+   "sublabel": "every feed, one screen",
+   "pos": [
+    842,
+    664
+   ],
+   "size": [
+    136,
+    46
+   ]
+  },
+  {
+   "id": "dispatch",
+   "type": "backend",
+   "label": "Dispatch, volunteers",
+   "sublabel": "tone out, reply R",
+   "pos": [
+    1080,
+    44
+   ],
+   "size": [
+    136,
+    46
+   ]
+  },
+  {
+   "id": "downwind",
+   "type": "backend",
+   "label": "Downwind ranchers",
+   "sublabel": "arrival estimate",
+   "pos": [
+    1080,
+    104
+   ],
+   "size": [
+    136,
+    46
+   ]
+  },
+  {
+   "id": "helpers",
+   "type": "backend",
+   "label": "Water trucks, discs",
+   "sublabel": "within 10 km",
+   "pos": [
+    1080,
+    164
+   ],
+   "size": [
+    136,
+    46
+   ]
+  },
+  {
+   "id": "aid",
+   "type": "backend",
+   "label": "Mutual aid",
+   "sublabel": "chief replies SEND",
+   "pos": [
+    1080,
+    224
+   ],
+   "size": [
+    136,
+    46
+   ]
+  },
+  {
+   "id": "ladder",
+   "type": "backend",
+   "label": "No answer",
+   "sublabel": "chief 3, dispatch 9",
+   "pos": [
+    1080,
+    284
+   ],
+   "size": [
+    136,
+    46
+   ]
+  },
+  {
+   "id": "heads",
+   "type": "backend",
+   "label": "Station heads-up",
+   "sublabel": "no trucks roll",
+   "pos": [
+    1080,
+    444
+   ],
+   "size": [
+    136,
+    46
+   ]
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "Data in",
+   "wraps": [
+    "danger",
+    "records",
+    "fault",
+    "people",
+    "sensor",
+    "board",
+    "geo",
+    "sat",
+    "weather",
+    "land",
+    "feeds"
+   ],
+   "pad": 12
+  },
+  {
+   "kind": "region",
+   "label": "Detect",
+   "wraps": [
+    "ffilter",
+    "read",
+    "smoke",
+    "sort",
+    "ngfs",
+    "group",
+    "ctx",
+    "score",
+    "guard",
+    "event"
+   ],
+   "pad": 12
+  },
+  {
+   "kind": "region",
+   "label": "Confirm",
+   "wraps": [
+    "hold",
+    "burn",
+    "escaped",
+    "rf",
+    "esc",
+    "count",
+    "inv",
+    "mon",
+    "ring"
+   ],
+   "pad": 12
+  },
+  {
+   "kind": "region",
+   "label": "Respond",
+   "wraps": [
+    "page",
+    "duty",
+    "plan",
+    "fcast",
+    "live",
+    "dispatch",
+    "downwind",
+    "helpers",
+    "aid",
+    "ladder",
+    "heads"
+   ],
+   "pad": 12
+  }
+ ],
+ "connections": [
+  {
+   "id": "e1",
+   "from": "fault",
+   "to": "ffilter",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e2",
+   "from": "people",
+   "to": "read",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e3",
+   "from": "sensor",
+   "to": "smoke",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e4",
+   "from": "board",
+   "to": "sort",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e5",
+   "from": "geo",
+   "to": "ngfs",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e6",
+   "from": "sat",
+   "to": "group",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e7",
+   "from": "weather",
+   "to": "ctx",
+   "variant": "dashed",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e8",
+   "from": "land",
+   "to": "ctx",
+   "variant": "dashed",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e9",
+   "from": "ffilter",
+   "to": "event",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e10",
+   "from": "read",
+   "to": "event",
+   "fromSide": "right",
+   "toSide": "left",
+   "route": "orthogonal-h"
+  },
+  {
+   "id": "e11",
+   "from": "smoke",
+   "to": "event",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e12",
+   "from": "sort",
+   "to": "event",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e13",
+   "from": "ngfs",
+   "to": "event",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e14",
+   "from": "group",
+   "to": "ctx",
+   "fromSide": "bottom",
+   "toSide": "top"
+  },
+  {
+   "id": "e15",
+   "from": "ctx",
+   "to": "score",
+   "variant": "emphasis",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e16",
+   "from": "score",
+   "to": "guard",
+   "variant": "emphasis",
+   "fromSide": "top",
+   "toSide": "bottom"
+  },
+  {
+   "id": "e17",
+   "from": "guard",
+   "to": "event",
+   "variant": "emphasis",
+   "fromSide": "top",
+   "toSide": "bottom"
+  },
+  {
+   "id": "e18",
+   "from": "event",
+   "to": "burn",
+   "variant": "emphasis",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e19",
+   "from": "records",
+   "to": "burn",
+   "label": "burn list",
+   "variant": "dashed",
+   "fromSide": "right",
+   "toSide": "top",
+   "labelAt": [
+    420,
+    117
+   ]
+  },
+  {
+   "id": "e20",
+   "from": "danger",
+   "to": "hold",
+   "label": "Red Flag, GFDI 25+",
+   "variant": "dashed",
+   "fromSide": "right",
+   "toSide": "top",
+   "labelAt": [
+    420,
+    57
+   ]
+  },
+  {
+   "id": "e21",
+   "from": "burn",
+   "to": "escaped",
+   "label": "yes",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e22",
+   "from": "burn",
+   "to": "rf",
+   "label": "no",
+   "variant": "emphasis",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "labelAt": [
+    522,
+    262
+   ]
+  },
+  {
+   "id": "e23",
+   "from": "escaped",
+   "to": "hold",
+   "label": "no",
+   "fromSide": "top",
+   "toSide": "bottom",
+   "labelAt": [
+    764,
+    172
+   ]
+  },
+  {
+   "id": "e24",
+   "from": "escaped",
+   "to": "rf",
+   "label": "yes",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "labelAt": [
+    700,
+    252
+   ]
+  },
+  {
+   "id": "e25",
+   "from": "rf",
+   "to": "esc",
+   "label": "yes",
+   "variant": "emphasis",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e26",
+   "from": "rf",
+   "to": "count",
+   "label": "no",
+   "variant": "emphasis",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "labelAt": [
+    526,
+    352
+   ]
+  },
+  {
+   "id": "e27",
+   "from": "count",
+   "to": "esc",
+   "label": "two",
+   "variant": "emphasis",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e28",
+   "from": "count",
+   "to": "inv",
+   "label": "one",
+   "fromSide": "right",
+   "toSide": "left",
+   "labelAt": [
+    672,
+    384
+   ]
+  },
+  {
+   "id": "e29",
+   "from": "count",
+   "to": "mon",
+   "label": "none",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "labelAt": [
+    526,
+    442
+   ]
+  },
+  {
+   "id": "e30",
+   "from": "inv",
+   "to": "ring",
+   "fromSide": "bottom",
+   "toSide": "top"
+  },
+  {
+   "id": "e31",
+   "from": "ring",
+   "to": "count",
+   "label": "reply 1",
+   "fromSide": "left",
+   "toSide": "right"
+  },
+  {
+   "id": "e32",
+   "from": "esc",
+   "to": "duty",
+   "variant": "emphasis",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e33",
+   "from": "inv",
+   "to": "duty",
+   "label": "FYI",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e34",
+   "from": "ctx",
+   "to": "fcast",
+   "label": "wind, land",
+   "variant": "dashed",
+   "fromSide": "bottom",
+   "toSide": "left",
+   "labelAt": [
+    600,
+    604
+   ]
+  },
+  {
+   "id": "e35",
+   "from": "fcast",
+   "to": "plan",
+   "fromSide": "top",
+   "toSide": "bottom"
+  },
+  {
+   "id": "e36",
+   "from": "plan",
+   "to": "duty",
+   "variant": "dashed",
+   "fromSide": "top",
+   "toSide": "bottom"
+  },
+  {
+   "id": "e37",
+   "from": "plan",
+   "to": "heads",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e38",
+   "from": "fcast",
+   "to": "live",
+   "variant": "dashed",
+   "fromSide": "bottom",
+   "toSide": "top"
+  },
+  {
+   "id": "e39",
+   "from": "feeds",
+   "to": "live",
+   "variant": "dashed",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e40",
+   "from": "duty",
+   "to": "page",
+   "label": "PAGE",
+   "variant": "emphasis",
+   "fromSide": "top",
+   "toSide": "bottom"
+  },
+  {
+   "id": "e41",
+   "from": "duty",
+   "to": "ladder",
+   "label": "silent",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e42",
+   "from": "page",
+   "to": "dispatch",
+   "variant": "emphasis",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e43",
+   "from": "page",
+   "to": "downwind",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e44",
+   "from": "page",
+   "to": "helpers",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "e45",
+   "from": "page",
+   "to": "aid",
+   "label": "too big",
+   "fromSide": "right",
+   "toSide": "left",
+   "labelAt": [
+    1050,
+    262
+   ]
+  }
+ ]
+}

@@ -29,11 +29,14 @@ class Settings(BaseSettings):
     poll_spc_s: int = 1800
     poll_hms_s: int = 1800
     poll_goes_fire_s: int = 60
+    poll_ngfs_s: int = 60
     poll_goes_lightning_s: int = 60
     poll_goes_smoke_s: int = 300
     poll_rtma_ru_s: int = 900
     poll_landsat_nrt_s: int = 300  # only polled when a FIRMS key is set
     firms_sources: str = "VIIRS_SNPP_NRT,VIIRS_NOAA20_NRT,VIIRS_NOAA21_NRT,MODIS_NRT"
+    # FIRMS counts days by UTC date, so 1 is empty after 6 pm Central until the next pass. dedupe_key absorbs the overlap.
+    firms_days: int = 2
     scorer: str = "auto"  # auto (model if present, else rules) | model | rules
     threshold_escalate: int = 70
     threshold_investigate: int = 40
@@ -75,6 +78,7 @@ class Settings(BaseSettings):
             "spc": self.poll_spc_s,
             "hms": self.poll_hms_s,
             "goes_fire": self.poll_goes_fire_s,
+            "ngfs": self.poll_ngfs_s,
             "goes_lightning": self.poll_goes_lightning_s,
             "goes_smoke": self.poll_goes_smoke_s,
             "rtma_ru": self.poll_rtma_ru_s,
