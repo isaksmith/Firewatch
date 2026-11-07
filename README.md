@@ -8,7 +8,7 @@
 
 ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white) ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white) ![XGBoost](https://img.shields.io/badge/XGBoost-scorer-EB5B2B) ![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white) ![MapLibre](https://img.shields.io/badge/MapLibre-GL-396CB2?logo=maplibre&logoColor=white) ![Meshtastic](https://img.shields.io/badge/Meshtastic-LoRa-67EA94) ![Data](https://img.shields.io/badge/data-free%20%26%20public-ff4b2b)
 
-[How it works](#how-it-works) · [Screens](#screens) · [Quick start](#quick-start) · [Run the demo](#run-the-demo) · [Pitch deck](docs/pitch/Firewatch-Pitch.pdf) · [Docs](#docs) · [Data sources](#data-sources-and-apis)
+[How it works](#how-it-works) · [Screens](#screens) · [Quick start](#quick-start) · [Run the demo](#run-the-demo) · [Pitch deck](docs/pitch/Firewatch-Pitch.pdf) · [Sensor video](https://youtu.be/OYTUxd2nSDk) · [Docs](#docs) · [Data sources](#data-sources-and-apis)
 
 Built for [Firewatch 2026](https://wsuinnovationworks.com/) · WSU Innovation Works × Lockheed Martin Skunk Works · Nov 6–8, 2026
 
@@ -284,7 +284,9 @@ The district (a 450 sq mi stand-in boundary centered on Coldwater in Comanche Co
 
 ## Hardware and field setup
 
-**Sensor node intro video (2 min):** [watch on YouTube](https://youtu.be/OYTUxd2nSDk). Design, parts and costs are in [sensors/README.md](sensors/README.md).
+<a href="https://youtu.be/OYTUxd2nSDk"><img src="https://img.youtube.com/vi/OYTUxd2nSDk/hqdefault.jpg" width="560" alt="FireWatch field sensor intro video (2 min): click to watch on YouTube" /></a>
+
+**Sensor node intro video (2 min):** [watch on YouTube](https://youtu.be/OYTUxd2nSDk). Every part in the exploded view, the node in a Kansas field, and what it costs. Design, parts and costs are in [sensors/README.md](sensors/README.md).
 
 <details>
 <summary><b>Mesh radios (Meshtastic)</b>: texts for volunteers and trucks out of cell coverage</summary>
