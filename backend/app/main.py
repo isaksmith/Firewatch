@@ -8,7 +8,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 from urllib.parse import parse_qsl
 
-import httpx
 import numpy as np
 from fastapi import (
     APIRouter,
@@ -23,18 +22,19 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import mesh, notify, playbook, sample, scenario, wind
+from . import mesh, notify, playbook, sample, scenario
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
 from .district import boundary_geojson, load_district, sync_roster
 from .fire_weather import default_curing, gfdi_band
+from .geo import compass
 from .ingest import goes_fire, goes_lightning, goes_smoke, hms, landsat_nrt, lsr, metar, nws, risk_grid, rtma_ru, spc, wfigs
 from .layers import LAYER_NAMES, load_layer, nearest_assets, segment_index
 from .pipeline import poll_firms_once
 from .signals import add_signal
 from .sim.ensemble import forecast
-from .sim.spread import SpreadInput, _contours, _rings, simulate
+from .sim.spread import SpreadInput, _contours, _rings, interp_weather, simulate
 from .situation import Situation, scenario_situation
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -743,7 +743,8 @@ def _alert_now(ev) -> tuple:
 
 @api.get("/alerts/{event_id}/forecast")
 def alert_forecast(event_id: int):
-    """The fire's likely and worst-case outline every 15 min from now to +6 h, for the map's time slider."""
+    """The fire's likely and worst-case outline and the wind at the fire, every 15 min from now to +6 h, for the
+    map's time slider."""
     with connect() as conn:
         ev = _get_event(conn, event_id)
     sit, now_min = _alert_now(ev)
@@ -763,32 +764,20 @@ def alert_forecast(event_id: int):
     a = fc["_arrival"]
     dom = a["domain"]
     t50, t10 = _contours(a["t50"], dom), _contours(a["t10"], dom)
+    weather = sit.weather_steps()
     steps = []
     for ahead in range(0, MAP_AHEAD_MIN + 1, MAP_STEP_MIN):
         m = now_min + ahead
         if m > horizon:
             break
         at = sit.ignition.time + timedelta(minutes=m)
+        w = interp_weather(weather, m)
         steps.append({"ahead_min": ahead, "at": at.isoformat(),
+                      "wind": {"from_deg": round(w.wind_from_deg) % 360, "kmh": round(w.wind_kmh, 1), "compass": compass(w.wind_from_deg)},
                       "likely": {"type": "MultiPolygon", "coordinates": _rings(t50, m) if m > 0 else []},
                       "worst": {"type": "MultiPolygon", "coordinates": _rings(t10, m) if m > 0 else []}})
     return {"event_id": event_id, "now": (sit.ignition.time + timedelta(minutes=now_min)).isoformat(),
             "steps": steps, "members": MAP_MEMBERS, "assumptions": fc["assumptions"], "provenance": fc["provenance"]}
-
-
-@api.get("/wind")
-def wind_field(event_id: int | None = None):
-    """Hourly wind for the map: live forecast for Kansas, or the wind around an alert's fire (archive for
-    historical samples, the scenario's weather for the scenario)."""
-    try:
-        if event_id is None:
-            return wind.live_field()
-        with connect() as conn:
-            ev = _get_event(conn, event_id)
-        sit, now_min = _alert_now(ev)
-        return wind.event_field(ev, sit, now_min)
-    except httpx.HTTPError as e:
-        raise HTTPException(503, f"wind data unavailable: {e}") from None
 
 
 @api.get("/scenarios")

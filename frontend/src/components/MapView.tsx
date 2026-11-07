@@ -7,7 +7,7 @@ import { REC_META, latLon, trackId } from '../lib/format'
 import { AOI_BBOX, BASEMAP_STYLE, KANSAS_VIEW, ringPolygon } from '../lib/map'
 import { FEEDS, LiveLayers, LiveToggles, useLiveFeeds, type FeedKey } from './LiveFeeds'
 import { TrackGlyph } from './ui'
-import { ForecastSlider, WindLayers } from './WindForecast'
+import { FireForecastLayer, ForecastSlider } from './FireForecast'
 
 interface Props {
   alerts: AlertSummary[]
@@ -35,7 +35,7 @@ const AOI: GeoJSON.Feature = {
   },
 }
 
-type LayerKey = 'power_lines' | 'static_sources' | 'flint_hills' | 'aoi' | 'district' | 'distribution_lines' | 'dry_grid' | 'wind_lines' | 'mesh' | 'wind'
+type LayerKey = 'power_lines' | 'static_sources' | 'flint_hills' | 'aoi' | 'district' | 'distribution_lines' | 'dry_grid' | 'wind_lines' | 'mesh' | 'fire_forecast'
 
 const SWATCH: Record<LayerKey, string> = {
   aoi: 'h-0 w-4 border-t border-dashed border-sample/70',
@@ -47,7 +47,7 @@ const SWATCH: Record<LayerKey, string> = {
   dry_grid: 'h-2 w-2 rounded-full bg-[#ffb21a]',
   wind_lines: 'h-0.5 w-4 bg-[#ff5c5c]',
   mesh: 'h-2 w-2 rotate-45 bg-ok',
-  wind: 'h-0.5 w-4 bg-[#ffd166]',
+  fire_forecast: 'h-2 w-4 bg-[#ff7a1a]/60 border border-[#ffb21a]',
 }
 
 const MESH_FRESH_MIN = 30
@@ -103,7 +103,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
     dry_grid: false,
     wind_lines: false,
     mesh: true,
-    wind: true,
+    fire_forecast: true,
   })
   const [liveOn, setLiveOn] = useState<Record<FeedKey, boolean>>(() => Object.fromEntries(FEEDS.map((f) => [f.key, false])) as Record<FeedKey, boolean>)
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, retry: false })
@@ -124,21 +124,13 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
   const [slider, setSlider] = useState<{ id: number | null; min: number }>({ id: null, min: 0 })
   const aheadMin = slider.id === selectedId ? slider.min : 0
   const setAheadMin = (min: number) => setSlider({ id: selectedId, min })
-  const wind = useQuery({
-    queryKey: ['wind', selectedId ?? 'kansas'],
-    queryFn: () => api.wind(selectedId ?? undefined),
-    enabled: layers.wind,
-    retry: false,
-    refetchInterval: 15 * 60_000,
-  })
   const fireForecast = useQuery({
     queryKey: ['alert-forecast', selectedId],
     queryFn: () => api.alertForecast(selectedId!),
-    enabled: layers.wind && selectedId != null,
+    enabled: layers.fire_forecast && selectedId != null,
     retry: false,
   })
-  // The fire's own clock when an alert is selected; otherwise the live forecast's first hour.
-  const forecastNow = fireForecast.data?.now ?? wind.data?.start ?? null
+  const fire = fireForecast.data?.event_id === selectedId ? fireForecast.data : undefined
   const [mapReady, setMapReady] = useState(false)
   useEffect(() => {
     if (mapReady && selected?.id) mapRef.current?.flyTo({ center: [selected.lon, selected.lat], zoom: 10, duration: 1200 })
@@ -273,24 +265,15 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
             </Marker>
           )
         })}
-        {layers.wind && forecastNow && (
-          <WindLayers wind={wind.data} fire={fireForecast.data?.event_id === selectedId ? fireForecast.data : undefined} now={forecastNow} aheadMin={aheadMin} />
-        )}
+        {layers.fire_forecast && fire && selected && <FireForecastLayer fire={fire} aheadMin={aheadMin} lat={selected.lat} lon={selected.lon} />}
         <LiveLayers feeds={feeds} />
         {layers.mesh && placed.map((n) => <MeshMarker key={n.node_id} n={n} />)}
         <CursorReadout />
       </Map>
 
       <div className="pointer-events-none absolute inset-3 brackets" style={{ ['--b' as string]: '#3a414b' }} />
-      {layers.wind && forecastNow && (
-        <ForecastSlider
-          wind={wind.data}
-          fire={fireForecast.data?.event_id === selectedId ? fireForecast.data : undefined}
-          now={forecastNow}
-          aheadMin={aheadMin}
-          setAheadMin={setAheadMin}
-          loadingFire={fireForecast.isFetching}
-        />
+      {layers.fire_forecast && selectedId != null && (
+        <ForecastSlider fire={fire} aheadMin={aheadMin} setAheadMin={setAheadMin} loading={fireForecast.isFetching} />
       )}
 
       <div className="hud absolute top-4 right-4 w-[200px]">
@@ -311,7 +294,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
                   ['distribution_lines', 'Distribution (partial)'],
                   ['dry_grid', 'Dry air grid'],
                   ['wind_lines', 'Lines under wind'],
-                  ['wind', 'Wind + fire forecast'],
+                  ['fire_forecast', 'Fire forecast (selected alert)'],
                   ...(placed.length > 0 ? ([['mesh', `Mesh radios (${placed.length})`]] as const) : []),
                 ] as const
               ).map(([k, label]) => (

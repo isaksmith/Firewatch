@@ -185,8 +185,7 @@ Results are in [backend/ml/report.md](backend/ml/report.md); the full analysis o
 | `backend/app/decision.py`, `playbook.py` | Expected-loss recommendation model and the playbook it drives (options, previews, receipts) |
 | `backend/ml/backtest.py` | Spread back-test against FIRMS archive detections of real fires |
 | `backend/ml/fire_day.py` | Fire-day model: ignition rate and large-fire share by fire danger, from WFIGS + archive weather |
-| `backend/app/wind.py` | Hourly wind fields for the map's wind layer (live forecast, archive around a past fire, or scenario weather) |
-| `frontend/src/components/WindForecast.tsx` | Wind arrows, fire forecast outline and the time slider on the console map |
+| `frontend/src/components/FireForecast.tsx` | The selected fire's forecast outline, its wind, and the time slider on the console map |
 | `backend/app/situation.py` | `Situation` contract between ingestion and forecast/recommendations; builds one from a scenario |
 | `backend/app/signals.py`, `confirm.py` | Line faults and texted reports on events; the two-source level rules and burn registry |
 | `backend/app/notify.py` | SMS gateway (outbox / Twilio), templates, neighbor asks, no-answer ladder, PAGE / NO / SEND, downwind warnings, mutual aid, inbound keywords |
