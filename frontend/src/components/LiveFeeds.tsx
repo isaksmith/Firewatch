@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Layer, Popup, Source, useMap, type MapLayerMouseEvent } from 'react-map-gl/maplibre'
 import { api, type FeedResponse } from '../api'
 
-export type FeedKey = 'nws_alerts' | 'lsr' | 'wfigs_incidents' | 'wfigs_perimeters' | 'metar' | 'spc' | 'hms' | 'landsat_nrt' | 'goes_fire'
+export type FeedKey = 'nws_alerts' | 'lsr' | 'wfigs_incidents' | 'wfigs_perimeters' | 'metar' | 'spc' | 'hms' | 'landsat_nrt' | 'goes_fire' | 'goes_lightning'
 
 interface FeedDef {
   key: FeedKey
@@ -25,6 +25,7 @@ export const FEEDS: FeedDef[] = [
   { key: 'hms', label: 'HMS fire points', every: 1800, color: '#ff9f1a', kind: 'point', list: 'points' },
   { key: 'landsat_nrt', label: 'Landsat', every: 300, color: '#c58bff', kind: 'point', list: 'points' },
   { key: 'goes_fire', label: 'GOES fire (geostationary)', every: 60, color: '#ff3df2', kind: 'point', list: 'points' },
+  { key: 'goes_lightning', label: 'GOES lightning (5 min)', every: 60, color: '#ffe94d', kind: 'point', list: 'points' },
 ]
 
 export const FEED_SWATCH: Record<FeedKey, string> = Object.fromEntries(
@@ -150,6 +151,7 @@ const POPUP_FIELDS: Record<FeedKey, string[]> = {
   spc: ['label', 'outlook'],
   hms: ['satellite', 'frp', 'time'],
   landsat_nrt: ['acq_date', 'frp'],
+  goes_lightning: ['time', 'energy_fj'],
   goes_fire: ['satellite', 'class', 'power_mw', 'temp_k', 'scan_start'],
 }
 
