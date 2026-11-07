@@ -935,3 +935,12 @@ def test_reporters_own_position_is_stored_nowhere():
         with connect() as conn:
             dump = "\n".join(conn.iterdump())
         assert "37.1234" not in dump and "96.6543" not in dump
+
+
+def test_compass_with_location_off_stores_no_point():
+    """Location off means no point at all: a direction "under 1 mile" would put the reporter within half a mile."""
+    with TestClient(app) as c:
+        pid = _compass(c, member(), attach_location=False).json()["post_id"]
+        with connect() as conn:
+            row = conn.execute("SELECT lat, lon, estimated FROM posts WHERE id = ?", (pid,)).fetchone()
+        assert (row["lat"], row["lon"]) == (None, None)

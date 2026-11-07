@@ -321,8 +321,9 @@ def create_post(body: NewPost, request: Request, x_firewatch_device: str = Heade
         used_home = body.attach_location and body.lat is None and c["lat"] is not None
         at = (body.lat, body.lon) if body.lat is not None and body.attach_location else None
         est = body.estimated or used_home
-        if body.bearing is not None:
-            # The reporter's own fix is only the origin: the stored point is where they pointed.
+        if body.bearing is not None and body.attach_location:
+            # The reporter's own fix is only the origin: the stored point is where they pointed. With location off
+            # nothing is placed, since a short distance would put the point close to the reporter.
             at, est, used_home = point_from(body.lat, body.lon, Where(body.bearing, body.miles)), True, False
         if body.client_key and (first := _first_by_key(conn, c["id"], body.client_key)):
             return _answer(conn, first, duplicate=True)
