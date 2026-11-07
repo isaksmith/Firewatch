@@ -23,6 +23,8 @@ Humans decide. Firewatch ranks, explains, and previews.
 
 - [Build plan](docs/PLAN.md): goals, data sources, milestones, team workstreams, demo script, cost and failure story.
 - [Design](docs/DESIGN.md): data model, pipeline, feature spec, scoring, spread model, API contract, UI design.
+- [Competitor packet](docs/COMPETITOR_PACKET.md): official brief, Cottonwood Creek scenario, judging criteria, schedule.
+- [Faultline research brief](docs/FAULTLINE_RESEARCH.md): alternative concept that uses power-line faults on high-danger days as the ignition trigger; evidence, data sources, and build plan.
 
 ## Stack
 
@@ -81,6 +83,8 @@ cd backend
 .venv/bin/python -m ml.train                           # evaluate, export data/model/, write ml/report.md
 ```
 
+Spread forecasts use NLCD land cover, downloaded on first use. To cache the scenario areas ahead of a demo (and try for the slower USDA CDL cropland detail), run `.venv/bin/python -m scripts.fetch_fuels`.
+
 Results are in [backend/ml/report.md](backend/ml/report.md). `SCORER=auto` (default) uses the model when it's present and weather is available, and falls back to the rules scorer otherwise.
 
 | Path | What it is |
@@ -89,11 +93,13 @@ Results are in [backend/ml/report.md](backend/ml/report.md). `SCORER=auto` (defa
 | `backend/app/features/` | Event clustering (2 km / 12 h) and feature enrichment |
 | `backend/app/scoring/` | XGBoost scorer v1 with per-alert reasons, rules fallback, guardrails, suppression reasons |
 | `backend/ml/` | Training pipeline and evaluation report |
-| `backend/app/sim/` | Grass-fire spread estimate (arrival-time grid → isochrones, impacts) |
+| `backend/app/sim/` | Grass-fire spread: fuel map (NLCD/CDL), changing weather, 24-member ensemble forecast |
+| `backend/app/situation.py` | `Situation` contract between ingestion and forecast/recommendations; scenario loader |
+| `backend/data/scenarios/` | Cottonwood Creek packet scenario and a cold-front what-if (synthetic) |
 | `backend/app/main.py` | FastAPI routes: alerts, actions, simulate, layers, health, sample replay |
 | `frontend/src/pages/Dashboard.tsx` | Alert list, map, detail drawer, actions |
 | `frontend/src/pages/Spread3D.tsx` | 3D terrain spread preview with wind override |
 
 ## Data attribution
 
-NASA FIRMS (LANCE) · Open-Meteo (CC BY 4.0) · NOAA / National Weather Service · NIFC WFIGS / IRWIN · © OpenStreetMap contributors (ODbL) · AWS Terrain Tiles · US Census TIGER · EPA ecoregions.
+NASA FIRMS (LANCE) · Open-Meteo (CC BY 4.0) · NOAA / National Weather Service · NIFC WFIGS / IRWIN · © OpenStreetMap contributors (ODbL) · AWS Terrain Tiles · US Census TIGER · MRLC NLCD · USDA NASS Cropland Data Layer · EPA ecoregions.

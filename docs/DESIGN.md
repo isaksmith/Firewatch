@@ -301,7 +301,7 @@ Output:
 
 ### 6.2 Fire behavior
 
-Treat all fuel as cured grassland (true for most of Kansas in the dormant season). On screen: *"Simplified grass-fire estimate for planning. Not an operational fire behavior prediction."*
+The CSIRO grassland rate below is the rate for cured natural grass; each grid cell scales it by a fuel multiplier from land cover (6.4). On screen: *"Simplified grass-fire estimate for planning. Not an operational fire behavior prediction."*
 
 1. **Dead fuel moisture** (McArthur): \(MC = 9.58 - 0.205\,T + 0.138\,RH\) (%).
 2. **Moisture factor** (Cheney et al., 1998): \(\phi_M = e^{-0.108\,MC}\) for \(MC < 12\%\); for \(MC \ge 12\%\), \(\phi_M = 0.684 - 0.0342\,MC\) if \(U \le 10\) km/h, else \(0.547 - 0.0228\,MC\). Clamp at ≥ 0.
@@ -316,15 +316,92 @@ Treat all fuel as cured grassland (true for most of Kansas in the dormant season
 
 ### 6.3 Arrival-time grid
 
-- Grid: 12 × 12 km centered on the event (shift the center 3 km downwind so the head fire stays in frame), 60 m cells (200 × 200).
+- Grid: square, sized so the fastest plausible run stays in frame (half-width ≥ 6 km), shifted toward the mean downwind side. 200 × 200 cells for a single run, 400 × 400 for the ensemble.
 - Elevation sampled from Terrarium tiles at zoom 12 and resampled to the grid; slope computed per neighbor step.
 - Ignition: cells within the event's detection footprint set to arrival time 0.
-- Propagation: Dijkstra over a 16-neighbor stencil. Edge cost = step distance ÷ \(R(\theta, s)\). Stop at 60 min (or the requested duration).
+- Propagation: Dijkstra over a 16-neighbor stencil. Edge cost = step distance ÷ \(R(\theta, s) \times\) fuel multiplier of the destination cell. Cells with multiplier 0 never burn. Stop at 60 min (or the requested duration).
 - Isochrones every 5 min: threshold the arrival grid, trace contours (`skimage.measure.find_contours` or `contourpy`), convert grid coordinates to lon/lat, simplify to ~20 m tolerance.
 - Impacts: intersect each isochrone with towns, lines, and substations (`shapely`); report the first minute each asset is reached.
 - Performance target: < 500 ms per call. Cache by `(event_id, wind_kmh rounded to 2, wind_dir rounded to 5°)`.
 
 Sanity tests: zero wind on flat ground produces near-circular isochrones; doubling wind lengthens the head run; flipping wind direction mirrors the shape.
+
+### 6.4 Fuel map (`backend/app/sim/fuels.py`)
+
+- **Base layer:** NLCD 2021 land cover, 30 m, from the MRLC WCS, cached in `data/cache/nlcd/` as 15 km tiles (EPSG:5070).
+- **Cropland refinement:** where a USDA CDL tile has been prefetched (`python -m scripts.fetch_fuels`), NLCD cropland is split into winter wheat, row-crop residue and fallow. CDL is never fetched during a forecast: its service is slow and often returns 502.
+- **Multipliers** relative to cured natural grass, by season (dormant Nov–Apr / growing May–Jul / late Aug–Oct). These are planning assumptions, not measured values:
+
+| Class | Dormant | Growing | Late |
+|---|---|---|---|
+| Grass, pasture, CRP | 1.0 | 1.0 | 1.0 |
+| Shrub and sand sage | 0.9 | 0.9 | 0.9 |
+| Cropland, unrefined | 0.3 | 0.3 | 0.3 |
+| Winter wheat | 0.15 | 0.6 | 0.3 |
+| Row-crop residue | 0.4 | 0.1 | 0.3 |
+| Fallow | 0.25 | 0.25 | 0.25 |
+| Trees | 0.5 | 0.5 | 0.5 |
+| Wetland | 0.4 | 0.3 | 0.4 |
+| Roads, open developed | 0.3 | 0.3 | 0.3 |
+| Town | 0.05 | 0.05 | 0.05 |
+| Water, barren | 0 | 0 | 0 |
+
+- Each grid cell averages 3 × 3 land-cover samples.
+- Neither dataset separates CRP from grazed range, so all grass is treated as ungrazed (the worst case).
+- A 1-cell (100–200 m) gap can still be crossed by the stencil's knight moves, which roughly stands in for spotting across roads and creeks on a windy day.
+- If tiles are unavailable, the missing area is assumed to be grass, and `assumptions.fuel` says so.
+
+### 6.5 Changing weather and new ignitions
+
+- Weather is a series of hourly (or finer) values. Rates are recomputed every 10 minutes from the weather interpolated at the middle of the block, so a wind shift turns a flank into a new head.
+- **New point ignition** (`fire_age_min = 0`, e.g. a line fault): the fire accelerates toward its equilibrium rate, \(R(t) = R\,(1 - e^{-0.115\,t})\), with t in minutes (Canadian FBP open fuels). At 15 minutes the head has run about half as far as an established fire's.
+- **Established fire** (`fire_age_min = None`, e.g. first seen by satellite): it spreads at the full rate from the start.
+
+### 6.6 Ensemble forecast (`backend/app/sim/ensemble.py`)
+
+- 24 members on one domain. Each member scales the whole weather series by:
+  - a wind-speed factor (lognormal, σ 0.15)
+  - a direction offset (σ 15°)
+  - an RH offset (σ 3 pts)
+  - a fuel-load factor (lognormal, σ 0.15)
+  
+  Member 0 is unperturbed. The seed is fixed, so results are reproducible.
+- These spreads are assumptions sized to typical hourly forecast error, not calibrated values.
+- Outputs:
+  - `isochrones`: median arrival
+  - `isochrones_early`: 10th-percentile arrival, i.e. "could be there this soon"
+  - `probability`: burned-by-end outlines at 10/50/90 % of members
+  - `checkpoints`: area and head distance at 15/30/60/90/120 min as p10/p50/p90
+  - `impacts`: per asset, the probability of being reached and arrival p10/p50/p90
+  - `fuel_mix`
+  - `provenance`: every input labeled observed / forecast / inferred / simulated / assumed
+- Runtime is about 0.7 s for 24 members at 400 × 400.
+
+### 6.7 Situation contract (`backend/app/situation.py`)
+
+The forecast and the recommendation layer read only a `Situation`, a pydantic model that ingestion fills in. Every block carries a `Provenance {source, kind, as_of}`.
+
+| Field | Required | Fallback |
+|---|---|---|
+| `ignition {lat, lon, time, points?, fire_age_min}` | yes | |
+| `weather {hours: [{time, wind_kmh, wind_from_deg, temp_c, rh_pct, gust_kmh?}]}` | yes | `from_open_meteo()` builds it from Open-Meteo |
+| `curing {pct}` | no | seasonal table (assumed) |
+| `red_flag` | no | unknown |
+| `burn_permits [{id, lat, lon, acres, start, end, status}]` | no | none |
+| `resources [{id, name, kind, lat, lon, crew, available, ready_min}]` | no | none |
+| `use_fuel_map`, `use_terrain` | no | true |
+
+API:
+- `GET /api/scenarios`
+- `GET /api/scenarios/{slug}`
+- `GET /api/scenarios/{slug}/forecast?minutes=120&members=24`
+- `POST /api/forecast`, with a `Situation` as the JSON body
+
+Scenarios live in `backend/data/scenarios/`:
+- `cottonwood-creek` is the packet scenario, placed at Coldwater, KS.
+- `cottonwood-creek-front` is a what-if in which a cold front swings the wind to the northwest at 4 pm.
+
+Both are labeled synthetic.
 
 ## 7. API contract
 

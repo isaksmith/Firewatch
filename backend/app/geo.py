@@ -48,3 +48,9 @@ def point_segment_km(lat: float, lon: float, a: tuple[float, float], b: tuple[fl
     t = 0.0 if seg2 == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / seg2))
     cx, cy = ax + t * dx, ay + t * dy
     return math.hypot(cx - px, cy - py)
+
+
+def angle_diff(a: float, b: float) -> float:
+    """Signed smallest difference b - a between two bearings, in (-180, 180]."""
+    d = (b - a) % 360
+    return d - 360 if d > 180 else d

@@ -14,7 +14,9 @@ from .db import connect, init_db, iso, loads, parse_iso, utcnow
 from .fire_weather import default_curing, gfdi_band
 from .layers import LAYER_NAMES, load_layer, nearest_assets
 from .pipeline import poll_firms_once
+from .sim.ensemble import forecast
 from .sim.spread import SpreadInput, simulate
+from .situation import Situation, list_scenarios, load_scenario
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("firewatch")
@@ -224,13 +226,51 @@ def simulate_alert(
             lat=ev["lat"], lon=ev["lon"], wind_kmh=key[2], wind_from_deg=key[3] % 360,
             temp_c=f.get("temp_c", 15.0), rh_pct=f.get("rh_pct", 50.0),
             curing_pct=f.get("curing_pct", default_curing(month)),
-            minutes=minutes, ignitions=[(r["lat"], r["lon"]) for r in dets],
+            minutes=minutes, ignitions=[(r["lat"], r["lon"]) for r in dets], use_fuel=True, month=month,
         ))
         result["event_id"] = event_id
         result["observed_wind"] = {"from_deg": round(observed_dir), "kmh": round(observed_wind, 1)}
         result["overridden"] = wind_kmh is not None or wind_from_deg is not None
         _sim_cache[key] = result
     return _sim_cache[key]
+
+
+def _public(result: dict) -> dict:
+    return {k: v for k, v in result.items() if not k.startswith("_")}
+
+
+@api.get("/scenarios")
+def get_scenarios():
+    return list_scenarios()
+
+
+@api.get("/scenarios/{slug}")
+def get_scenario(slug: str):
+    try:
+        meta, sit = load_scenario(slug)
+    except FileNotFoundError:
+        raise HTTPException(404, "unknown scenario")
+    return meta | {"slug": slug, "situation": sit.model_dump(mode="json")}
+
+
+_forecast_cache: dict[tuple, dict] = {}
+
+
+@api.get("/scenarios/{slug}/forecast")
+def scenario_forecast(slug: str, minutes: int = Query(120, ge=10, le=240), members: int = Query(24, ge=1, le=64)):
+    key = (slug, minutes, members)
+    if key not in _forecast_cache:
+        try:
+            _, sit = load_scenario(slug)
+        except FileNotFoundError:
+            raise HTTPException(404, "unknown scenario")
+        _forecast_cache[key] = _public(forecast(sit, minutes, members)) | {"scenario": slug}
+    return _forecast_cache[key]
+
+
+@api.post("/forecast")
+def forecast_situation(sit: Situation, minutes: int = Query(120, ge=10, le=240), members: int = Query(24, ge=1, le=64)):
+    return _public(forecast(sit, minutes, members))
 
 
 @api.get("/layers/{name}")

@@ -1,0 +1,319 @@
+{
+  "title": "Cottonwood Creek: line fault on a red-flag Tuesday",
+  "story": "Fictional district modeled on Clark, Comanche and Barber counties. A gust snaps a cross-arm on a 40-year-old line serving an oil lease 11 miles NW of the station; the line drops into CRP grass at 1:50 pm. South wind 30-40 mph, gusts past 55, RH 11%, 78 F, dormant grass.",
+  "synthetic": true,
+  "district": {
+    "name": "Cottonwood Creek Fire District",
+    "station": {
+      "name": "Station 1 (Coldwater)",
+      "lat": 37.2689,
+      "lon": -99.3268
+    },
+    "area_sq_mi": 450,
+    "volunteers": 18,
+    "weekday_available": 5
+  },
+  "placement_note": "Station placed at Coldwater, KS (Comanche County) so the real terrain and land cover are used; the district itself is fictional.",
+  "packet_timeline": [
+    {
+      "time": "13:50",
+      "minute": 0,
+      "event": "Line falls, grass ignites",
+      "who_knows": "Nobody"
+    },
+    {
+      "time": "14:17",
+      "minute": 27,
+      "event": "Driver sees smoke, no signal",
+      "who_knows": "Driver"
+    },
+    {
+      "time": "14:21",
+      "minute": 31,
+      "event": "911 call",
+      "who_knows": "Dispatch"
+    },
+    {
+      "time": "14:23",
+      "minute": 33,
+      "event": "District paged",
+      "who_knows": "District"
+    },
+    {
+      "time": "14:34",
+      "minute": 44,
+      "event": "Brush 1 rolls, two volunteers",
+      "who_knows": "District"
+    },
+    {
+      "time": "14:52",
+      "minute": 62,
+      "event": "Brush 1 on scene, fire 2 to 3 miles long",
+      "who_knows": "District"
+    },
+    {
+      "time": "15:05",
+      "minute": 75,
+      "event": "Tanker and Brush 2 on scene",
+      "who_knows": "District"
+    },
+    {
+      "time": "15:10",
+      "minute": 80,
+      "event": "Mutual aid requested, nearest 30 to 40 min out",
+      "who_knows": "County"
+    },
+    {
+      "time": "15:20",
+      "minute": 90,
+      "event": "State requested; aircraft hours away and wind-limited",
+      "who_knows": "State"
+    },
+    {
+      "time": "16:00",
+      "minute": 130,
+      "event": "Fire across two county roads; rancher discing ahead of it",
+      "who_knows": "Everyone"
+    }
+  ],
+  "situation": {
+    "ignition": {
+      "lat": 37.3821,
+      "lon": -99.4681,
+      "time": "2026-03-17T18:50:00Z",
+      "fire_age_min": 0,
+      "provenance": {
+        "source": "competitor packet (fictional scenario): downed line, 11 mi NW of station",
+        "kind": "simulated"
+      }
+    },
+    "weather": {
+      "hours": [
+        {
+          "time": "2026-03-17T17:00:00Z",
+          "wind_from_deg": 175,
+          "wind_kmh": 50,
+          "gust_kmh": 80,
+          "temp_c": 24.0,
+          "rh_pct": 14
+        },
+        {
+          "time": "2026-03-17T18:00:00Z",
+          "wind_from_deg": 180,
+          "wind_kmh": 56,
+          "gust_kmh": 88,
+          "temp_c": 25.5,
+          "rh_pct": 12
+        },
+        {
+          "time": "2026-03-17T19:00:00Z",
+          "wind_from_deg": 185,
+          "wind_kmh": 60,
+          "gust_kmh": 90,
+          "temp_c": 25.6,
+          "rh_pct": 11
+        },
+        {
+          "time": "2026-03-17T20:00:00Z",
+          "wind_from_deg": 185,
+          "wind_kmh": 61,
+          "gust_kmh": 92,
+          "temp_c": 25.6,
+          "rh_pct": 11
+        },
+        {
+          "time": "2026-03-17T21:00:00Z",
+          "wind_from_deg": 190,
+          "wind_kmh": 56,
+          "gust_kmh": 86,
+          "temp_c": 25.0,
+          "rh_pct": 12
+        },
+        {
+          "time": "2026-03-17T22:00:00Z",
+          "wind_from_deg": 195,
+          "wind_kmh": 50,
+          "gust_kmh": 77,
+          "temp_c": 23.9,
+          "rh_pct": 13
+        },
+        {
+          "time": "2026-03-17T23:00:00Z",
+          "wind_from_deg": 200,
+          "wind_kmh": 42,
+          "gust_kmh": 64,
+          "temp_c": 22.0,
+          "rh_pct": 16
+        }
+      ],
+      "provenance": {
+        "source": "competitor packet (fictional scenario): red flag day",
+        "kind": "simulated"
+      }
+    },
+    "curing": {
+      "pct": 98,
+      "provenance": {
+        "source": "competitor packet: dormant grass, no rain in 5 weeks",
+        "kind": "simulated"
+      }
+    },
+    "red_flag": true,
+    "burn_permits": [
+      {
+        "id": "permit-sat-1",
+        "lat": 37.384,
+        "lon": -99.585,
+        "acres": 160,
+        "start": "2026-03-14T15:00:00Z",
+        "end": "2026-03-14T23:00:00Z",
+        "status": "extinguished",
+        "provenance": {
+          "source": "competitor packet (fictional scenario)",
+          "kind": "simulated"
+        }
+      },
+      {
+        "id": "permit-sun-2",
+        "lat": 37.3,
+        "lon": -99.56,
+        "acres": 240,
+        "start": "2026-03-15T15:00:00Z",
+        "end": "2026-03-15T23:00:00Z",
+        "status": "extinguished",
+        "provenance": {
+          "source": "competitor packet (fictional scenario)",
+          "kind": "simulated"
+        }
+      }
+    ],
+    "resources": [
+      {
+        "id": "brush-1",
+        "name": "Brush 1",
+        "kind": "brush",
+        "lat": 37.2689,
+        "lon": -99.3268,
+        "crew": 2,
+        "ready_min": 11,
+        "available": true,
+        "provenance": {
+          "source": "competitor packet (fictional scenario)",
+          "kind": "simulated"
+        }
+      },
+      {
+        "id": "brush-2",
+        "name": "Brush 2 (military surplus)",
+        "kind": "brush",
+        "lat": 37.2689,
+        "lon": -99.3268,
+        "crew": 2,
+        "ready_min": 25,
+        "available": true,
+        "provenance": {
+          "source": "competitor packet (fictional scenario)",
+          "kind": "simulated"
+        }
+      },
+      {
+        "id": "tanker-1",
+        "name": "Tanker 1",
+        "kind": "tanker",
+        "lat": 37.2689,
+        "lon": -99.3268,
+        "crew": 1,
+        "ready_min": 25,
+        "available": true,
+        "provenance": {
+          "source": "competitor packet (fictional scenario)",
+          "kind": "simulated"
+        }
+      },
+      {
+        "id": "engine-1",
+        "name": "Engine 1 (structure)",
+        "kind": "engine",
+        "lat": 37.2689,
+        "lon": -99.3268,
+        "crew": 2,
+        "ready_min": 20,
+        "available": true,
+        "provenance": {
+          "source": "competitor packet (fictional scenario)",
+          "kind": "simulated"
+        }
+      },
+      {
+        "id": "lease-water",
+        "name": "Oil lease water truck",
+        "kind": "water_truck",
+        "lat": 37.392,
+        "lon": -99.42,
+        "crew": 1,
+        "ready_min": 5,
+        "available": true,
+        "provenance": {
+          "source": "competitor packet (fictional scenario)",
+          "kind": "simulated"
+        }
+      },
+      {
+        "id": "ranch-disc",
+        "name": "Rancher with disc (downwind)",
+        "kind": "disc",
+        "lat": 37.455,
+        "lon": -99.462,
+        "crew": 1,
+        "ready_min": 10,
+        "available": true,
+        "provenance": {
+          "source": "competitor packet (fictional scenario)",
+          "kind": "simulated"
+        }
+      },
+      {
+        "id": "ma-protection",
+        "name": "Mutual aid: Protection FD",
+        "kind": "brush",
+        "lat": 37.2006,
+        "lon": -99.4838,
+        "crew": 2,
+        "ready_min": 15,
+        "available": true,
+        "provenance": {
+          "source": "competitor packet (fictional scenario)",
+          "kind": "simulated"
+        }
+      },
+      {
+        "id": "ma-ashland",
+        "name": "Mutual aid: Ashland FD",
+        "kind": "brush",
+        "lat": 37.1886,
+        "lon": -99.7657,
+        "crew": 2,
+        "ready_min": 15,
+        "available": false,
+        "provenance": {
+          "source": "competitor packet (fictional scenario)",
+          "kind": "simulated"
+        }
+      },
+      {
+        "id": "state-air",
+        "name": "State single-engine air tanker",
+        "kind": "aircraft",
+        "lat": 38.0656,
+        "lon": -97.8606,
+        "crew": 2,
+        "ready_min": 60,
+        "available": true,
+        "provenance": {
+          "source": "competitor packet (fictional scenario)",
+          "kind": "simulated"
+        }
+      }
+    ]
+  }
+}
