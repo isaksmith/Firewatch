@@ -136,6 +136,13 @@ def test_route_inventory_is_allow_list():
     assert not any(p.startswith("/api/board/admin") for _, p in got)
 
 
+def test_schema_lists_only_the_board_routes():
+    """Catches a route added straight onto the public app, which the router walk above cannot see."""
+    from app import public_app
+    assert set(public_app.app.openapi()["paths"]) == {"/api/board/device", "/api/board/me", "/api/board/posts",
+                                                       "/api/board/posts/{post_id}/confirm", "/api/board/posts/{post_id}/station"}
+
+
 @pytest.mark.parametrize("path", ["/api/alerts", "/api/contacts", "/api/messages", "/api/members/pending",
                                   "/api/board/admin/posts", "/api/sms/inbound", "/api/scenarios", "/docs", "/openapi.json"])
 def test_other_paths_404(pub, path):
