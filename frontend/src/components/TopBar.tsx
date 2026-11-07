@@ -115,7 +115,7 @@ export function TopBar({
       <div className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden">
       <div className="flex shrink-0 items-center gap-2.5 text-text">
         <Mark size={16} />
-        <span className="num hidden text-[13px] font-semibold tracking-[0.28em] md:inline">FIREWATCH</span>
+        <span className="num hidden text-[13px] font-semibold tracking-[0.28em] 2xl:inline">FIREWATCH</span>
       </div>
       <Divider />
       <nav className="flex shrink-0 items-center gap-1">
@@ -146,7 +146,7 @@ export function TopBar({
           title={threeDSelected ? 'Open the 3D spread view for the selected alert' : 'Open the 3D spread view for the top alert. Select another alert first to see its own.'}
         >
           <Box size={12} /> 3D view
-          <span className="hidden text-[10px] font-normal tracking-normal text-muted 2xl:inline">{threeDSelected ? 'selected alert' : 'top alert'}</span>
+          <span className="hidden text-[10px] font-normal tracking-normal text-muted min-[1900px]:inline">{threeDSelected ? 'selected alert' : 'top alert'}</span>
         </Link>
       )}
       <span className="label hidden 2xl:inline">Kansas AOI · Confirmation Layer</span>
@@ -176,14 +176,14 @@ export function TopBar({
           aria-label={`Low data ${lowData ? 'on' : 'off'}`}
           title={`Low data ${lowData ? 'on' : 'off'}. Use less data: no map pictures, slower updates`}
         >
-          <Wifi size={11} /> <span className="hidden lg:inline">Low data {lowData ? 'on' : 'off'}</span>
+          <Wifi size={11} /> <span className="hidden xl:inline">Low data {lowData ? 'on' : 'off'}</span>
         </button>
         {onBurnLog && (
           <button onClick={onBurnLog} aria-pressed={burnOpen} aria-label="Burn log" title="Burn log" className={`btn !h-6 ${burnOpen ? '!border-text' : ''}`}>
             <ClipboardList size={11} /> <span className="hidden 2xl:inline">Burn log</span>
           </button>
         )}
-        <div className="hidden items-center gap-4 min-[1800px]:flex">
+        <div className="hidden items-center gap-4 min-[1900px]:flex">
           <Clock />
           <Divider />
           <label className="flex items-center gap-2">
@@ -224,20 +224,18 @@ export function TopBar({
             onClick={onRunScenario}
             disabled={scenarioRunning}
             aria-label={scenarioRunning ? 'Scenario running' : 'Run scenario'}
-            className="btn btn-danger !h-6"
+            className="btn btn-danger !h-8 !px-3.5 !text-[12.5px]"
           >
-            <Flame size={11} /> <span className="hidden 2xl:inline">{scenarioRunning ? 'Scenario running' : 'Run scenario'}</span>
+            <Flame size={14} /> {scenarioRunning ? 'Scenario running' : 'Run scenario'}
           </button>
         )}
         {mode === 'sample' && (
           <button
             onClick={() => replay.mutate()}
             disabled={replay.isPending || health.data?.replay_running}
-            aria-label={health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}
-            title={health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}
-            className="btn !h-6"
+            className="btn !h-8 !px-3.5 !text-[12.5px]"
           >
-            <Play size={11} /> <span className="hidden 2xl:inline">{health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}</span>
+            <Play size={14} /> {health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}
           </button>
         )}
         {mode === 'live' && (
