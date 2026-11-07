@@ -5,7 +5,7 @@ import { api, type SourceHealth } from '../api'
 import { setOperator, useOperator } from '../lib/operator'
 import { Mark } from './ui'
 
-const SOURCE_LABELS: Record<string, string> = { firms: 'FIRMS', open_meteo: 'WX' }
+const SOURCE_LABELS: Record<string, string> = { firms: 'FIRMS', open_meteo: 'WX', mesh: 'MESH' }
 
 const HEALTH_STYLE: Record<SourceHealth['status'], { dot: string; text: string }> = {
   ok: { dot: 'bg-ok', text: 'text-ok' },

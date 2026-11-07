@@ -12,7 +12,11 @@ BASE_RADIUS_KM = 2.0
 # Line faults and texted reports are located to a feeder section or a road, not a pixel.
 SIGNAL_RADIUS_KM = 3.0
 SIGNAL_WINDOW = timedelta(hours=6)
-LOCATING_SIGNALS = ("line_fault", "report", "camera_smoke")
+LOCATING_SIGNALS = ("line_fault", "report", "camera_smoke", "sensor_smoke")
+# A smoke sensor sits downwind of the fire, not on it: it joins events farther out and only places an event
+# when nothing else does.
+SENSOR_SIGNALS = ("sensor_smoke",)
+SENSOR_JOIN_KM = 8.0
 
 
 def match_radius_km(scan_km: float | None, track_km: float | None) -> float:
@@ -50,12 +54,15 @@ def assign_detection(conn: sqlite3.Connection, det_id: int) -> int:
     return event_id
 
 
-def signal_matches(conn: sqlite3.Connection, lat: float, lon: float, t, is_sample: int) -> set[int]:
-    """Open events with a locating signal within SIGNAL_RADIUS_KM and SIGNAL_WINDOW of (lat, lon, t)."""
-    dlat = SIGNAL_RADIUS_KM / KM_PER_DEG_LAT
-    dlon = SIGNAL_RADIUS_KM / km_per_deg_lon(lat)
+def signal_matches(
+    conn: sqlite3.Connection, lat: float, lon: float, t, is_sample: int, radius_km: float = SIGNAL_RADIUS_KM
+) -> set[int]:
+    """Open events with a locating signal within radius_km (SENSOR_JOIN_KM of a smoke sensor) and SIGNAL_WINDOW."""
+    reach = max(radius_km, SENSOR_JOIN_KM)
+    dlat = reach / KM_PER_DEG_LAT
+    dlon = reach / km_per_deg_lon(lat)
     rows = conn.execute(
-        "SELECT s.event_id, s.lat, s.lon FROM signals s JOIN events e ON e.id = s.event_id "
+        "SELECT s.event_id, s.kind, s.lat, s.lon FROM signals s JOIN events e ON e.id = s.event_id "
         f"WHERE e.status != 'closed' AND e.is_sample = ? AND s.kind IN ({','.join('?' * len(LOCATING_SIGNALS))}) "
         "AND s.observed_at BETWEEN ? AND ? AND s.lat BETWEEN ? AND ? AND s.lon BETWEEN ? AND ?",
         (
@@ -63,7 +70,10 @@ def signal_matches(conn: sqlite3.Connection, lat: float, lon: float, t, is_sampl
             lat - dlat, lat + dlat, lon - dlon, lon + dlon,
         ),
     ).fetchall()
-    return {r["event_id"] for r in rows if haversine_km(lat, lon, r["lat"], r["lon"]) <= SIGNAL_RADIUS_KM}
+    return {
+        r["event_id"] for r in rows
+        if haversine_km(lat, lon, r["lat"], r["lon"]) <= (reach if r["kind"] in SENSOR_SIGNALS else radius_km)
+    }
 
 
 def join_or_create(conn: sqlite3.Connection, matched: list[int], lat: float, lon: float, at: str, is_sample: int) -> int:
@@ -95,7 +105,8 @@ def refresh_event_geometry(conn: sqlite3.Connection, event_id: int) -> None:
         weights = [max(r["frp_mw"] or 0.0, 1.0) for r in rows]
         points = [(r["lat"], r["lon"]) for r in rows]
     else:
-        points = [(s["lat"], s["lon"]) for s in signals if s["kind"] in LOCATING_SIGNALS]
+        points = [(s["lat"], s["lon"]) for s in signals if s["kind"] in LOCATING_SIGNALS and s["kind"] not in SENSOR_SIGNALS]
+        points = points or [(s["lat"], s["lon"]) for s in signals if s["kind"] in SENSOR_SIGNALS]
         weights = [1.0] * len(points)
     if not points:
         return

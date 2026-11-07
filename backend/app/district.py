@@ -61,14 +61,16 @@ def sync_roster(conn: sqlite3.Connection, slug: str | None = None) -> int:
     with path.open(newline="") as f:
         for row in csv.DictReader(f):
             conn.execute(
-                "INSERT INTO contacts(name, phone, role, lat, lon, weekday_avail, ladder_rank) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(phone) DO UPDATE SET name = excluded.name, "
+                "INSERT INTO contacts(name, phone, role, lat, lon, weekday_avail, ladder_rank, mesh_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(phone) DO UPDATE SET name = excluded.name, "
                 "role = excluded.role, lat = excluded.lat, lon = excluded.lon, "
-                "weekday_avail = excluded.weekday_avail, ladder_rank = excluded.ladder_rank, registered = 1",
+                "weekday_avail = excluded.weekday_avail, ladder_rank = excluded.ladder_rank, "
+                "mesh_id = excluded.mesh_id, registered = 1",
                 (
                     row["name"], row["phone"], row["role"],
                     float(row["lat"]) if row["lat"] else None, float(row["lon"]) if row["lon"] else None,
                     int(row["weekday_avail"] or 0), int(row["ladder_rank"]) if row["ladder_rank"] else None,
+                    (row.get("mesh_id") or "").strip().lower() or None,
                 ),
             )
             n += 1

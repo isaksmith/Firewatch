@@ -1,0 +1,237 @@
+FIREWATCH: MESH AND SENSOR HARDWARE PRICING
+Prepared Friday, November 6, 2026. Rough figures from public retail and
+distributor listings, not vendor quotes. Prices exclude sales tax.
+
+
+1. SUMMARY
+
+- One tower node (mesh relay with smoke, temperature, and humidity sensors)
+  costs about $157 in parts.
+- A county needs six nodes, a station radio, and one optional duty-officer
+  radio: about $1,040 in hardware, or about $1,140 with 10% spares. There are
+  no monthly fees. The target was under $1,500.
+- With the Kansas Forest Service Volunteer Fire Assistance grant (50/50 cost
+  share) and a joint purchase across counties, the district's own share is
+  about $450-550.
+- Six nodes cover roughly 300-600 sq mi with mesh radio, the whole district
+  with local temperature and humidity, and about 20-60 sq mi a day with smoke
+  detection (the downwind side of the six highest-risk spots).
+- Dryad Networks' Silvanet sensor is cheaper per unit (about EUR 48) but is a
+  different device: a 100 m gas sniffer that needs EUR 371 gateways for range.
+  Covering a 450 sq mi district at Dryad's density would cost about
+  EUR 1.2 million plus about EUR 180,000 a year.
+
+
+2. ONE TOWER NODE
+
+  Part                                                    Approx. cost
+  ------------------------------------------------------  ------------
+  RAK WisBlock starter kit: RAK19007 base board (solar         $35
+    charger built in) + RAK4631 core (nRF52840, SX1262
+    LoRa radio at 22 dBm), bought from a US distributor
+  Weatherproof junction box + 2-3 W, 6 V solar panel           $25
+  Two 18650 lithium cells                                      $10
+  Outdoor 915 MHz fiberglass antenna (5.8 dBi) + short         $27
+    low-loss pigtail
+  RAK12039 particulate sensor (Plantower PMSA003I, I2C,        $38
+    plugs into the base board)
+  RAK1901 temperature and humidity sensor (SHTC3)               $9
+  Vented radiation shield (stacked plant saucers)               $5
+  Mount, cable, wiring                                          $8
+                                                          ------------
+  Total                                                       ~$157
+
+  Variants:
+  - Temperature and humidity only (no particulate sensor):     ~$119
+  - Relay only (no sensors, radio range only):                 ~$105
+  - Same node with an off-the-shelf solar enclosure ($50)
+    and a commercial radiation shield ($18):                   ~$195
+
+  Why the shield matters: a particulate sensor sealed inside the box measures
+  nothing, and temperature and humidity read inside a sunlit box come out too
+  hot and too dry. The shield keeps the sensors in shaded, moving air.
+
+
+3. ONE COUNTY
+
+  Item                                                    Approx. cost
+  ------------------------------------------------------  ------------
+  6 tower nodes at ~$157                                       $942
+  Station radio (RAK kit + small antenna, USB-powered           $45
+    from the station PC)
+  One duty-officer radio, SenseCAP T1000-E (optional)           $51
+                                                          ------------
+  Hardware total                                            ~$1,040
+  With 10% spares                                           ~$1,140
+  Monthly fees                                                   $0
+
+  Volunteers need no new hardware; SMS still reaches them. The cloud server
+  and SMS are a separate operating cost (about $300-500 a year, or $0 if the
+  Kansas Forest Service hosts one server for every district).
+
+
+4. WHAT THE MONEY COVERS
+
+  Coverage                     Per node                  Six nodes
+  ---------------------------  ------------------------  -----------------
+  Mesh radio, tower to a       ~5-10 km radius           ~300-600 sq mi
+    handheld on the ground       (~30-120 sq mi)           after overlap
+  Temperature and humidity     ~15 km radius             The whole district
+  Smoke                        ~3-5 km, downwind only    ~20-60 sq mi a day
+
+  Radio: antennas 30-40 m up on elevators and water towers reach each other
+  20-30 km apart; a ground-level handheld is the weak link. Creek bottoms and
+  rolling Flint Hills ground will leave dead spots. Model the tower sites in
+  the Meshtastic Site Planner and drive-test one node before buying six.
+
+  Weather: humidity and temperature change slowly over open grass. Firewatch
+  uses a sensor's reading for any live event within 15 km, in place of the
+  gridded forecast. This decides whether a line fault counts as a fire, and
+  is probably the most dependable thing the sensors do.
+
+  Smoke: a particulate sensor only reacts when the plume passes over it. On a
+  windy day a grass-fire plume is a narrow band, so a sensor catches fires
+  roughly 3-5 km upwind of it. Placed just north of the riskiest feeders and
+  towns (fire-weather winds in Kansas are mostly south and southwest), the
+  six sensors watch where fires most often start. Paired with a line fault,
+  a smoke reading pages the duty officer without anyone driving out. For
+  comparison, a phase 3 camera sees smoke 10-15 miles out (300+ sq mi) but
+  costs $1,500-4,000 per node plus a monthly data fee.
+
+
+5. COMPARISON: DRYAD NETWORKS SILVANET (dryad.net)
+
+  Dryad does not publish prices on its website; it sells on quotes. The
+  figures below are the most recent public ones found, from 2023.
+
+  Silvanet part      Price                      What it does
+  -----------------  -------------------------  -----------------------------
+  Wildfire sensor    EUR 48 list (a Sicilian    Bosch BME688 gas sensor;
+                     town reported EUR 100,     detects a smoldering fire
+                     likely installed)          within 80-100 m; radio
+                                                reaches ~1 km (14 dBm,
+                                                built-in antenna)
+  Mesh gateway       EUR 371                    Relays for up to 100 sensors;
+                                                gateways 2-6 km apart
+  Border gateway     EUR 549                    Cellular or satellite link to
+                                                the cloud; up to 20 mesh
+                                                gateways
+  Service            15% a year                 Maintenance and cloud platform
+
+  Dryad's investor materials put the sensor's hardware cost at about EUR 30.
+
+  Why their sensor is cheaper:
+  a) It is a sensor, not a relay. Range comes from the separately priced
+     gateways. Firewatch's node does both jobs; Dryad's closest equivalent
+     is a gateway plus a sensor, about EUR 420.
+  b) One gas chip, a few dollars, about 4 mA, measures temperature,
+     humidity, pressure, and gases. Our particulate sensor costs $38 and its
+     fan draws 60-120 mA.
+  c) No battery. The low draw lets a small solar cell and supercapacitors
+     run it. A relay that is always listening can't get through a Kansas
+     winter night on supercapacitors.
+  d) A custom single board in a molded case, built by the hundreds of
+     thousands.
+
+  A 450 sq mi district at Dryad's average density (0.2 sensors per hectare):
+
+    116,500 hectares x 0.2  = ~23,300 sensors x EUR 48  = ~EUR 1,120,000
+    ~233 mesh gateways x EUR 371                        =    ~EUR 86,000
+    ~12 border gateways x EUR 549                       =     ~EUR 6,600
+                                                          ---------------
+                                                          ~EUR 1,210,000
+    plus 15% a year                                     ~EUR 180,000/yr
+
+  Silvanet is sized for forests, where every 100 m matters and air is still
+  under the canopy. In open grass with a 25 mph wind, a gas chip would only
+  notice a fire very close by.
+
+  Not copied from Dryad: replacing the particulate sensor with the gas chip
+  would save about $30 a node and solve the fan's power draw, but it gives up
+  the one sensor that notices smoke kilometers away, and Meshtastic reports
+  only a raw gas reading from that chip, not Dryad's trained fire detection.
+
+
+6. WAYS TO LOWER THE COST WITHOUT LOWERING QUALITY
+
+  Lever                                    Effect on the district's cost
+  ---------------------------------------  ----------------------------------
+  Volunteer Fire Assistance grant          Halves it: ~$1,040 -> ~$520
+  Electric co-op pays for nodes near its   Up to the full cost of those nodes
+    lines
+  Mount at co-op substations               ~$25-35 less per node
+  Several counties, or the Kansas Forest   ~5-10% on parts; spares drop from
+    Service, buy together                    10% per county to ~3% shared
+  Buy tax-exempt                           Avoids ~8-9% sales tax
+  Volunteer or Forest Service assembly     No labor cost
+
+  Volunteer Fire Assistance grant. Administered by the Kansas Forest Service
+  with US Forest Service funds, for departments protecting areas under 10,000
+  people. 50/50 cost share; communications equipment is a stated priority.
+  Purchases dated before the application are not reimbursed. The 2027 window
+  is May 1 - June 15, 2027: apply first, buy after.
+
+  Electric co-op. Line-caused ignitions are the co-op's liability, and a
+  wildfire mitigation plan is the natural place to fund sensors on its
+  feeders. The plan already asks the co-op for the line-fault feed.
+
+  Substations. Mains power replaces the solar panel; keep the batteries as
+  backup. This improves the node: it stays up through cloudy weeks, and runs
+  on battery through the outage that a line fault causes.
+
+  Joint purchase. One order, one shared spare-parts pool, one person flashing
+  firmware.
+
+  Sales tax. Fire districts are usually exempt as local government bodies;
+  check with the county clerk.
+
+  Bulk buying alone saves little at this scale. These modules already sell
+  near volume pricing: one distributor lists the RAK1901 at $8.25 for 1 and
+  $7.59 for 1,000, and the RAK4631 at $35.49 for 1 and $32.65 for 1,000.
+
+  Stacked together (grant, joint purchase, shared spares), a county's own
+  cost is roughly $450-550. Nodes the co-op pays for come off that.
+
+  Statewide option. All 105 Kansas counties at six nodes each is about 630
+  nodes. That could justify one custom board built on RAK's pre-certified
+  RAK4630 radio module, which avoids a full FCC certification. A guess:
+  $80-100 a node with the same radio, antenna, and range. It takes one-time
+  engineering and would be a Kansas Forest Service project, not a county one.
+
+  Keep spending on: the outdoor antenna, the cable, the radiation shield, and
+  good battery cells. They set the range and keep the readings accurate, and
+  replacing one costs a trip up the tower.
+
+
+7. OPEN RISKS
+
+- Power. The particulate sensor's fan draws more than a small panel supplies
+  running nonstop. Whether Meshtastic firmware sleeps the fan between
+  readings is unverified. Check it on one node through a cloudy week before
+  buying six.
+- Homemade enclosure and shield. Cheap, but a tower visit to fix one costs
+  more than the parts saved. Build one and leave it out in weather first.
+- Particulate sensor sourcing. Meshtastic reads the I2C version (PMSA003I).
+  The cheaper serial version (about $19) is not supported as far as we can
+  tell. The bare I2C module is quote-only from distributors.
+- Tariffs and shipping. Buying direct from RAK (China) adds a 25% import
+  tariff plus shipping; US distributors price that in.
+- Range figures are estimates for flat to rolling ground, not measurements.
+
+
+8. SOURCES
+
+- Dryad Networks: https://www.dryad.net/
+- Dryad sensor ranges: https://docs.dryad.app/dryad-documentation/site-planning/planning-guidelines/sensor-ranges-ratios
+- Dryad sensor and gateway ratios: https://www.dryad.net/faq/how-many-sensors-mesh-gateways-border-gateways-are-needed-to-cover-a-forest
+- Silvanet prices (sensor EUR 48, mesh gateway EUR 371, border gateway EUR 549): https://blog.st.com/silvanet/
+- Dryad business model (15% annual service fee): https://www.swisskrono.com/fileadmin/user_upload/Germany/Wood_Innovation_Day/Dryad_Networks_Carsten_Brinkschulte_wood_innovation_day2023_success_stories.pdf
+- Dryad hardware cost (investor listing): https://startup.network/projects/435555.html
+- Troina, Sicily deployment (EUR 100 per sensor): https://www.dryad.net/post/silvanet-sensors-transform-sicilian-town-s-firefighting-efforts
+- RAK WisBlock starter kit: https://store.rakwireless.com/products/wisblock-starter-kit
+- RAK volume pricing (distributor): https://shengyuic.com/manufacturers/RAKwireless-Technology-Limited/1753.html?pn=2
+- RAK US distributor and tariff note: https://store.rokland.com/products/rak-wireless-wisblock-base-board-2nd-gen-rak19007-ver-b-pid-110082
+- RAK12039 PMSA003I: https://store.rokland.com/en-de/products/particle-matter-sensor-plantower-pmsa003i-rak12039
+- Plantower PMSA003-A (serial version): https://www.pese.co/product-detail/PMSA003-A
+- Kansas Volunteer Fire Assistance: https://www.kansasforests.org/programs/vfa.html
+- VFA 50/50 cost share: https://www.rfdtv.com/kansas-forest-service-is-giving-back-to-the-volunteer-fire-departments-that-are-keeping-rural-america-safe
