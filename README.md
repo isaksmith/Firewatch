@@ -16,6 +16,54 @@ In the challenge scenario (Cottonwood Creek Fire District: 450 sq mi, 18 volunte
 
 Humans decide every page. Every signal, text, and decision is logged on the event.
 
+```mermaid
+flowchart LR
+  subgraph Detect
+    LF["Co-op line fault<br/>(lockout, High fire danger)"]
+    SAT["Satellite hotspot<br/>VIIRS / MODIS / GOES"]
+    TXT["Texted report<br/>FIRE"]
+  end
+
+  subgraph Confirm
+    EV["One event per fire<br/>(3 km / 6 h)"]
+    ML["ML score + guardrails"]
+    BURN{"Registered burn,<br/>not escaped?"}
+    LVL{"Independent<br/>sources"}
+    ASK["Ask 3 nearest neighbors<br/>1 smoke · 2 no · 3 my burn"]
+  end
+
+  subgraph Respond
+    MON["Monitor<br/>texts nobody"]
+    FYI["Investigate<br/>duty officer FYI"]
+    ESC["Escalate<br/>duty officer: Reply PAGE"]
+    LAD["No answer:<br/>chief at 3 min, dispatch at 9 min"]
+    PAGE["PAGE<br/>county dispatch + volunteers"]
+    DW["Downwind ranchers:<br/>arrival estimate"]
+    EQ["Water truck / disc:<br/>can you help?"]
+    MA["Mutual aid draft<br/>chief replies SEND"]
+  end
+
+  LF --> EV
+  SAT --> EV
+  TXT --> EV
+  SAT --> ML --> EV
+  EV --> BURN
+  BURN -- yes --> MON
+  BURN -- no --> LVL
+  LVL -- none --> MON
+  LVL -- one --> FYI
+  FYI --> ASK
+  ASK -- "reply 1" --> EV
+  LVL -- "two, or strong satellite" --> ESC
+  ESC -.-> LAD
+  ESC -- "duty officer replies PAGE" --> PAGE
+  PAGE --> DW
+  PAGE --> EQ
+  PAGE -- "too big for 2 trucks,<br/>or under 2 responding" --> MA
+```
+
+In the Cottonwood Creek replay this chain pages at T+9 instead of today's 911 call at T+31. The first truck arrives at T+40 to about 220 acres instead of 520 at T+62 (spread model estimate, not field data).
+
 **Status:** the satellite path (ingest, clustering, enrichment, ML scoring, map, 3D spread, logged actions) is built and evaluated on real Kansas data. The whole chain also runs end to end in the **Cottonwood Creek replay**: line fault, neighbor texts, two-source confirmation, PAGE by text, downwind warnings with arrival estimates, mutual aid, and a registered burn that texts nobody. Texts go to a simulated outbox. Twilio sending is written but not yet tried on a real phone. The plan, honest cost numbers, and failure modes are in [docs/PLAN.md](docs/PLAN.md).
 
 ## Docs
@@ -73,6 +121,41 @@ The Vite dev server proxies `/api` to `http://127.0.0.1:8000` (override with `AP
 
 On macOS, XGBoost needs OpenMP: `brew install libomp`.
 
+### Mesh radios (Meshtastic)
+
+Firewatch can send its texts over a Meshtastic LoRa mesh, for volunteers and trucks out of cell coverage, and take replies and GPS positions back. It's built for the SenseCAP T1000-E, but any Meshtastic radio works. See [DESIGN.md section 5.7](docs/DESIGN.md#57-mesh-radios-meshtastic).
+
+1. On each radio, use the Meshtastic phone app to set the LoRa region to **US** and put both radios on the same primary channel. A real district would use a private channel with its own key. On the field radio, shorten the position broadcast interval so the map stays current.
+2. Plug the station radio into the server with its USB cable. Run `backend/.venv/bin/meshtastic --info` to confirm it's connected and read its node ID. Keep phones off the station radio while the server is using it.
+3. Put the field radio's node ID (`!a1b2c3d4`, shown in the Meshtastic app) in the `mesh_id` column of `backend/data/districts/cottonwood-creek/roster.csv`, on the row of whoever carries it. For the demo, use the duty officer. The radio also appears at `GET /api/mesh/nodes` once the station has heard it.
+4. Set `MESH_GATEWAY=serial` in `.env` (and `MESH_DEVICE=/dev/cu.usbmodem…` if the server has more than one serial device), then restart the backend. **MESH** appears in the top bar.
+5. Run the scenario. The field radio buzzes with the duty officer's texts. Reply `PAGE` in the Meshtastic app's direct-message thread from the station radio. Each mesh text in the drawer shows **DELIVERED** once that radio acknowledges it.
+
+### Tower sensor nodes (temperature, humidity, smoke)
+
+Mesh relays on elevators and water towers can report temperature, humidity, and PM2.5/PM10, and raise a smoke-sensor signal. See [DESIGN.md section 5.8](docs/DESIGN.md#58-tower-sensor-nodes). Rough parts list per node:
+
+| Part | ~Cost |
+|---|---|
+| RAK WisBlock starter kit (RAK19007 base with solar charger + RAK4631 nRF52840/LoRa core), from a US distributor | $35 |
+| Weatherproof junction box + 2–3 W, 6 V solar panel | $25 |
+| Two 18650 cells | $10 |
+| Outdoor 915 MHz antenna + pigtail adapter | $27 |
+| RAK12039 particulate sensor (Plantower PMSA003I, I²C; Meshtastic doesn't read the cheaper serial version) | $38 |
+| RAK1901 temperature/humidity sensor (SHTC3) | $9 |
+| Vented radiation shield for the sensors (they can't sit inside the sealed box) | $5 |
+| Mount, cable, wiring | $8 |
+| **Per node** | **~$157** |
+
+A county: 6 nodes ($942) + a station radio (~$45) + an optional duty-officer T1000-E ($51) ≈ **$1,040**, about $1,140 with spares. No monthly fees. Costs, coverage, grants, and a comparison with Dryad Silvanet are in [docs/research/hardware-pricing.txt](docs/research/hardware-pricing.txt).
+
+1. Flash Meshtastic, set region **US** and the district's channel, role **Router**.
+2. Enable telemetry: environment metrics and air quality, both on a 5-minute interval.
+3. Set a **fixed position** at the tower's coordinates. Without one, the node's readings are stored but it raises no smoke signals.
+4. Mount the sensors in the shield, facing open air, with the antenna as high as the structure allows.
+
+The map shows each node's latest PM2.5, °C, and RH. Thresholds are in `backend/data/districts/<district>/settings.json` (`smoke_pm25_rise`, `smoke_fine_ratio`, `smoke_regional_share`, `smoke_repeat_min`).
+
 ### Map layers and the scorer
 
 `backend/data/layers/` holds real Kansas data: transmission lines ≥ 115 kV, transmission substations, and towns from OpenStreetMap (counties from Census boundaries), plus persistent industrial heat sources derived from ten years of FIRMS detections. `backend/data/model/` holds the trained scorer. Both are committed, so the app runs without rebuilding them. To rebuild:
@@ -103,6 +186,8 @@ Results are in [backend/ml/report.md](backend/ml/report.md); the full analysis o
 | `backend/app/situation.py` | `Situation` contract between ingestion and forecast/recommendations; builds one from a scenario |
 | `backend/app/signals.py`, `confirm.py` | Line faults and texted reports on events; the two-source level rules and burn registry |
 | `backend/app/notify.py` | SMS gateway (outbox / Twilio), templates, neighbor asks, no-answer ladder, PAGE / NO / SEND, downwind warnings, mutual aid, inbound keywords |
+| `backend/app/mesh.py` | Meshtastic bridge: texts out as acknowledged direct messages, replies in, radio positions and crew distances |
+| `backend/app/sensors.py` | Tower sensor telemetry: readings, the smoke rule (baseline, dust check, regional check), local temperature and humidity |
 | `backend/app/scenario.py` | Scenario replay on its own clock |
 | `backend/app/main.py` | FastAPI routes: alerts, actions, decisions, signals, SMS, simulate, layers, district, scenario, health, sample replay |
 | `frontend/src/pages/Dashboard.tsx` | Alert list, map, detail drawer, actions, scenario strip |

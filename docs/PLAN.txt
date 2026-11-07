@@ -114,7 +114,11 @@ a rancher who answers. Section 8 says how we'd test both.
 |                                                | (works on one bar, carrier store-and-forward). |
 |                                                | Replies are single digits or one word. The web |
 |                                                | console is for the station and county, never   |
-|                                                | required in the field.                         |
+|                                                | required in the field. Where there is no bar,  |
+|                                                | volunteers and trucks can carry a $51          |
+|                                                | Meshtastic LoRa radio that gets the same texts |
+|                                                | and replies with a delivery receipt (section   |
+|                                                | 4.3).                                          |
 +------------------------------------------------+------------------------------------------------+
 | Power                                          | Phase 1 puts no hardware in the district: the  |
 |                                                | server runs in the cloud, the district needs   |
@@ -246,6 +250,52 @@ decision is logged on the event. That log is the audit trail and the training da
 |                  |                  |                  |                  | but can't page   |
 |                  |                  |                  |                  | alone.           |
 +------------------+------------------+------------------+------------------+------------------+
+| Mesh radio       | Human speed      | ~$51 per radio,  | No cell needed;  | FIRE from a      |
+| reports          |                  | no per-message   | LoRa range ~2–5  | Meshtastic radio |
+|                  |                  | cost             | km per hop       | (SenseCAP        |
+|                  |                  |                  |                  | T1000-E) is      |
+|                  |                  |                  |                  | located at the   |
+|                  |                  |                  |                  | radio's GPS fix, |
+|                  |                  |                  |                  | so a volunteer   |
+|                  |                  |                  |                  | or lease truck   |
+|                  |                  |                  |                  | can report from  |
+|                  |                  |                  |                  | where they       |
+|                  |                  |                  |                  | stand.           |
++------------------+------------------+------------------+------------------+------------------+
+| Smoke and        | 5 min (one       | ~$157 per node,  | No cell needed;  | Six solar mesh   |
+| weather sensors  | reading per      | no monthly fee   | readings ride    | relays on        |
+| on tower relays  | node)            |                  | the mesh         | elevators and    |
+|                  |                  |                  |                  | water towers     |
+|                  |                  |                  |                  | each carry a     |
+|                  |                  |                  |                  | particulate      |
+|                  |                  |                  |                  | (PM2.5/PM10)     |
+|                  |                  |                  |                  | sensor and a     |
+|                  |                  |                  |                  | temperature and  |
+|                  |                  |                  |                  | humidity sensor. |
+|                  |                  |                  |                  | Placed downwind  |
+|                  |                  |                  |                  | (north) of the   |
+|                  |                  |                  |                  | highest-risk     |
+|                  |                  |                  |                  | feeders and      |
+|                  |                  |                  |                  | towns. A smoke   |
+|                  |                  |                  |                  | jump counts as   |
+|                  |                  |                  |                  | one signal, so   |
+|                  |                  |                  |                  | it pairs with a  |
+|                  |                  |                  |                  | line fault to    |
+|                  |                  |                  |                  | page without     |
+|                  |                  |                  |                  | sending anyone.  |
+|                  |                  |                  |                  | The humidity     |
+|                  |                  |                  |                  | reading replaces |
+|                  |                  |                  |                  | the gridded      |
+|                  |                  |                  |                  | forecast near    |
+|                  |                  |                  |                  | the event. Six   |
+|                  |                  |                  |                  | point sensors    |
+|                  |                  |                  |                  | won't smell      |
+|                  |                  |                  |                  | every fire in    |
+|                  |                  |                  |                  | the district;    |
+|                  |                  |                  |                  | they cover the   |
+|                  |                  |                  |                  | spots where      |
+|                  |                  |                  |                  | fires start.     |
++------------------+------------------+------------------+------------------+------------------+
 | Burn notices     | Before the burn  | Same             | Yes              | Keyword BURN     |
 |                  |                  |                  |                  | registers a burn |
 |                  |                  |                  |                  | area and day.    |
@@ -288,12 +338,12 @@ satellite evidence (section 11).
 | Escalate    | Two independent signals agree (any two  | Duty officer gets a PAGE / NO text      |
 |             | of: satellite score ≥ 40, line fault on |                                         |
 |             | a fire-weather day, texted report,      |                                         |
-|             | neighbor reply "1", camera smoke), or   |                                         |
-|             | satellite score ≥ 70                    |                                         |
+|             | neighbor reply "1", camera smoke, smoke |                                         |
+|             | sensor), or satellite score ≥ 70        |                                         |
 +-------------+-----------------------------------------+-----------------------------------------+
 | Investigate | Any one signal: satellite score ≥ 40,   | Duty officer gets an FYI text;          |
 |             | line fault with fire danger High or     | Firewatch asks the neighbors            |
-|             | above, a texted report                  |                                         |
+|             | above, a texted report, a smoke sensor  |                                         |
 +-------------+-----------------------------------------+-----------------------------------------+
 | Monitor     | Anything else, including a detection    | Nobody; shown on the console and in an  |
 |             | inside a registered burn on its day     | optional evening digest                 |
@@ -307,6 +357,13 @@ Ask the neighbor is the cheapest confirmation there is. At Investigate, Firewatc
 signed-up contacts within 3 miles: "Firewatch: possible fire near Rd 40 & Hwy 177. See smoke? Reply
 1 yes, 2 no, 3 it's my burn." People who are already there answer in minutes, and nobody drives out.
 "3" from the registered burner's own number drops the event to Monitor.
+
+Smoke sensors, and their two false alarms: a sensor raises a signal when PM2.5 climbs at least 50
+µg/m³ over that node's own 3-hour median. Wind-blown dust and harvest chaff are coarse particles, so
+a PM2.5/PM10 ratio under 0.6 is ignored. Flint Hills burn-season haze raises every sensor at once,
+so a jump that most sensors more than 15 km away are also seeing is ignored. All sensors together
+count as one source: two sensors under one plume still only reach Investigate. Thresholds are per
+district.
 
 Public imagery: the alert links the latest GOES visible loop for the area, so the duty officer can
 look for a plume in daylight (free, 5-minute refresh).
@@ -332,14 +389,20 @@ sight needs an FAA waiver. It's in the cost table as optional.
     for the neighboring district and county EM.
 5.  Updates as evidence arrives. New satellite passes and replies update the event; recipients get a
     follow-up only when the threat level or direction changes.
+6.  Mesh copy for people out of coverage. Anyone carrying a Meshtastic radio gets the same texts
+    over LoRa from a radio at the station, and can reply PAGE, R, or FIRE from the Meshtastic app
+    with no cell signal. The console shows when each radio confirmed receipt, and shows volunteers
+    and trucks at their live GPS positions: "Sam Ortiz, responding, 4.3 mi ENE of the fire."
 
 5. Field reality
 
 - Connectivity: SMS everywhere in the field; the carrier stores and retries messages. Optional links
   open a text-only page (< 50 KB, static map image). The 3D console is for the station, the county
   EOC, and the pitch.
-- Power: none needed in the district in phases 1–2. Camera nodes (phase 3) are sized for 3 cloudy
-  days on battery.
+- Power: none needed in the district in phase 1. Tower sensor relays (phase 1b) run on a small solar
+  panel and two 18650 cells; the particulate sensor's fan is the main draw, so it samples for 30 s
+  every 5 minutes. That power budget still needs checking on a real node through a cloudy week.
+  Camera nodes (phase 3) are sized for 3 cloudy days on battery.
 - False alarms: the burn registry, two-signal rule, weather gating, and ML suppression of Flint
   Hills burns and refinery flares (section 11). Investigate is a text, not a page. Batching: one
   Investigate digest per 15 min at most; one page per 30 min per area unless a new independent
@@ -349,43 +412,60 @@ sight needs an FAA waiver. It's in the cost table as optional.
 
 6. Failure modes
 
-+--------------------------------+--------------------------------+-------------------------------+
-| Failure                        | What Firewatch does            | What the district does        |
-+================================+================================+===============================+
-| Duty officer has no signal     | Carrier retries; after 3 min   | Nothing new; 911 still works  |
-|                                | with no reply the ladder moves |                               |
-|                                | on (chief, then county         |                               |
-|                                | dispatch by voice call)        |                               |
-+--------------------------------+--------------------------------+-------------------------------+
-| Firewatch server down          | An external uptime monitor     | Same as today                 |
-|                                | texts the chief within 5 min:  |                               |
-|                                | "Firewatch offline — 911 is    |                               |
-|                                | your only detection"           |                               |
-+--------------------------------+--------------------------------+-------------------------------+
-| A source goes quiet (satellite | Per-source health; a 7 am      | Knows which eyes are closed   |
-| feed late, co-op feed silent,  | health text during burn        |                               |
-| camera offline)                | season; the console says "no   |                               |
-|                                | data," never "no fire"         |                               |
-+--------------------------------+--------------------------------+-------------------------------+
-| False-alarm storm (calm March  | Registered burns suppressed;   | Gets one digest, not 30 texts |
-| afternoon, 30 hotspots)        | satellite-only events can't    |                               |
-|                                | page below 70; rate limits and |                               |
-|                                | batching                       |                               |
-+--------------------------------+--------------------------------+-------------------------------+
-| Volunteers unavailable         | Mutual-aid prompt after 5 min  | One tap to send               |
-|                                | with < 2 responding            |                               |
-+--------------------------------+--------------------------------+-------------------------------+
-| Fake or mistaken texted report | Unregistered numbers can       | Reviews in the log            |
-|                                | trigger Investigate and the    |                               |
-|                                | neighbor check, never a page   |                               |
-|                                | alone                          |                               |
-+--------------------------------+--------------------------------+-------------------------------+
-| Model wrong                    | Humans decide every page;      | 911 remains primary           |
-|                                | rules floor events near towns  |                               |
-|                                | and lines at Investigate;      |                               |
-|                                | overrides are logged for       |                               |
-|                                | retraining                     |                               |
-+--------------------------------+--------------------------------+-------------------------------+
++--------------------------------+--------------------------------+--------------------------------+
+| Failure                        | What Firewatch does            | What the district does         |
++================================+================================+================================+
+| Duty officer has no signal     | Carrier retries; the mesh copy | Nothing new; 911 still works   |
+|                                | reaches their radio if they    |                                |
+|                                | carry one and shows            |                                |
+|                                | "delivered"; after 3 min with  |                                |
+|                                | no reply the ladder moves on   |                                |
+|                                | (chief, then county dispatch   |                                |
+|                                | by voice call)                 |                                |
++--------------------------------+--------------------------------+--------------------------------+
+| Station mesh radio unplugged   | The console marks MESH down;   | Plug it back in; the server    |
+| or out of range                | SMS carries on unchanged       | reconnects within 30 s         |
++--------------------------------+--------------------------------+--------------------------------+
+| Dust storm, harvest, or        | Coarse dust fails the          | Nothing                        |
+| regional burn smoke            | PM2.5/PM10 check;              |                                |
+|                                | district-wide haze fails the   |                                |
+|                                | distant-sensor check; sensors  |                                |
+|                                | alone never page               |                                |
++--------------------------------+--------------------------------+--------------------------------+
+| Tower sensor node dies or      | The node's map label goes grey | Replace the battery or panel   |
+| loses its position             | after 30 min; a node with no   | at the next tower visit        |
+|                                | fixed position records         |                                |
+|                                | readings but raises no signals |                                |
++--------------------------------+--------------------------------+--------------------------------+
+| Firewatch server down          | An external uptime monitor     | Same as today                  |
+|                                | texts the chief within 5 min:  |                                |
+|                                | "Firewatch offline — 911 is    |                                |
+|                                | your only detection"           |                                |
++--------------------------------+--------------------------------+--------------------------------+
+| A source goes quiet (satellite | Per-source health; a 7 am      | Knows which eyes are closed    |
+| feed late, co-op feed silent,  | health text during burn        |                                |
+| camera offline)                | season; the console says "no   |                                |
+|                                | data," never "no fire"         |                                |
++--------------------------------+--------------------------------+--------------------------------+
+| False-alarm storm (calm March  | Registered burns suppressed;   | Gets one digest, not 30 texts  |
+| afternoon, 30 hotspots)        | satellite-only events can't    |                                |
+|                                | page below 70; rate limits and |                                |
+|                                | batching                       |                                |
++--------------------------------+--------------------------------+--------------------------------+
+| Volunteers unavailable         | Mutual-aid prompt after 5 min  | One tap to send                |
+|                                | with < 2 responding            |                                |
++--------------------------------+--------------------------------+--------------------------------+
+| Fake or mistaken texted report | Unregistered numbers can       | Reviews in the log             |
+|                                | trigger Investigate and the    |                                |
+|                                | neighbor check, never a page   |                                |
+|                                | alone                          |                                |
++--------------------------------+--------------------------------+--------------------------------+
+| Model wrong                    | Humans decide every page;      | 911 remains primary            |
+|                                | rules floor events near towns  |                                |
+|                                | and lines at Investigate;      |                                |
+|                                | overrides are logged for       |                                |
+|                                | retraining                     |                                |
++--------------------------------+--------------------------------+--------------------------------+
 
 7. Honest numbers
 
@@ -404,6 +484,25 @@ Rough figures before vendor quotes. We will say "rough" on the slide.
 |          | registry,           |                     | (one server handles | and through the     |
 |          | ask-the-neighbor,   |                     | the state)          | co-op newsletter;   |
 |          | targeted texts      |                     |                     | one drill page      |
++----------+---------------------+---------------------+---------------------+---------------------+
+| 1b       | Mesh and sensors,   | ~$1,040 hardware,   | VFA grant 50/50     | A weekend: flash    |
+|          | under $1,500 per    | ~$1,140 with 10%    | cost share (apply   | and set a private   |
+|          | county: a station   | spares, no monthly  | before buying:      | channel, set each   |
+|          | radio (~$45, USB to | fees; the           | purchases dated     | tower's fixed       |
+|          | the station PC); 6  | district's share is | before the          | position, mount 6   |
+|          | solar tower relays  | ~$450–550 after the | application aren't  | nodes               |
+|          | with smoke,         | VFA grant and a     | reimbursed); the    |                     |
+|          | temperature, and    | joint purchase      | co-op for nodes     |                     |
+|          | humidity sensors in | (rough; pricing     | near its lines;     |                     |
+|          | a vented shield     | report)             | tower mounting      |                     |
+|          | (~$157 each, $942); |                     | rides on the        |                     |
+|          | one duty-officer    |                     | elevator and water  |                     |
+|          | radio (SenseCAP     |                     | tower agreements    |                     |
+|          | T1000-E, $51,       |                     | that phase 3 needs  |                     |
+|          | optional).          |                     | anyway              |                     |
+|          | Volunteers need     |                     |                     |                     |
+|          | nothing new: SMS    |                     |                     |                     |
+|          | still reaches them  |                     |                     |                     |
 +----------+---------------------+---------------------+---------------------+---------------------+
 | 2        | Co-op fault and     | $0 hardware; staff  | The co-op:          | 1–3 months          |
 |          | outage feed         | time                | line-caused         | (data-sharing       |
@@ -465,6 +564,14 @@ scoring, spread, impacts, map) and adds:
 5.  A scenario clock in the console: minutes since ignition, the baseline timeline beside the
     Firewatch timeline, and fire size at each point.
 6.  Same afternoon, a registered burn 6 miles away that never pages anyone.
+7.  Meshtastic bridge (built Friday night): the same texts go to linked radios as acknowledged
+    direct messages; radio replies run through the SMS parser; GPS positions put volunteers and
+    trucks on the map and on each alert. It's tested against the real meshtastic library's packet
+    handling, but not yet over the air with the team's two T1000-E radios.
+8.  Sensor telemetry (built Friday night): temperature, humidity, and PM2.5/PM10 from tower nodes
+    are stored and shown on the map; the smoke rule above raises a smoke-sensor signal that joins a
+    line fault within 8 km. Humidity and temperature from a sensor within 15 km replace the forecast
+    on live events. Tested with simulated packets; no sensor hardware is on hand yet.
 
 Not yet built from this list: phone mockups, contacts drawn on the map and in 3D, and the text-only
 field page. Twilio sending and signature checks are written but have not been tried against a real

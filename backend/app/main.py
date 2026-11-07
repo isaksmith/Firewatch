@@ -22,7 +22,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import notify, playbook, sample, scenario
+from . import mesh, notify, playbook, sample, scenario
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
@@ -42,6 +42,7 @@ log = logging.getLogger("firewatch")
 
 _tasks: list[asyncio.Task] = []
 TICK_SECONDS = 30
+MESH_RETRY_SECONDS = 30
 
 
 async def _source_loop(name: str, interval_s: int, job) -> None:
@@ -96,6 +97,17 @@ async def _tick_loop() -> None:
         await asyncio.sleep(TICK_SECONDS)
 
 
+async def _mesh_loop() -> None:
+    """Keep the server's Meshtastic radio connected; reconnect if it is unplugged or reboots."""
+    while True:
+        if mesh.get_bridge() is None:
+            try:
+                await asyncio.to_thread(mesh.start)
+            except Exception:
+                log.exception("mesh connect failed")
+        await asyncio.sleep(MESH_RETRY_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -112,10 +124,13 @@ async def lifespan(app: FastAPI):
         intervals = s.source_intervals
         _tasks.extend(asyncio.create_task(_source_loop(n, intervals[n], job)) for n, job in poll_jobs().items())
     _tasks.append(asyncio.create_task(_tick_loop()))
+    if s.mesh_gateway != "off":
+        _tasks.append(asyncio.create_task(_mesh_loop()))
     yield
     for t in _tasks:
         t.cancel()
     _tasks.clear()
+    mesh.stop()
 
 
 def require_token(x_firewatch_token: str = Header(default="")) -> None:
@@ -223,6 +238,7 @@ def _response_brief(conn, ev) -> dict | None:
         "texts_sent": conn.execute(
             "SELECT COUNT(*) n FROM messages WHERE event_id = ? AND direction = 'out'", (ev["id"],)
         ).fetchone()["n"],
+        "crew": mesh.crew_positions(conn, ev["lat"], ev["lon"]),
     }
 
 
@@ -313,7 +329,7 @@ def _mask(phone: str | None) -> str | None:
 
 def _messages(conn, event_id: int | None = None, limit: int = 300) -> list[dict]:
     q = (
-        "SELECT m.id, m.event_id, m.direction, m.purpose, m.body, m.status, m.created_at, m.phone, "
+        "SELECT m.id, m.event_id, m.direction, m.purpose, m.body, m.status, m.created_at, m.phone, m.channel, "
         "c.name AS contact_name, c.role AS contact_role FROM messages m LEFT JOIN contacts c ON c.id = m.contact_id"
     )
     args: tuple = ()
@@ -548,6 +564,8 @@ def health():
         status = "ok" if age_s < 3 * interval_s else "stale" if age_s < 12 * interval_s else "down"
         sources[name] = {"status": status, "age_min": round(age_s / 60), "last_ok": r["last_ok"],
                          "last_error": last_error, "interval_s": interval_s}
+    if (m := mesh.health()) is not None:
+        sources["mesh"] = m
     return {
         "mode": s.mode,
         "firms_key_configured": bool(s.firms_map_key),
@@ -584,7 +602,7 @@ def sample_fixtures():
 
 
 class SignalIn(BaseModel):
-    kind: Literal["line_fault", "report", "camera_smoke"]
+    kind: Literal["line_fault", "report", "camera_smoke", "sensor_smoke"]
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
     observed_at: str | None = None
@@ -655,6 +673,13 @@ def list_contacts():
             {**dict(r), "phone": _mask(r["phone"])}
             for r in conn.execute("SELECT * FROM contacts ORDER BY ladder_rank IS NULL, ladder_rank, role, name")
         ]
+
+
+@api.get("/mesh/nodes")
+def list_mesh_nodes():
+    """Every Meshtastic radio the server's radio has heard, with its last position and the contact who carries it."""
+    with connect() as conn:
+        return mesh.list_nodes(conn)
 
 
 @api.get("/district")

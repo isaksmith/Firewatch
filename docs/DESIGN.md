@@ -142,21 +142,46 @@ CREATE TABLE contacts (
   weekday_avail INTEGER NOT NULL DEFAULT 0,
   ladder_rank   INTEGER,                   -- order in the duty escalation ladder
   opted_in      INTEGER NOT NULL DEFAULT 1, -- STOP sets 0
-  registered    INTEGER NOT NULL DEFAULT 1  -- 0 for unknown numbers that texted in
+  registered    INTEGER NOT NULL DEFAULT 1, -- 0 for unknown numbers that texted in
+  mesh_id       TEXT UNIQUE                -- Meshtastic node ID (!a1b2c3d4) of the radio they carry
 );
 
 CREATE TABLE messages (
   id           INTEGER PRIMARY KEY,
   event_id     INTEGER REFERENCES events(id),
   contact_id   INTEGER REFERENCES contacts(id), -- null for a number not in the roster
-  phone        TEXT NOT NULL,
+  phone        TEXT NOT NULL,              -- phone number, or mesh node ID on the mesh channel
   direction    TEXT NOT NULL,              -- out | in
   purpose      TEXT,                       -- ask_neighbor | duty_fyi | duty_escalate | ladder | ladder_dispatch | page | page_dispatch | downwind | helper | mutual_aid_draft | mutual_aid | reply
   body         TEXT NOT NULL,              -- ≤ 160 chars for outbound
-  status       TEXT NOT NULL,              -- sent | failed | received
-  gateway_id   TEXT,                       -- Twilio SID; outbox-… in sample mode
+  status       TEXT NOT NULL,              -- sent | failed | received; mesh adds relayed | delivered
+  gateway_id   TEXT,                       -- Twilio SID; outbox-… in sample mode; mesh-<packet id>
   is_sample    INTEGER NOT NULL DEFAULT 0,
-  created_at   TEXT NOT NULL               -- the response clock (the scenario's own time during a replay)
+  created_at   TEXT NOT NULL,              -- the response clock (the scenario's own time during a replay)
+  channel      TEXT NOT NULL DEFAULT 'sms' -- sms | mesh
+);
+
+CREATE TABLE mesh_nodes (                  -- every Meshtastic radio the server's radio has heard
+  node_id      TEXT PRIMARY KEY,           -- !a1b2c3d4; contacts.mesh_id links a radio to a person
+  long_name    TEXT,
+  short_name   TEXT,
+  hw_model     TEXT,
+  lat          REAL,                       -- last GPS fix
+  lon          REAL,
+  position_at  TEXT,                       -- wall-clock time the fix arrived
+  battery_pct  INTEGER,
+  snr          REAL,
+  last_heard   TEXT NOT NULL
+);
+
+CREATE TABLE sensor_readings (             -- telemetry from mesh sensor nodes (5.8)
+  id       INTEGER PRIMARY KEY,
+  node_id  TEXT NOT NULL,
+  at       TEXT NOT NULL,                  -- wall-clock arrival time
+  temp_c   REAL,
+  rh_pct   REAL,
+  pm25     REAL,                           -- µg/m³, "environmental" (outdoor) correction
+  pm10     REAL
 );
 
 CREATE TABLE burn_notices (
@@ -281,6 +306,7 @@ Satellite detections go through 4.1–4.4 and get an ML score (section 5). Every
 | `report` | Inbound SMS `FIRE <where>` (place text geocoded against roads and towns; the sender's roster location as fallback) | Always for Investigate; for Escalate only from a registered number |
 | `neighbor_reply` | Inbound SMS reply to an ask-the-neighbor text | Reply `1` (smoke). Reply `3` from the contact who registered a burn here today makes the event a registered burn. Reply `2` is recorded but doesn't lower the level, because the neighbor may not have a view. |
 | `camera_smoke` | Phase 3 camera node | Detector confidence above its threshold on two consecutive frames |
+| `sensor_smoke` | Mesh sensor node telemetry (5.8) | Always: the smoke rule already ran before the signal was raised. All sensors together count as one kind. A sensor joins events within 8 km, not 3, because smoke drifts downwind; it doesn't move the event's location when a line fault or report has placed it, and it can't show a burn has escaped. |
 | Satellite | Section 4.1 | ML score ≥ 40 |
 
 **Level rules** (evaluated after every new detection, signal, or reply; each rule that fires becomes a reason):
@@ -399,7 +425,26 @@ health         FIREWATCH 7AM: satellites OK, co-op feed {coop_status}, SMS OK. {
 
 **Gateway.** One `SmsGateway` interface with two implementations: `OutboxGateway` (sample mode: writes `messages` rows and shows them in the console's outbox) and `TwilioGateway` (live: sends, and receives on `POST /api/sms/inbound`, with the webhook signature verified). Outbound is rate-limited per contact (at most 1 message a minute; batched FYIs at most once every 15 minutes).
 
-### 5.7 Playbook: a dynamic run card (`backend/app/playbook.py`)
+### 5.7 Mesh radios (Meshtastic)
+
+For the places with no cell bar at all, volunteers and trucks can carry a Meshtastic LoRa radio (SenseCAP T1000-E: ~$51, card-sized, GPS, buzzer, IP65). One radio plugged into the server by USB (or reachable over TCP) is the gateway. Code: `backend/app/mesh.py`.
+
+- **Out.** `notify.send` texts a contact by SMS and, if the roster gives them a `mesh_id` and the gateway radio is connected, also sends the same text over the mesh as a direct message with an ACK requested. That's one `messages` row per channel. Mesh rows go from `sent` to `relayed` (another radio rebroadcast it), `delivered` (the recipient's radio acknowledged it), or `failed` (the firmware gave up). SMS has no equivalent "delivered to the device" signal. Mesh sends happen in sample mode too, since they only reach radios the roster links to a contact.
+- **In.** A direct message to the gateway radio goes through the same `handle_inbound` parser as an SMS (`PAGE`, `R`, `1`/`2`/`3`, `FIRE`, `BURN`, `STOP`). The reply goes back on the mesh only. Broadcast channel chatter is ignored. A radio with no roster contact counts like an unregistered number: it can open an Investigate, never an Escalate.
+- **Positions.** Position, node-info, and telemetry packets update `mesh_nodes`. A `FIRE` from a radio with a fix from the last 30 minutes is located at the radio, not at a roster address. So a volunteer or lease truck can report from the field, and volunteers, who have no roster location, show on the map. Each alert's response lists `crew`: roster contacts with a fresh fix, nearest the fire first.
+- **Health.** `/api/health` reports `mesh` as a source: `ok` if a packet arrived in the last 15 minutes, `stale` if connected but quiet, `down` if no radio is attached. The server retries the connection every 30 s.
+- **Range, honestly.** A body-worn T1000-E reaches about 2–5 km on flat ground and further from height. 450 sq mi needs relay radios (router role, solar) on the same elevators and water towers as the phase 3 cameras. Until then the mesh covers the station area and wherever radios happen to chain.
+
+### 5.8 Tower sensor nodes
+
+The tower relays carry sensors: a PMSA003I particulate sensor and an SHTC3 or BME280 temperature and humidity sensor on a RAK4631, in a vented radiation shield. Meshtastic firmware reads them and sends telemetry packets; `mesh.handle_packet` passes them to `backend/app/sensors.py`, which stores `sensor_readings`. Each tower node needs a fixed position set in Meshtastic: a node with no position records readings but raises no signals.
+
+- **Smoke rule.** For each PM2.5 reading: rise = PM2.5 − the node's baseline (median of its readings from 3 h to 20 min ago, or 10 µg/m³ with fewer than 3). It's smoke if rise ≥ `smoke_pm25_rise` (50), PM2.5/PM10 ≥ `smoke_fine_ratio` (0.6; dust is coarse), and, when at least 2 sensors more than 15 km away reported in the last 30 minutes, fewer than `smoke_regional_share` (50%) of them rose by half the threshold (otherwise it's regional haze). Then `add_signal("sensor_smoke", node position, source "mesh:<node>")`, at most once per node per `smoke_repeat_min` (60). Thresholds live in the district's `settings.json`.
+- **Local weather.** On live (non-sample) events, temperature and humidity from the nearest sensor within 15 km with a reading in the last 30 minutes replace the forecast's values before fire danger is computed; `weather.local_sensor` names the node. Sample events keep the scenario's weather, so a sensor on the demo table can't change the replay.
+- **Map.** `GET /api/mesh/nodes` includes each node's latest `sensors` readings; the map label shows PM2.5, °C, and RH, amber at PM2.5 ≥ 35.
+- **Power.** The PMSA003I fan draws 60–120 mA, more than a small panel supplies running nonstop. Set the air-quality telemetry interval to 5 minutes. Whether the firmware sleeps the fan between readings (through the sensor's SET pin) is unverified; check it on the first node before buying six.
+
+### 5.9 Playbook: a dynamic run card (`backend/app/playbook.py`)
 
 The full explanation of the decision model is in [How Firewatch recommends actions](RECOMMENDATIONS.md); the fitted danger multiplier in [Fire-day model v1](research/fire-day-model-v1.md). This section is the summary.
 
@@ -817,6 +862,9 @@ TWILIO_AUTH_TOKEN=
 TWILIO_FROM=
 PUBLIC_BASE_URL=           # used to check Twilio signatures and in console links
 API_TOKEN=                 # when set, required on endpoints that can text people
+MESH_GATEWAY=off           # off | serial | tcp: a Meshtastic radio attached to the server
+MESH_DEVICE=               # serial port (first Meshtastic port when blank) or the radio's host for tcp
+MESH_CHANNEL_INDEX=0
 ```
 
 `backend/data/districts/<slug>/settings.json` holds what a chief tunes:
@@ -835,7 +883,7 @@ API_TOKEN=                 # when set, required on endpoints that can text peopl
 }
 ```
 
-The roster is a CSV the chief already has in some form (`name, phone, role, lat, lon, weekday_avail, ladder_rank`). Ranchers and pumpers can also join by texting `JOIN` plus a road or landmark.
+The roster is a CSV the chief already has in some form (`name, phone, role, lat, lon, weekday_avail, ladder_rank, mesh_id`). `mesh_id` is the Meshtastic node ID (`!a1b2c3d4`) of the radio the person carries, blank if none. Ranchers and pumpers can also join by texting `JOIN` plus a road or landmark.
 
 ## 10. Sample fixture format
 

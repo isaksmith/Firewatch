@@ -1,4 +1,4 @@
-"""Expected-loss decision model behind the playbook's recommendations (docs/DESIGN.md section 5.7).
+"""Expected-loss decision model behind the playbook's recommendations (docs/DESIGN.md section 5.9).
 
 For each option:
 

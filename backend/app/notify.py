@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from . import mesh
 from .config import get_settings
 from .db import iso, loads, parse_iso
 from .district import LADDER_ROLES, NEIGHBOR_ROLES, VOLUNTEER_ROLES, load_district
@@ -159,26 +160,43 @@ def t_mutual_aid(ev, short_name: str, plan: dict, n_resp: int) -> str:
 # --- sending ---------------------------------------------------------------------------------------------
 
 
+CHANNELS = ("sms", "mesh")
+
+
 def send(
-    conn: sqlite3.Connection, contact, body: str, purpose: str, event_id: int | None, now: datetime, is_sample: bool
+    conn: sqlite3.Connection, contact, body: str, purpose: str, event_id: int | None, now: datetime, is_sample: bool,
+    channels: tuple[str, ...] = CHANNELS,
 ) -> dict | None:
+    """Text a contact by SMS and, when they carry a radio and the server's radio is up, over the mesh too.
+
+    Mesh messages go out even in sample mode: they only reach radios the roster links to a contact.
+    """
     if not contact["opted_in"] and purpose != "reply":
         return None
     if len(body) > SMS_MAX:
         log.warning("%s text is %d chars; truncating", purpose, len(body))
         body = body[: SMS_MAX - 1] + "…"
-    status, gid = "sent", None
-    try:
-        gid = gateway_for(is_sample).send(contact["phone"], body)
-    except httpx.HTTPError as e:
-        log.warning("SMS to %s failed: %s", contact["phone"], e)
-        status = "failed"
-    cur = conn.execute(
-        "INSERT INTO messages(event_id, contact_id, phone, direction, purpose, body, status, gateway_id, is_sample, created_at) "
-        "VALUES (?, ?, ?, 'out', ?, ?, ?, ?, ?, ?)",
-        (event_id, contact["id"], contact["phone"], purpose, body, status, gid, int(is_sample), iso(now)),
-    )
-    return {"id": cur.lastrowid, "to": contact["name"], "purpose": purpose, "body": body, "status": status}
+    routes = []
+    if "sms" in channels and not contact["phone"].startswith("!"):
+        routes.append(("sms", contact["phone"], gateway_for(is_sample)))
+    node = contact["mesh_id"] if "mesh_id" in contact.keys() else None
+    if "mesh" in channels and node and (bridge := mesh.get_bridge()):
+        routes.append(("mesh", node, bridge))
+    first = None
+    for channel, to, gateway in routes:
+        status, gid = "sent", None
+        try:
+            gid = gateway.send(to, body)
+        except (httpx.HTTPError if channel == "sms" else Exception) as e:
+            log.warning("%s to %s failed: %s", channel, to, e)
+            status = "failed"
+        cur = conn.execute(
+            "INSERT INTO messages(event_id, contact_id, phone, direction, purpose, body, status, gateway_id, is_sample, created_at, channel) "
+            "VALUES (?, ?, ?, 'out', ?, ?, ?, ?, ?, ?, ?)",
+            (event_id, contact["id"], to, purpose, body, status, gid, int(is_sample), iso(now), channel),
+        )
+        first = first or {"id": cur.lastrowid, "to": contact["name"], "purpose": purpose, "body": body, "status": status, "channel": channel}
+    return first
 
 
 def _contacts(conn, roles: tuple[str, ...]) -> list[sqlite3.Row]:
@@ -442,20 +460,28 @@ def _latest_open_response(conn, is_sample: bool) -> int | None:
 HELP = "{name} Firewatch: text FIRE to report a fire, BURN to register a burn today, STOP to opt out."
 
 
-def handle_inbound(conn: sqlite3.Connection, phone: str, body: str, now: datetime, is_sample: bool = False) -> dict:
-    """Parse one inbound text. Returns {"action", "event_id", "reply"}; the reply is also sent."""
+def handle_inbound(
+    conn: sqlite3.Connection, phone: str, body: str, now: datetime, is_sample: bool = False,
+    channel: str = "sms", at: tuple[float, float] | None = None,
+) -> dict:
+    """Parse one inbound text. Returns {"action", "event_id", "reply"}; the reply is also sent.
+
+    `phone` is the sender's number, or their radio's node ID on the mesh channel. `at` is where the sender is
+    right now (a radio's GPS fix) and locates their reports in place of their roster address.
+    """
     from .confirm import evaluate_event
     from .signals import add_signal
 
     d = load_district()
-    contact = conn.execute("SELECT * FROM contacts WHERE phone = ?", (phone,)).fetchone()
+    contact = conn.execute("SELECT * FROM contacts WHERE phone = ? OR mesh_id = ?", (phone, phone)).fetchone()
+    here = at or ((contact["lat"], contact["lon"]) if contact and contact["lat"] is not None else None)
     words = re.findall(r"[A-Za-z0-9]+", body.upper())
     word = words[0] if words else ""
     rest = body.strip()[len(words[0]):].strip(" :-,") if words else ""
     conn.execute(
-        "INSERT INTO messages(event_id, contact_id, phone, direction, purpose, body, status, is_sample, created_at) "
-        "VALUES (NULL, ?, ?, 'in', NULL, ?, 'received', ?, ?)",
-        (contact["id"] if contact else None, phone, body, int(is_sample), iso(now)),
+        "INSERT INTO messages(event_id, contact_id, phone, direction, purpose, body, status, is_sample, created_at, channel) "
+        "VALUES (NULL, ?, ?, 'in', NULL, ?, 'received', ?, ?, ?)",
+        (contact["id"] if contact else None, phone, body, int(is_sample), iso(now), channel),
     )
     msg_id = conn.execute("SELECT last_insert_rowid() id").fetchone()["id"]
     out: dict = {"action": "help", "event_id": None, "reply": None}
@@ -481,12 +507,12 @@ def handle_inbound(conn: sqlite3.Connection, phone: str, body: str, now: datetim
     elif word == "JOIN":
         if contact is None:
             conn.execute(
-                "INSERT INTO contacts(name, phone, role, registered) VALUES (?, ?, 'pending', 0)",
-                (rest[:60] or "Unregistered", phone),
+                "INSERT INTO contacts(name, phone, role, registered, mesh_id) VALUES (?, ?, 'pending', 0, ?)",
+                (rest[:60] or "Unregistered", phone, phone if channel == "mesh" else None),
             )
         out.update(action="join", reply=f"Firewatch: thanks. {d.short_name} will confirm your number and place.")
     elif word in ("1", "2", "3") and (eid := latest_event(("ask_neighbor",))):
-        add_signal(conn, "neighbor_reply", contact["lat"], contact["lon"], iso(now), f"sms:{phone}", word,
+        add_signal(conn, "neighbor_reply", contact["lat"], contact["lon"], iso(now), f"{channel}:{phone}", word,
                    contact["id"], is_sample, event_id=eid)
         evaluate_event(conn, eid, None, now)
         out.update(action="neighbor_reply", event_id=eid, reply="Thanks. The fire district has your answer.")
@@ -509,9 +535,9 @@ def handle_inbound(conn: sqlite3.Connection, phone: str, body: str, now: datetim
         _save(conn, eid, state)
         out.update(action="responding", event_id=eid, reply=f"Firewatch: copy, {len(responders)} responding.")
     elif word == "FIRE":
-        if contact and contact["lat"] is not None:
-            eid = add_signal(conn, "report", contact["lat"], contact["lon"], iso(now), f"sms:{phone}", rest or None,
-                             contact["id"], is_sample)
+        if here:
+            eid = add_signal(conn, "report", *here, iso(now), f"{channel}:{phone}", rest or None,
+                             contact["id"] if contact else None, is_sample)
             evaluate_event(conn, eid, None, now)
             out.update(action="report", event_id=eid, reply="Firewatch: report received. The duty officer is being told.")
         else:
@@ -519,12 +545,12 @@ def handle_inbound(conn: sqlite3.Connection, phone: str, body: str, now: datetim
             if duty:
                 send(conn, duty[0], f"FIREWATCH unlocated report from {phone}: {body.strip()}"[:SMS_MAX], "duty_fyi", None, now, is_sample)
             out.update(action="report_unlocated", reply="Firewatch: report sent to the duty officer. Call 911 if anyone is in danger.")
-    elif word == "BURN" and contact and contact["lat"] is not None:
+    elif word == "BURN" and contact and here:
         burn_date = now.astimezone(CENTRAL).date().isoformat()
         radius = d.settings.get("burn_radius_km", 1.5)
         conn.execute(
             "INSERT INTO burn_notices(contact_id, lat, lon, radius_km, burn_date, is_sample, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (contact["id"], contact["lat"], contact["lon"], radius, burn_date, int(is_sample), iso(now)),
+            (contact["id"], *here, radius, burn_date, int(is_sample), iso(now)),
         )
         out.update(action="burn", reply="Firewatch: burn noted for today near your place. Text FIRE if it gets away.")
     else:
@@ -533,6 +559,6 @@ def handle_inbound(conn: sqlite3.Connection, phone: str, body: str, now: datetim
     if out["event_id"]:
         conn.execute("UPDATE messages SET event_id = ? WHERE id = ?", (out["event_id"], msg_id))
     if out["reply"]:
-        target = contact or {"id": None, "phone": phone, "name": phone, "opted_in": 1}
-        send(conn, target, out["reply"], "reply", out["event_id"], now, is_sample)
+        target = contact or {"id": None, "phone": phone, "name": phone, "opted_in": 1, "mesh_id": phone if channel == "mesh" else None}
+        send(conn, target, out["reply"], "reply", out["event_id"], now, is_sample, channels=(channel,))
     return out

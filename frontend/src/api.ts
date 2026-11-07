@@ -40,7 +40,7 @@ export interface AlertSummary {
 export type Suppression = 'static_source' | 'likely_prescribed' | 'registered_burn' | 'low_signal'
 
 export interface Evidence {
-  kind: 'satellite' | 'line_fault' | 'report' | 'neighbor_reply' | 'camera_smoke' | 'burn_notice'
+  kind: 'satellite' | 'line_fault' | 'report' | 'neighbor_reply' | 'camera_smoke' | 'sensor_smoke' | 'burn_notice'
   label: string
   at: string
   counts: 'strong' | 'yes' | 'weak' | 'no'
@@ -67,6 +67,47 @@ export interface ResponseBrief {
     helpers: { contact_id: number; name: string; role: string }[]
   } | null
   texts_sent: number
+  crew: CrewPosition[]
+}
+
+/** A roster contact whose Meshtastic radio has a GPS fix from the last 30 minutes. */
+export interface CrewPosition {
+  contact_id: number
+  name: string
+  role: string
+  lat: number
+  lon: number
+  mi: number
+  from_fire: string
+  position_min_ago: number
+}
+
+export interface MeshNode {
+  node_id: string
+  long_name: string | null
+  short_name: string | null
+  hw_model: string | null
+  lat: number | null
+  lon: number | null
+  position_at: string | null
+  battery_pct: number | null
+  snr: number | null
+  last_heard: string
+  contact_id: number | null
+  contact_name: string | null
+  contact_role: string | null
+  is_gateway: boolean
+  heard_min_ago: number
+  position_min_ago: number | null
+  sensors: SensorReadings | null
+}
+
+export interface SensorReadings {
+  temp_c?: number
+  rh_pct?: number
+  pm25?: number
+  pm10?: number
+  reading_at: string
 }
 
 export interface Message {
@@ -78,6 +119,7 @@ export interface Message {
   status: string
   created_at: string
   phone: string | null
+  channel: 'sms' | 'mesh'
   contact_name: string | null
   contact_role: string | null
 }
@@ -267,6 +309,7 @@ export const api = {
   decide: (id: number, action: 'page' | 'no' | 'send', operator: string) =>
     request<AlertDetail>(`/alerts/${id}/decision`, { method: 'POST', body: JSON.stringify({ action, operator }) }),
   district: () => request<District>('/district'),
+  meshNodes: () => request<MeshNode[]>('/mesh/nodes'),
   scenario: (slug: string) => request<ScenarioStatus>(`/scenario/${slug}`),
   runScenario: (slug: string) => request<{ status: string }>(`/scenario/${slug}/run`, { method: 'POST' }),
   options: (id: number) => request<Playbook>(`/alerts/${id}/options`),

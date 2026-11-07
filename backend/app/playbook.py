@@ -1,6 +1,6 @@
 """Playbook: a dynamic run card. For the decision in front of the dispatcher, the three options with the lowest
 expected loss side by side, the best one recommended, each with what it would cost, what it would do, and a
-receipt once done. The model is in decision.py (docs/DESIGN.md section 5.7).
+receipt once done. The model is in decision.py (docs/DESIGN.md section 5.9).
 
 "Heads-up downwind" texts the stations whose area the fire could reach in the next two hours (worst case of the
 ensemble forecast): no trucks roll, but they are ready, which shortens mutual aid's arrival.

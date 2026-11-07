@@ -15,7 +15,7 @@ import httpx
 
 from .db import iso, loads, mark_source, parse_iso, utcnow
 from .district import District, load_district
-from .features.cluster import LOCATING_SIGNALS
+from .features.cluster import LOCATING_SIGNALS, SENSOR_SIGNALS
 from .features.enrich import build_features, context_features
 from .fire_weather import gfdi_band
 from .geo import KM_PER_MILE, bearing_deg, compass, haversine_km
@@ -61,6 +61,10 @@ def evaluate_event(
     ev = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
     if weather is None:
         weather = loads(ev["weather_json"], {}) or fetch_weather(conn, event_id)
+    if weather and not ev["is_sample"]:
+        from .sensors import local_weather
+
+        weather = local_weather(conn, ev["lat"], ev["lon"], weather)
 
     has_dets = conn.execute("SELECT 1 FROM detections WHERE event_id = ? LIMIT 1", (event_id,)).fetchone()
     sat = None
@@ -168,6 +172,11 @@ def decide_level(
             item["label"] = f"Camera smoke: {s['source']}"
             item["counts"] = "yes"
             independent.setdefault(f"camera:{s['source']}", "camera smoke")
+        elif s["kind"] == "sensor_smoke":
+            # Every smoke sensor together is one source: a plume reaching two of them is still one observation.
+            item["label"] = f"Smoke sensor {s['source'].split(':')[-1]}" + (f": {s['value']}" if s["value"] else "")
+            item["counts"] = "yes"
+            independent.setdefault("sensor", "smoke sensor")
         evidence.append(item)
 
     burn, escaped = _registered_burn(conn, ev, f, signals, cfg)
@@ -220,7 +229,7 @@ def _registered_burn(conn, ev, f, signals, cfg) -> tuple[dict | None, list[str]]
     escaped = []
     limit = burn["radius_km"] + BURN_ESCAPE_OUTSIDE_KM
     points = [(d["lat"], d["lon"]) for d in conn.execute("SELECT lat, lon FROM detections WHERE event_id = ?", (ev["id"],))]
-    points += [(s["lat"], s["lon"]) for s in signals if s["kind"] in LOCATING_SIGNALS]
+    points += [(s["lat"], s["lon"]) for s in signals if s["kind"] in LOCATING_SIGNALS and s["kind"] not in SENSOR_SIGNALS]
     if any(haversine_km(lat, lon, burn["lat"], burn["lon"]) > limit for lat, lon in points):
         escaped.append(f"fire seen more than {BURN_ESCAPE_OUTSIDE_KM:g} km outside the notice")
     if f["gfdi"] >= cfg.get("burn_escape_gfdi", 25):

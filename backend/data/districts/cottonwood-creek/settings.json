@@ -88,5 +88,9 @@
       "ready_min": 60,
       "available": true
     }
-  ]
+  ],
+  "smoke_pm25_rise": 50,
+  "smoke_fine_ratio": 0.6,
+  "smoke_regional_share": 0.5,
+  "smoke_repeat_min": 60
 }
