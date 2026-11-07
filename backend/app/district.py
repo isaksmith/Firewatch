@@ -36,8 +36,25 @@ def _dir(slug: str) -> Path:
     return DISTRICTS_DIR / slug
 
 
-@lru_cache(maxsize=4)
+# Per-scenario settings overrides (for example a baseline run at the old 3 mile ask). Merged outside the
+# lru_cache so the cached District is never mutated; set and cleared by scenario.py.
+_OVERRIDES: dict = {}
+
+
+def set_overrides(settings: dict | None) -> None:
+    _OVERRIDES.clear()
+    _OVERRIDES.update(settings or {})
+
+
 def load_district(slug: str | None = None) -> District:
+    d = _load_district(slug)
+    if not _OVERRIDES:
+        return d
+    return District(d.slug, {**d.settings, **_OVERRIDES}, d.rings)
+
+
+@lru_cache(maxsize=4)
+def _load_district(slug: str | None = None) -> District:
     slug = slug or get_settings().district
     d = _dir(slug)
     settings = json.loads((d / "settings.json").read_text())

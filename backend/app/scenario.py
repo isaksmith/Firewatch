@@ -4,13 +4,14 @@ clock (docs/DESIGN.md section 10). Everything it writes is sample data."""
 import asyncio
 import json
 import logging
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import lru_cache
 
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, iso, loads, parse_iso
-from .district import load_district, sync_roster
+from .district import load_district, set_overrides, sync_roster
 from .fire_weather import default_curing, gfdi, gfdi_band
 from .notify import handle_inbound, tick
 from .pipeline import process_detections
@@ -79,12 +80,22 @@ def _pre_steps(sc: dict) -> list[int]:
     return sorted({s["t"] for s in sc["timeline"] if s["t"] < 0})
 
 
+@contextmanager
+def _district_settings(sc: dict):
+    """Apply the scenario's optional `settings` block over the district's for the length of a run."""
+    set_overrides(sc.get("settings"))
+    try:
+        yield
+    finally:
+        set_overrides(None)
+
+
 def run_now(slug: str, until: int | None = None) -> None:
     """Run the whole scenario synchronously (tests, and the instant 'load' button)."""
     sc = load_scenario(slug)
     clear(slug)
     end = sc["duration_min"] if until is None else until
-    with connect() as conn:
+    with _district_settings(sc), connect() as conn:
         sync_roster(conn, sc["district"])
         for t in [*_pre_steps(sc), *range(end + 1)]:
             _minute(conn, sc, t)
@@ -94,6 +105,7 @@ def run_now(slug: str, until: int | None = None) -> None:
 async def _replay(slug: str, seconds_per_minute: float) -> None:
     sc = load_scenario(slug)
     await asyncio.to_thread(clear, slug)
+    set_overrides(sc.get("settings"))
 
     def setup():
         with connect() as conn:
@@ -114,6 +126,7 @@ async def _replay(slug: str, seconds_per_minute: float) -> None:
             await asyncio.sleep(seconds_per_minute)
     finally:
         _clock["running"] = False
+        set_overrides(None)
     log.info("scenario %s finished", slug)
 
 
@@ -163,7 +176,7 @@ def status(slug: str) -> dict:
     def minutes(at: str | None) -> float | None:
         return None if at is None else round((parse_iso(at) - t0).total_seconds() / 60, 1)
 
-    cfg = load_district(sc["district"]).settings
+    cfg = {**load_district(sc["district"]).settings, **sc.get("settings", {})}
     turnout, drive = cfg.get("turnout_min", 13), cfg.get("drive_min", 18)
     events, firewatch = [], []
     with connect() as conn:

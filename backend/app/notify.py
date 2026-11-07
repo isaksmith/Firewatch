@@ -24,6 +24,7 @@ from .db import iso, loads, parse_iso
 from .district import LADDER_ROLES, NEIGHBOR_ROLES, VOLUNTEER_ROLES, load_district
 from .fire_weather import default_curing
 from .geo import KM_PER_MILE, bearing_deg, compass, haversine_km
+from .where import parse_where, point_from
 from .sim.spread import SpreadInput, simulate
 
 log = logging.getLogger(__name__)
@@ -154,6 +155,8 @@ def t_mutual_aid(ev, short_name: str, plan: dict, n_resp: int) -> str:
 
 # --- sending ---------------------------------------------------------------------------------------------
 
+
+ESTIMATE_JOIN_KM = 8.0  # a report placed by bearing and distance may be off by miles, so it joins wider
 
 CHANNELS = ("sms", "mesh")
 
@@ -525,10 +528,15 @@ def handle_inbound(
         out.update(action="responding", event_id=eid, reply=f"Firewatch: copy, {len(responders)} responding.")
     elif word == "FIRE":
         if here:
-            eid = add_signal(conn, "report", *here, iso(now), f"{channel}:{phone}", rest or None,
-                             contact["id"] if contact else None, is_sample)
+            w = parse_where(rest)
+            at_pt, join_km, reply = here, None, "Firewatch: report received. The duty officer is being told."
+            if w:
+                at_pt, join_km = point_from(*here, w), ESTIMATE_JOIN_KM
+                reply = f"Firewatch: placed {w.label} of you. The duty officer is being told. Wrong? Text FIRE again."
+            eid = add_signal(conn, "report", *at_pt, iso(now), f"{channel}:{phone}", rest or None,
+                             contact["id"] if contact else None, is_sample, join_radius_km=join_km)
             evaluate_event(conn, eid, None, now)
-            out.update(action="report", event_id=eid, reply="Firewatch: report received. The duty officer is being told.")
+            out.update(action="report", event_id=eid, reply=reply)
         else:
             duty = _ladder(conn)[:1]
             if duty:

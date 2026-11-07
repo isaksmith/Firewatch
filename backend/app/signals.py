@@ -32,11 +32,13 @@ def add_signal(
     contact_id: int | None = None,
     is_sample: bool = False,
     event_id: int | None = None,
+    join_radius_km: float | None = None,
 ) -> int:
     """Store a signal and attach it to an event; returns the event id.
 
     Neighbor replies pass the `event_id` they answer. Locating signals join an open event with a detection
-    or signal within 3 km and 6 h, or open a new event.
+    or signal within 3 km and 6 h, or open a new event. `join_radius_km` overrides that radius (estimated
+    reports pass ESTIMATE_JOIN_KM).
     """
     if kind not in KINDS:
         raise ValueError(f"unknown signal kind {kind!r}")
@@ -44,7 +46,7 @@ def add_signal(
         if kind not in LOCATING_SIGNALS:
             raise ValueError(f"{kind} needs the event it refers to")
         flag = int(is_sample)
-        radius = SENSOR_JOIN_KM if kind in SENSOR_SIGNALS else SIGNAL_RADIUS_KM
+        radius = join_radius_km or (SENSOR_JOIN_KM if kind in SENSOR_SIGNALS else SIGNAL_RADIUS_KM)
         matched = signal_matches(conn, lat, lon, parse_iso(observed_at), flag, radius)
         matched |= _detection_matches(conn, lat, lon, observed_at, flag, radius)
         event_id = join_or_create(conn, sorted(matched), lat, lon, observed_at, flag)
