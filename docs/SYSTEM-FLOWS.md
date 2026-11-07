@@ -1,6 +1,6 @@
 # Firewatch system flows
 
-The README diagram stays the short version. This file is the long version: every flow across every branch, plus the community board. For the pitch, open [system-walkthrough.html](system-walkthrough.html) in a browser. It tells the same story with a guided replay.
+The README diagram stays the short version. This file is the long version: every flow across every branch, plus the community board. For the pitch, open [system-map.html](system-map.html) in a browser. It is the one-screen version, built with Archify from `system-map.architecture.json`.
 
 Everything here follows the code, not the older docs. Where the two disagree, the list at the end says so.
 
