@@ -529,8 +529,6 @@ async function liteAlerts(): Promise<AlertsResponse> {
   return out
 }
 
-const TOKEN = import.meta.env.VITE_API_TOKEN as string | undefined
-
 /** Plain words for the errors people can actually hit, instead of raw codes. */
 function plainError(res: Response, detail: unknown): string {
   if (res.status === 401) return "This computer isn't signed in to do that."
@@ -544,7 +542,8 @@ function plainError(res: Response, detail: unknown): string {
 async function request<T>(path: string, init?: RequestInit, unauthorized?: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(TOKEN ? { 'X-Firewatch-Token': TOKEN } : {}), ...init?.headers },
+    // No token here: anything in the bundle is public. The proxy in front of the API adds X-Firewatch-Token.
+    headers: { 'Content-Type': 'application/json', ...init?.headers },
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))

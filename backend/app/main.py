@@ -745,7 +745,7 @@ def post_burn(body: BurnIn):
         return _burn_row(conn.execute("SELECT * FROM burn_notices WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
-@api.get("/burns")
+@api.get("/burns", dependencies=[Depends(require_token)])  # caller names are personal data
 def list_burns():
     """Logged burns (called in with a window), soonest first."""
     with connect() as conn:

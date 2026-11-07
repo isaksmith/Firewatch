@@ -11,7 +11,12 @@ export default defineConfig({
   server: {
     proxy: {
       // 127.0.0.1 rather than localhost: localhost can resolve to IPv6 and hit another service on :8000.
-      '/api': process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:8000',
+      // The API token stays on the server side: the proxy adds it, so it is never in the browser bundle.
+      // Use API_TOKEN (not a VITE_ variable, which Vite would ship to the page).
+      '/api': {
+        target: process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:8000',
+        headers: process.env.API_TOKEN ? { 'X-Firewatch-Token': process.env.API_TOKEN } : {},
+      },
       '/lite': process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:8000',
     },
   },
