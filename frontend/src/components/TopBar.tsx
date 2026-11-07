@@ -75,12 +75,12 @@ export function TopBar({ onRunScenario, scenarioRunning }: { onRunScenario?: () 
         </span>
       )}
       <Divider />
-      <div className="hidden items-center gap-5 lg:flex">
+      <div className="hidden min-w-0 items-center gap-5 overflow-hidden lg:flex">
         {health.data && Object.entries(health.data.sources).map(([k, v]) => <SourceStatus key={k} name={k} h={v} />)}
         {health.isError && <span className="num text-[10px] tracking-[0.12em] text-escalate">BACKEND UNREACHABLE</span>}
       </div>
 
-      <div className="ml-auto flex items-center gap-4">
+      <div className="ml-auto flex shrink-0 items-center gap-4">
         <Clock />
         <Divider />
         <label className="flex items-center gap-2">

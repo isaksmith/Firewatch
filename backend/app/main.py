@@ -21,7 +21,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import notify, sample, scenario
+from . import notify, playbook, sample, scenario
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
@@ -636,6 +636,26 @@ def alert_decision(event_id: int, body: DecisionIn):
         now = scenario.clock_now(ev["sample_slug"]) if ev["is_sample"] else None
         notify.decide(conn, event_id, body.action, body.operator, now or utcnow())
     return get_alert(event_id)
+
+
+@api.get("/alerts/{event_id}/options")
+def alert_options(event_id: int):
+    """The playbook: the decision in front of the dispatcher, three options (one recommended), and receipts."""
+    with connect() as conn:
+        return playbook.options(conn, _get_event(conn, event_id))
+
+
+class OptionIn(BaseModel):
+    operator: str = Field(min_length=1, max_length=80)
+
+
+@api.post("/alerts/{event_id}/options/{option_id}", dependencies=[Depends(require_token)])
+def choose_option(event_id: int, option_id: str, body: OptionIn):
+    with connect() as conn:
+        try:
+            return playbook.execute(conn, _get_event(conn, event_id), option_id, body.operator)
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from None
 
 
 @api.get("/scenarios")

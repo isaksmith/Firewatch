@@ -188,6 +188,42 @@ export interface Health {
   sources: Record<string, SourceHealth>
 }
 
+export interface PlaybookOption {
+  id: string
+  title: string
+  recommended: boolean
+  why: string | null
+  metrics: { label: string; value: string }[]
+  effects: string[]
+  /** Clock time this option was already chosen for the current decision. */
+  done: string | null
+  /** In acre-equivalents: P(fire) x acres if real + (1 - P) x false-alarm cost. */
+  expected_loss: number
+}
+
+export interface Receipt {
+  at: string
+  clock: string
+  by: string
+  title: string
+  followed_recommendation: boolean | null
+  results: string[]
+}
+
+export interface Playbook {
+  event_id: number
+  clock: string
+  minutes_since_start: number
+  /** P(fire is real) and the evidence steps that produced it. */
+  probability: { p: number; steps: { text: string; factor?: number; p: number }[] }
+  /** What makes this fire dangerous (context; the choice comes from expected loss). */
+  risk: string[]
+  decision: { id: string; question: string; options: PlaybookOption[] } | null
+  receipts: Receipt[]
+  /** Every weight the recommendation uses, with its source. */
+  model: { key: string; value: number | Record<string, number>; source: string }[]
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
@@ -224,4 +260,7 @@ export const api = {
   district: () => request<District>('/district'),
   scenario: (slug: string) => request<ScenarioStatus>(`/scenario/${slug}`),
   runScenario: (slug: string) => request<{ status: string }>(`/scenario/${slug}/run`, { method: 'POST' }),
+  options: (id: number) => request<Playbook>(`/alerts/${id}/options`),
+  chooseOption: (id: number, optionId: string, operator: string) =>
+    request<Playbook>(`/alerts/${id}/options/${optionId}`, { method: 'POST', body: JSON.stringify({ operator }) }),
 }

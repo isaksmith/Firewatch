@@ -399,6 +399,48 @@ health         FIREWATCH 7AM: satellites OK, co-op feed {coop_status}, SMS OK. {
 
 **Gateway.** One `SmsGateway` interface with two implementations: `OutboxGateway` (sample mode: writes `messages` rows and shows them in the console's outbox) and `TwilioGateway` (live: sends, and receives on `POST /api/sms/inbound`, with the webhook signature verified). Outbound is rate-limited per contact (at most 1 message a minute; batched FYIs at most once every 15 minutes).
 
+### 5.7 Playbook: a dynamic run card (`backend/app/playbook.py`)
+
+The full explanation of the decision model is in [How Firewatch recommends actions](RECOMMENDATIONS.md); the fitted danger multiplier in [Fire-day model v1](research/fire-day-model-v1.md). This section is the summary.
+
+A fire department's run card is a fixed table: "a grass fire in zone 4 gets Brush 1 and Tanker 1". The playbook makes it dynamic. For the decision in front of the dispatcher it shows three options side by side, one recommended, each with what it costs and exactly what it will do. After a choice it shows a receipt.
+
+**How the recommendation is chosen: expected loss** (`backend/app/decision.py`). Every candidate option is scored:
+
+> expected loss = P(fire) × acres burned before enough help is on scene + (1 − P(fire)) × false-alarm cost
+
+Everything is in acres, so the trade reads plainly: "a false page costs us about as much as 100 acres burned". The three lowest-loss options are shown, the lowest is recommended, and the card says at what P(fire) the runner-up would win (the break-even point).
+
+- **P(fire)** starts from a base rate set by the earliest signal, then multiplies the odds by a likelihood ratio for each piece of evidence:
+  - a line lockout: 3% (PG&E outage-to-ignition rate) × a danger multiplier from the fire-day model (per-day rate ratio ^0.5: Low-Mod ×0.52, High ×1, Very High ×1.6, Severe ×2.4, Extreme ×4.2)
+  - a satellite detection: 15% real-world prior; scorer v1's score `s` then counts as a factor of s/(100−s), because its scores are calibrated to an even wildfire/burn prior
+  - a neighbor seeing smoke ×20, "no smoke" ×0.4, "my burn" ×0.1; a registered text report ×10; an unregistered one ×2; camera smoke ×8; inside a registered burn that hasn't escaped ×0.05
+- **Acres if it is a fire** comes from the median ensemble forecast at the time enough help is on scene:
+  - two trucks if the fire stays under `capacity_ha_60min` for 30 min after they arrive
+  - otherwise when mutual aid arrives: requested 5 min after the page, 35 min travel, or 25 min if the downwind stations got a heads-up
+- **False-alarm costs** in acre-equivalents: a page 100, a mutual-aid request 250, a heads-up text 3, a neighbor text 1.
+- **Candidates for "How should we respond?":** page now (it also sends the downwind heads-up), ask neighbors or wait for their answers, heads-up + ask, heads-up + recheck on the next pass, and watch. Once two sources agree, the wait-to-confirm options drop out and "heads-up only" takes their place.
+- **Candidates for "Do we need mutual aid?":** request now, wait for Brush 1's size-up, or don't.
+- **Every weight** is listed with its source in `decision.DEFAULTS`, returned as `model` by the API, and shown under "How this is decided". A district overrides any of them under `"decision"` in its `settings.json`. The weights are planning assumptions until outcomes are logged and the ratios re-fitted.
+- **On the scenario:**
+  - At minute 0 (line lockout on an Extreme day, P = 13%), heads-up + wait for neighbors wins.
+  - At minute 8 a neighbor sees smoke (P = 74%), and paging wins; that flips back below 33%.
+  - At minute 9, after the page, requesting mutual aid now wins (expected loss ~413 vs ~1,230 for waiting for the size-up).
+
+**What each option shows:**
+- when the district would be paged
+- acres if it is a fire, and when enough help is there
+- what it costs if it isn't
+- the expected loss
+- how many stations are warned ahead of the fire
+
+**Doing it:**
+- `POST /api/alerts/{id}/options/{option_id}` runs the option through the real paths (`notify.decide` for page and mutual aid, `ask_neighbors`, and heads-up texts).
+- It records `{option, by, at, followed_recommendation, texts sent by purpose}` in the response state.
+- A chosen option is marked done and can't be repeated.
+- `GET /api/alerts/{id}/options` returns the assessment, the current decision and the receipts. The receipts include automatic steps and decisions made by text (PAGE / SEND).
+- The console drawer shows this panel at the top. The old Acknowledge / Escalate buttons, which only changed a status label, are gone; "Not a fire: dismiss" remains.
+
 ## 6. Spread simulation
 
 ### 6.1 Inputs and outputs

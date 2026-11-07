@@ -140,6 +140,11 @@ def t_helper(ev, contact, short_name: str) -> str:
     return f"{short_name}: grass fire {_rel(ev, contact)} of you. Can you bring your {kind}? Reply R if heading there. Stay off the fire's head."
 
 
+def t_heads_up(ev, contact, eta: int, wind: str) -> str:
+    return (f"FIREWATCH heads-up: possible grass fire {_rel(ev, contact)} of your station, NOT confirmed. "
+            f"Wind {wind}. Could reach your area in ~{eta} min. No action yet.")
+
+
 def t_mutual_aid_draft(reason: str, neighbor: str) -> str:
     return f"FIREWATCH mutual aid: {reason}. Reply SEND to request {neighbor}."
 
@@ -243,6 +248,16 @@ def on_level(conn: sqlite3.Connection, event_id: int, level: str, now: datetime)
 def ask_neighbors(conn: sqlite3.Connection, ev, now: datetime) -> list[dict]:
     """Text up to N opted-in neighbors within the ask radius, nearest first."""
     d = load_district()
+    out = []
+    for km, c in nearest_neighbors(conn, ev):
+        send(conn, c, t_ask_neighbor(ev, c, d.short_name), "ask_neighbor", ev["id"], now, bool(ev["is_sample"]))
+        out.append({"contact_id": c["id"], "name": c["name"], "km": round(km, 2)})
+    return out
+
+
+def nearest_neighbors(conn: sqlite3.Connection, ev) -> list[tuple[float, sqlite3.Row]]:
+    """The neighbors ask_neighbors would text: (km, contact), nearest first."""
+    d = load_district()
     radius_km = d.settings.get("ask_neighbor_radius_mi", 3) * KM_PER_MILE
     reporters = {r["contact_id"] for r in conn.execute("SELECT contact_id FROM signals WHERE event_id = ?", (ev["id"],))}
     near = []
@@ -253,11 +268,7 @@ def ask_neighbors(conn: sqlite3.Connection, ev, now: datetime) -> list[dict]:
         if km <= radius_km:
             near.append((km, c))
     near.sort(key=lambda kc: kc[0])
-    out = []
-    for km, c in near[: d.settings.get("ask_neighbor_max", 3)]:
-        send(conn, c, t_ask_neighbor(ev, c, d.short_name), "ask_neighbor", ev["id"], now, bool(ev["is_sample"]))
-        out.append({"contact_id": c["id"], "name": c["name"], "km": round(km, 2)})
-    return out
+    return near[: d.settings.get("ask_neighbor_max", 3)]
 
 
 def _ladder_step(conn, ev, state: dict, now: datetime) -> None:
