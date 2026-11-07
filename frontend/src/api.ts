@@ -423,6 +423,7 @@ export const api = {
   district: () => request<District>('/district'),
   meshNodes: () => request<MeshNode[]>('/mesh/nodes'),
   boardAdminPosts: () => request<AdminPost[]>('/board/admin/posts'),
+  boardAdminBurns: () => request<AdminBurn[]>('/board/admin/burns'),
   boardStation: (id: number, action: StationAction, operator: string) =>
     request<StationResult>(`/board/admin/posts/${id}/station`, {
       method: 'POST',
@@ -544,6 +545,21 @@ export interface ApproveResult {
 
 export const BOARD_ADMIN_KEY = ['board-admin-posts'] as const
 
+export interface Burn {
+  lat: number
+  lon: number
+  radius_km: number
+  registered_at: string
+  reports_nearby: boolean
+}
+
+export interface AdminBurn extends Burn {
+  name: string
+  late: boolean
+}
+
+export const BOARD_BURNS_ADMIN_KEY = ['board-admin-burns'] as const
+
 export interface PostResult {
   post_id: number
   event_id: number | null
@@ -627,6 +643,7 @@ export const boardApi = {
     return boardRequest<BoardMe>('/me', undefined, t)
   },
   posts: () => boardRequest<BoardPost[]>('/posts'),
+  burns: () => boardRequest<Burn[]>('/burns'),
   post: (b: { category: BoardCategory; body: string; lat: number | null; lon: number | null; attach_location: boolean }) =>
     withDevice(() => boardRequest<PostResult>('/posts', { method: 'POST', body: JSON.stringify(b) })),
   confirm: (id: number, b: { kind: ConfirmKind; lat: number | null; lon: number | null }) =>

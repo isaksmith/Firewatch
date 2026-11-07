@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { api, BOARD_ADMIN_KEY, type AdminPost } from '../api'
+import { api, BOARD_ADMIN_KEY, BOARD_BURNS_ADMIN_KEY, type AdminBurn, type AdminPost } from '../api'
 import { timeAgo } from './format'
 
 // Category styling reuses tokens already in the dashboard: fire is the escalate red,
@@ -56,3 +56,32 @@ export function postAge(p: { age_min?: number; created_at: string }): string {
   if (hours < 48) return `T+${hours}H`
   return `T+${Math.round(hours / 24)}D`
 }
+
+export function useBoardBurns() {
+  return useQuery<AdminBurn[]>({
+    queryKey: BOARD_BURNS_ADMIN_KEY,
+    queryFn: api.boardAdminBurns,
+    refetchInterval: 15_000,
+    retry: false,
+  })
+}
+
+const DIRECTIONS = ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest']
+
+/** Straight-line km and compass bearing (degrees from north) from a to b. */
+export function kmAndBearing(a: { lat: number; lon: number }, b: { lat: number; lon: number }): { km: number; deg: number } {
+  const rad = Math.PI / 180
+  const dy = (b.lat - a.lat) * 110.57
+  const dx = (b.lon - a.lon) * 111.32 * Math.cos(((a.lat + b.lat) / 2) * rad)
+  const deg = (Math.atan2(dx, dy) / rad + 360) % 360
+  return { km: Math.hypot(dx, dy), deg }
+}
+
+/** "About 3 km northwest of you", from the phone to the burn's rounded point. */
+export function burnDistanceText(me: { lat: number; lon: number }, burn: { lat: number; lon: number }): string {
+  const { km, deg } = kmAndBearing(me, burn)
+  if (km < 1) return 'Under 1 km from you'
+  return `About ${Math.round(km)} km ${DIRECTIONS[Math.round(deg / 45) % 8]} of you`
+}
+
+export const burnCoords = (b: { lat: number; lon: number }) => `Near ${b.lat.toFixed(2)}, ${b.lon.toFixed(2)}`
