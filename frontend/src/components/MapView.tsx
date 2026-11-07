@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronDown } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Map, { Layer, Marker, NavigationControl, ScaleControl, Source, useMap, type MapRef } from 'react-map-gl/maplibre'
-import { api, type AlertSummary } from '../api'
+import { api, type AlertSummary, type MeshNode, type SensorReadings } from '../api'
 import { REC_META, latLon, trackId } from '../lib/format'
 import { AOI_BBOX, BASEMAP_STYLE, KANSAS_VIEW, ringPolygon } from '../lib/map'
 import { TrackGlyph } from './ui'
@@ -33,7 +33,7 @@ const AOI: GeoJSON.Feature = {
   },
 }
 
-type LayerKey = 'power_lines' | 'static_sources' | 'flint_hills' | 'aoi' | 'district'
+type LayerKey = 'power_lines' | 'static_sources' | 'flint_hills' | 'aoi' | 'district' | 'mesh'
 
 const SWATCH: Record<LayerKey, string> = {
   aoi: 'h-0 w-4 border-t border-dashed border-sample/70',
@@ -41,6 +41,47 @@ const SWATCH: Record<LayerKey, string> = {
   power_lines: 'h-px w-4 bg-[#c9d4e0]',
   static_sources: 'h-2 w-2 rounded-full border border-muted',
   flint_hills: 'h-2 w-4 border border-dashed border-ok/70',
+  mesh: 'h-2 w-2 rotate-45 bg-ok',
+}
+
+const MESH_FRESH_MIN = 30
+const PM25_HIGH = 35
+
+function sensorLine(s: SensorReadings | null): { text: string; high: boolean } | null {
+  if (!s || Date.now() - Date.parse(s.reading_at) > MESH_FRESH_MIN * 60_000) return null
+  const parts = [
+    s.pm25 != null && `PM2.5 ${Math.round(s.pm25)}`,
+    s.temp_c != null && `${Math.round(s.temp_c)}°C`,
+    s.rh_pct != null && `RH ${Math.round(s.rh_pct)}%`,
+  ].filter(Boolean)
+  return parts.length ? { text: parts.join(' · '), high: (s.pm25 ?? 0) >= PM25_HIGH } : null
+}
+
+function MeshMarker({ n }: { n: MeshNode }) {
+  const fresh = n.position_min_ago != null && n.position_min_ago <= MESH_FRESH_MIN
+  const label = n.contact_name ?? n.long_name ?? n.short_name ?? n.node_id
+  const age = n.position_min_ago == null ? '' : n.position_min_ago < 1 ? 'NOW' : `${n.position_min_ago}M`
+  const reading = sensorLine(n.sensors)
+  return (
+    <Marker longitude={n.lon!} latitude={n.lat!} anchor="center">
+      <div
+        className="relative"
+        title={`${label} · ${n.node_id}${n.battery_pct != null ? ` · battery ${n.battery_pct}%` : ''}${n.snr != null ? ` · SNR ${n.snr}` : ''}`}
+      >
+        <span className={`block h-2 w-2 rotate-45 ${fresh ? 'bg-ok' : 'border border-dim bg-void'}`} />
+        <span
+          className={`num pointer-events-none absolute top-1/2 left-full ml-2 -translate-y-1/2 bg-void/80 px-1 text-[10px] whitespace-nowrap ${
+            fresh ? 'text-ok' : 'text-dim'
+          }`}
+        >
+          {n.is_gateway ? 'STATION RADIO' : label.toUpperCase()} <span className="text-dim">{age}</span>
+          {reading && (
+            <span className={`block ${reading.high ? 'text-investigate' : 'text-muted'}`}>{reading.text}</span>
+          )}
+        </span>
+      </div>
+    </Marker>
+  )
 }
 
 export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Props) {
@@ -52,7 +93,10 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
     flint_hills: false,
     aoi: true,
     district: true,
+    mesh: true,
   })
+  const meshNodes = useQuery({ queryKey: ['mesh-nodes'], queryFn: api.meshNodes, refetchInterval: 10_000 })
+  const placed = (meshNodes.data ?? []).filter((n) => n.lat != null && n.lon != null)
   const district = useQuery({ queryKey: ['district'], queryFn: api.district, retry: false })
   const lines = useQuery({ queryKey: ['layer', 'power_lines'], queryFn: () => api.layer('power_lines') })
   const statics = useQuery({ queryKey: ['layer', 'static_sources'], queryFn: () => api.layer('static_sources') })
@@ -175,6 +219,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
             </Marker>
           )
         })}
+        {layers.mesh && placed.map((n) => <MeshMarker key={n.node_id} n={n} />)}
         <CursorReadout />
       </Map>
 
@@ -195,6 +240,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
                   ['power_lines', 'Transmission'],
                   ['static_sources', 'Known heat sources'],
                   ['flint_hills', 'Flint Hills'],
+                  ...(placed.length > 0 ? ([['mesh', `Mesh radios (${placed.length})`]] as const) : []),
                 ] as const
               ).map(([k, label]) => (
                 <label key={k} className="flex cursor-pointer items-center gap-2.5 text-[11.5px] text-muted hover:text-text">

@@ -65,7 +65,7 @@ export const SUPPRESSION_LABEL = {
   low_signal: 'low signal',
 } as const
 
-const SIGNAL_SHORT: Record<string, string> = { line_fault: 'line', report: 'report', neighbor_reply: 'nbr', camera_smoke: 'cam' }
+const SIGNAL_SHORT: Record<string, string> = { line_fault: 'line', report: 'report', neighbor_reply: 'nbr', camera_smoke: 'cam', sensor_smoke: 'smoke' }
 
 /** Compact evidence count for list rows, e.g. "viirs×3 line×1 nbr×1". */
 export function sourcesLabel(sources: Record<string, number>, signals: Record<string, number>): string {

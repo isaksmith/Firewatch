@@ -13,5 +13,9 @@
   "burn_radius_km": 1.5,
   "turnout_min": 13,
   "drive_min": 18,
-  "false_page_budget_per_month": 2
+  "false_page_budget_per_month": 2,
+  "smoke_pm25_rise": 50,
+  "smoke_fine_ratio": 0.6,
+  "smoke_regional_share": 0.5,
+  "smoke_repeat_min": 60
 }

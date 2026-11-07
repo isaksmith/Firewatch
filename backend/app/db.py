@@ -95,13 +95,14 @@ CREATE TABLE IF NOT EXISTS contacts (
   weekday_avail INTEGER NOT NULL DEFAULT 0,
   ladder_rank   INTEGER,
   opted_in      INTEGER NOT NULL DEFAULT 1,
-  registered    INTEGER NOT NULL DEFAULT 1
+  registered    INTEGER NOT NULL DEFAULT 1,
+  mesh_id       TEXT                       -- Meshtastic node ID (!a1b2c3d4) of the radio they carry
 );
 
 CREATE TABLE IF NOT EXISTS signals (
   id           INTEGER PRIMARY KEY,
   event_id     INTEGER REFERENCES events(id),
-  kind         TEXT NOT NULL,              -- line_fault | report | neighbor_reply | camera_smoke
+  kind         TEXT NOT NULL,              -- line_fault | report | neighbor_reply | camera_smoke | sensor_smoke
   lat          REAL NOT NULL,
   lon          REAL NOT NULL,
   observed_at  TEXT NOT NULL,
@@ -118,16 +119,41 @@ CREATE TABLE IF NOT EXISTS messages (
   id          INTEGER PRIMARY KEY,
   event_id    INTEGER REFERENCES events(id),
   contact_id  INTEGER REFERENCES contacts(id),
-  phone       TEXT NOT NULL,
+  phone       TEXT NOT NULL,               -- phone number, or mesh node ID on the mesh channel
   direction   TEXT NOT NULL,               -- out | in
   purpose     TEXT,
   body        TEXT NOT NULL,
-  status      TEXT NOT NULL,               -- sent | failed | received
+  status      TEXT NOT NULL,               -- sent | failed | received; mesh adds relayed | delivered
   gateway_id  TEXT,
   is_sample   INTEGER NOT NULL DEFAULT 0,
-  created_at  TEXT NOT NULL
+  created_at  TEXT NOT NULL,
+  channel     TEXT NOT NULL DEFAULT 'sms'  -- sms | mesh
 );
 CREATE INDEX IF NOT EXISTS idx_messages_event ON messages(event_id);
+
+CREATE TABLE IF NOT EXISTS mesh_nodes (
+  node_id      TEXT PRIMARY KEY,           -- !a1b2c3d4
+  long_name    TEXT,
+  short_name   TEXT,
+  hw_model     TEXT,
+  lat          REAL,
+  lon          REAL,
+  position_at  TEXT,
+  battery_pct  INTEGER,
+  snr          REAL,
+  last_heard   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sensor_readings (   -- telemetry from mesh sensor nodes
+  id           INTEGER PRIMARY KEY,
+  node_id      TEXT NOT NULL,
+  at           TEXT NOT NULL,              -- wall-clock receive time
+  temp_c       REAL,
+  rh_pct       REAL,
+  pm25         REAL,                       -- µg/m³, PM2.5 (atmospheric units when the sensor sends them)
+  pm10         REAL                        -- µg/m³, PM10
+);
+CREATE INDEX IF NOT EXISTS idx_sensor_node_time ON sensor_readings(node_id, at);
 
 CREATE TABLE IF NOT EXISTS burn_notices (
   id          INTEGER PRIMARY KEY,
@@ -144,7 +170,13 @@ CREATE TABLE IF NOT EXISTS burn_notices (
 # Columns added after the first release; ALTER them onto older databases.
 MIGRATIONS = {
     "events": {"evidence_json": "TEXT", "level_reason": "TEXT", "response_json": "TEXT"},
+    "contacts": {"mesh_id": "TEXT"},
+    "messages": {"channel": "TEXT NOT NULL DEFAULT 'sms'"},
 }
+POST_MIGRATION = """
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_mesh ON contacts(mesh_id);
+CREATE INDEX IF NOT EXISTS idx_messages_gateway ON messages(gateway_id);
+"""
 
 
 def utcnow() -> datetime:
@@ -186,6 +218,7 @@ def init_db(path: str | None = None) -> None:
             for col, decl in cols.items():
                 if col not in have:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        conn.executescript(POST_MIGRATION)
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

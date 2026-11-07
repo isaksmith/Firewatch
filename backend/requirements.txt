@@ -6,4 +6,5 @@ pydantic-settings>=2.4
 contourpy>=1.2
 pillow>=10.4
 xgboost>=3.0
+meshtastic>=2.7
 pytest>=8.3
