@@ -342,6 +342,8 @@ export interface RegionPlan {
     rich: number
     relays: number
     priority_covered: number
+    watched_by_rich: number
+    watched_by_bare: number
     coverage_curve: number[]
     reported_wildfires: number
     burns_per_year: number

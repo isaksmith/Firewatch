@@ -466,11 +466,11 @@ The tower relays carry sensors: a PMSA003I particulate sensor and an SHTC3 or BM
    For Cottonwood Creek: 116 High+ hours a year, 75% from the SSW and 24% from the NW behind cold fronts, almost all in March and April. The cached summaries in `data/climate/` are committed so planning works offline.
 4. **Detection model.** A sensor only smells a fire it is downwind of, so a plot's catchment is a wedge upwind of it, weighted by the wind rose:
    - **Rich nodes:** 3 km, ±20° plume half-width, 0.8 chance a node in the plume catches it.
-   - **Bare nodes:** the plot itself plus 0.4 km of fetch upwind. Dryad's 100 m spacing is the only reference.
+   - **Bare nodes:** the plot itself plus 0.4 km of fetch upwind, with a 0.3 chance per node of catching a fire there. Dryad's 100 m spacing is the only reference. That footprint is a small fraction of a 1 km cell, so bare nodes barely move the watched share (about 0.1–0.2% in Cottonwood Creek) and never move plots: they add confirmation inside the plot, while the rich nodes' smoke range decides placement. The page states this split under the summary.
 
    These are planning guesses, because the README is explicit that no node has a proven detection radius. They are request parameters so the detection trial's numbers can replace them.
 5. **Siting.** The top 400 cells by priority are candidates. A cell crossed by a power line puts its plot on the line, at the co-op's right of way; otherwise the plot goes at the cell center. Plots are chosen greedily by marginal priority covered, at least 3 km apart. The page plots the coverage curve up to twice the requested count, so a county can see what each extra plot buys. A budget can replace the plot count; the planner then fits plots, relays, the station and 10% spares under it.
-6. **Plot layout.** Nodes go on a 4 × 4 lattice across the 15-acre square (~82 m spacing).
+6. **Plot layout.** Nodes go on a 4 × 4 lattice across the 15-acre square (~82 m spacing). The lattice grows to 5 × 5 or 6 × 6 when a plot has more than 16 nodes.
    - Rich nodes take the corner farthest downwind of each fire-wind direction, one per direction. In Cottonwood Creek that puts one on the NE corner for SSW winds and one on the SE corner for post-frontal NW winds.
    - Bare nodes fill the next most-downwind positions.
 7. **Mesh.** Relay candidates are:

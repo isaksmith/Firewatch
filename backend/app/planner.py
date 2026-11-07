@@ -51,6 +51,7 @@ PARAMS = {
     "rich_half_angle_deg": 20.0,  # plume half-width either side of the wind direction
     "rich_catch": 0.8,  # chance a rich node in the plume catches it (sampling gaps, plume meander)
     "bare_fetch_km": 0.4,  # gas head catches fires this far upwind of the plot (Dryad spaces 100 m)
+    "bare_catch": 0.3,  # chance one bare node catches a fire inside its plot's fetch (gas plumes are narrow)
     "budget_usd": None,
 }
 COSTS = {"bare": 175, "rich": 240, "relay": 105, "station": 45}
@@ -93,7 +94,7 @@ USABLE_PACK = 0.8
 ASSUMPTIONS = [
     (
         "Detection distances are planning figures: no FireWatch node has a measured detection radius yet. "
-        "Replace rich_range_km and bare_fetch_km with the detection trial's results."
+        "Replace rich_range_km, bare_fetch_km and the per-node catch rates with the detection trial's results."
     ),
     (
         "Power lines are OpenStreetMap transmission lines (115 kV and up). Distribution feeders, which start most "
@@ -392,8 +393,9 @@ def site_cover(g: Grid, sx: float, sy: float, clim: dict, p: dict) -> np.ndarray
     wedge = np.where(own, np.maximum(wedge, 0.5), wedge)
     rich = 1 - (1 - p["rich_catch"] * wedge) ** p["rich_per_site"] if p["rich_per_site"] else np.zeros_like(wedge)
     side_km = math.sqrt(p["plot_acres"] * 4046.86) / 1000
-    bare_area = side_km * (side_km + p["bare_fetch_km"]) * min(1.0, p["bare_per_site"] / 7)
-    bare = np.where(own, min(1.0, bare_area / g.cell_km**2), 0.0) if p["bare_per_site"] else np.zeros_like(wedge)
+    bare_area = side_km * (side_km + p["bare_fetch_km"])
+    bare_hit = 1 - (1 - p["bare_catch"]) ** p["bare_per_site"]
+    bare = np.where(own, min(1.0, bare_area / g.cell_km**2) * bare_hit, 0.0) if p["bare_per_site"] else np.zeros_like(wedge)
     return 1 - (1 - rich) * (1 - bare)
 
 
@@ -449,7 +451,7 @@ def plot_layout(sx: float, sy: float, clim: dict, p: dict) -> list[dict]:
     """Bare and rich node positions in one plot: downwind edges first, a rich node per fire-wind mode."""
     side = math.sqrt(p["plot_acres"] * 4046.86) / 1000
     modes = clim["fire_wind_modes"]
-    steps = np.linspace(-side / 2, side / 2, 4)
+    steps = np.linspace(-side / 2, side / 2, max(4, math.ceil(math.sqrt(p["bare_per_site"] + p["rich_per_site"]))))
     pts = [(u, v) for u in steps for v in steps]
 
     def score(pt, dws):
@@ -953,6 +955,14 @@ def plan_region(region: Region, overrides: dict | None = None, fetch_climate: bo
     for s in sites:
         miss *= 1 - s["cover"]
     covered = 1 - miss
+
+    def watched_by(tier_off: str) -> float:
+        q = {**p, tier_off: 0}
+        m = np.ones_like(g.x)
+        for s in sites:
+            m *= 1 - site_cover(g, s["x"], s["y"], clim, q)
+        return round(1 - float((g.priority * m).sum()) / total, 4)
+
     cells = []
     h = g.cell_km / 2
     for i in range(len(g.x)):
@@ -993,7 +1003,9 @@ def plan_region(region: Region, overrides: dict | None = None, fetch_climate: bo
         "power": power_check(clim),
         "summary": {
             "sites": len(site_out), "bare": n_bare, "rich": n_rich, "relays": n_relay,
-            "priority_covered": round(1 - float((g.priority * miss).sum()) / total, 3),
+            "priority_covered": round(1 - float((g.priority * miss).sum()) / total, 4),
+            "watched_by_rich": watched_by("bare_per_site"),
+            "watched_by_bare": watched_by("rich_per_site"),
             "coverage_curve": curve,
             "reported_wildfires": len(fires_in),
             "burns_per_year": round(float(np.sum(_burns_inside(region)))),
