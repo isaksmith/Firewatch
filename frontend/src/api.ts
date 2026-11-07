@@ -238,10 +238,12 @@ export interface FeedResponse {
   data: any
 }
 
+const TOKEN = import.meta.env.VITE_API_TOKEN
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: { 'Content-Type': 'application/json', ...(TOKEN ? { 'X-Firewatch-Token': TOKEN } : {}), ...init?.headers },
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))

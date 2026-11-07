@@ -340,3 +340,24 @@ def test_confirms_during_a_hold_send_no_texts_and_count_rises():
         r = posts.confirm(conn, pid, wes, "see", at(11), True)
         assert r["ok"] and r["counted"] and r["count"] == 1
         assert all_out(conn) == n_out
+
+
+def test_actions_route_requires_token_when_set(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from app import main
+    from app.main import app
+
+    real = main.get_settings()
+    monkeypatch.setattr(main, "get_settings", lambda: SimpleNamespace(**{**vars(real), "api_token": "s3cret"}))
+    with TestClient(app) as client:
+        top = client.get("/api/alerts").json()["alerts"][0]
+        body = {"action": "acknowledge", "operator": "Dispatch 2"}
+        r = client.post(f"/api/alerts/{top['id']}/actions", json=body)
+        assert r.status_code == 401
+        with connect() as conn:
+            assert ev(conn, top["id"])["ack_until"] is None
+        r = client.post(f"/api/alerts/{top['id']}/actions", json=body, headers={"X-Firewatch-Token": "s3cret"})
+        assert r.status_code == 200

@@ -356,7 +356,7 @@ class ActionIn(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
-@api.post("/alerts/{event_id}/actions")
+@api.post("/alerts/{event_id}/actions", dependencies=[Depends(require_token)])
 def act_on_alert(event_id: int, body: ActionIn):
     allowed_from, new_status = TRANSITIONS[body.action]
     with connect() as conn:
