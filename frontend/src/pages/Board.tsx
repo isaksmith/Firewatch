@@ -13,7 +13,7 @@ import {
   type StationAction,
 } from '../api'
 import { Mark } from '../components/ui'
-import { postAge, threadLine } from '../lib/board'
+import { plainAge, threadLine } from '../lib/board'
 
 const CATEGORIES: { key: BoardCategory; label: string }[] = [
   { key: 'fire', label: 'Fire' },
@@ -444,7 +444,7 @@ function PostCard({
       )}
 
       <p className="mt-2 text-[12px] text-muted">
-        {post.author ?? 'A neighbor'} <span className="text-dim">·</span> {postAge(post)} <span className="text-dim">·</span>{' '}
+        {post.author ?? 'A neighbor'} <span className="text-dim">·</span> {plainAge(post)} <span className="text-dim">·</span>{' '}
         <span className="text-text">{seeText(post.confirms)}</span>
       </p>
 

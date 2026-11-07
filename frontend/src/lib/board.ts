@@ -31,6 +31,21 @@ export const threadLine = (p: { thread_size?: number; badge?: string | null }) =
     ? `Part of ${p.thread_size} reports in this area${p.badge ? '. The notice covers all of them.' : ''}`
     : null
 
+function ageMinutes(p: { age_min?: number; created_at: string }): number {
+  if (p.age_min != null) return Math.max(0, Math.round(p.age_min))
+  return Math.max(0, Math.round((Date.now() - Date.parse(p.created_at)) / 60_000))
+}
+
+/** Plain words for the public phone page, from the server's age_min when present. */
+export function plainAge(p: { age_min?: number; created_at: string }): string {
+  const mins = ageMinutes(p)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} min ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 48) return `${hours} hr ago`
+  return `${Math.round(hours / 24)} days ago`
+}
+
 /** Server age_min when present (replay posts carry old timestamps), else the browser clock. */
 export function postAge(p: { age_min?: number; created_at: string }): string {
   if (p.age_min == null) return timeAgo(p.created_at)
