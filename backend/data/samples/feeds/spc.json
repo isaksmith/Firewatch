@@ -1,0 +1,37 @@
+{
+ "count": 1,
+ "areas": [
+  {
+   "outlook": "day1_wind_rh",
+   "label": "Elevated",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -100.5,
+       38
+      ],
+      [
+       -97,
+       38
+      ],
+      [
+       -97,
+       39.5
+      ],
+      [
+       -100.5,
+       39.5
+      ],
+      [
+       -100.5,
+       38
+      ]
+     ]
+    ]
+   }
+  }
+ ],
+ "errors": {}
+}

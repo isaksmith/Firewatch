@@ -7,7 +7,7 @@ import numpy as np
 from .config import DATA_DIR
 from .geo import EARTH_RADIUS_KM, KM_PER_DEG_LAT, KM_PER_MILE, bearing_deg, compass, km_per_deg_lon
 
-LAYER_NAMES = ("towns", "power_lines", "substations", "static_sources", "flint_hills")
+LAYER_NAMES = ("towns", "power_lines", "substations", "static_sources", "flint_hills", "distribution_lines")
 DISTANCE_CAP_KM = 50.0
 
 

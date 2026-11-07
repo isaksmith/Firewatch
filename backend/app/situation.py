@@ -12,13 +12,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .config import DATA_DIR
 from .fire_weather import default_curing
 from .geo import angle_diff
 from .sim.spread import WeatherStep
 
 Kind = Literal["observed", "forecast", "inferred", "simulated", "assumed"]
-SCENARIO_DIR = DATA_DIR / "scenarios"
 
 
 class Provenance(BaseModel):
@@ -131,23 +129,74 @@ def from_open_meteo(lat: float, lon: float, when: datetime, hours: int = 4) -> S
     )
 
 
-def list_scenarios() -> list[dict]:
+def scenario_situation(slug: str, weather_variant: str | None = None) -> Situation:
+    """The forecast's view of a replay scenario (data/scenarios) and its district (data/districts).
+
+    Raises FileNotFoundError for an unknown scenario or weather variant.
+    """
+    from .district import _dir
+    from .scenario import load_scenario
+
+    try:
+        sc = load_scenario(slug)
+    except KeyError:
+        raise FileNotFoundError(slug) from None
+    t0 = datetime.fromisoformat(sc["t0"].replace("Z", "+00:00"))
+    src = Provenance(source=f"scenario {slug} (fictional)", kind="simulated")
+
+    if weather_variant:
+        variant = sc.get("weather_variants", {}).get(weather_variant)
+        if variant is None:
+            raise FileNotFoundError(weather_variant)
+        hours, wsrc = variant["hours"], Provenance(source=f"scenario {slug}, what-if '{weather_variant}'", kind="simulated")
+    elif sc.get("weather_hourly"):
+        hours, wsrc = sc["weather_hourly"], src
+    else:  # one reading: hold it constant across the run
+        w = sc["weather"]
+        hours = [{"time": t0 + timedelta(hours=h), "wind_kmh": w["wind_kmh"], "wind_from_deg": w["wind_dir_deg"],
+                  "temp_c": w["temp_c"], "rh_pct": w["rh_pct"], "gust_kmh": w.get("gust_kmh")} for h in (-1, 4)]
+        wsrc = src
+
+    import csv
     import json
 
-    out = []
-    for path in sorted(SCENARIO_DIR.glob("*.json")):
-        raw = json.loads(path.read_text())
-        out.append({"slug": path.stem, "title": raw["title"], "story": raw.get("story"), "synthetic": raw.get("synthetic", True)})
-    return out
+    district = _dir(sc["district"])
+    cfg = json.loads((district / "settings.json").read_text())
+    with (district / "roster.csv").open(newline="") as f:
+        roster = list(csv.DictReader(f))
+    by_phone = {r["phone"]: r for r in roster}
 
+    resources = []
+    station = cfg.get("station")
+    if station:
+        for a in cfg.get("apparatus", []):
+            resources.append(Resource(**a, lat=station["lat"], lon=station["lon"], provenance=src))
+    for a in cfg.get("mutual_aid", []):
+        resources.append(Resource(**a, provenance=src))
+    for r in roster:
+        if r["role"] in ("water_truck", "disc") and r["lat"]:
+            resources.append(Resource(
+                id=f"contact-{r['phone'][-4:]}", name=r["name"], kind=r["role"], lat=float(r["lat"]), lon=float(r["lon"]),
+                crew=1, ready_min=5, provenance=src,
+            ))
 
-def load_scenario(slug: str) -> tuple[dict, Situation]:
-    """Returns (metadata, situation). Raises FileNotFoundError for an unknown slug."""
-    import json
+    permits = [BurnPermit(**b) for b in sc.get("burn_permits", [])]
+    for step in sc.get("timeline", []):
+        who = by_phone.get(step.get("from", ""))
+        if step.get("type") == "sms" and step.get("body", "").upper().startswith("BURN") and who and who["lat"]:
+            start = t0 + timedelta(minutes=step["t"])
+            permits.append(BurnPermit(
+                id=f"burn-{who['phone'][-4:]}", lat=float(who["lat"]), lon=float(who["lon"]), start=start,
+                end=start.replace(hour=23, minute=59), status="active", provenance=src,
+            ))
 
-    path = SCENARIO_DIR / f"{slug}.json"
-    if not path.is_file() or path.parent != SCENARIO_DIR:
-        raise FileNotFoundError(slug)
-    raw = json.loads(path.read_text())
-    meta = {k: v for k, v in raw.items() if k != "situation"}
-    return meta, Situation.model_validate(raw["situation"])
+    ig = sc["ignition"]
+    return Situation(
+        ignition=Ignition(lat=ig["lat"], lon=ig["lon"], time=t0, fire_age_min=0,
+                          provenance=Provenance(source=f"scenario {slug}: {ig.get('cause', 'ignition')}", kind="simulated")),
+        weather=Weather(hours=[WeatherHour(**h) for h in hours], provenance=wsrc),
+        curing=Curing(pct=sc["curing_pct"], provenance=src) if sc.get("curing_pct") is not None else None,
+        red_flag=sc.get("red_flag"),
+        burn_permits=permits,
+        resources=resources,
+    )

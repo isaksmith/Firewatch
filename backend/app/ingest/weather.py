@@ -7,7 +7,7 @@ import httpx
 
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
-HOURLY = "temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation,weather_code"
+HOURLY = "temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation,weather_code,dew_point_2m,pressure_msl,vapour_pressure_deficit"
 
 
 @lru_cache(maxsize=512)
@@ -31,6 +31,11 @@ def _hourly(lat_r: float, lon_r: float, day: str, archive: bool) -> dict:
     return resp.json()["hourly"]
 
 
+def _at(h: dict, key: str, idx: int):
+    vals = h.get(key)
+    return vals[idx] if vals and idx < len(vals) else None
+
+
 def weather_at(lat: float, lon: float, when: datetime) -> dict:
     """Weather features at the hour nearest `when`. Raises httpx.HTTPError on failure."""
     when = when.astimezone(timezone.utc)
@@ -48,6 +53,9 @@ def weather_at(lat: float, lon: float, when: datetime) -> dict:
         "wind_dir_deg": h["wind_direction_10m"][idx],
         "rh_pct": h["relative_humidity_2m"][idx],
         "temp_c": h["temperature_2m"][idx],
+        "dew_point_c": _at(h, "dew_point_2m", idx),
+        "pressure_hpa": _at(h, "pressure_msl", idx),
+        "vpd_kpa": _at(h, "vapour_pressure_deficit", idx),
         "precip_72h_mm": round(sum(window("precipitation", 72)), 1),
         "thunder_24h": int(any(95 <= c <= 99 for c in window("weather_code", 24))),
         "source": "open-meteo",

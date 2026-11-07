@@ -33,21 +33,38 @@ const AOI: GeoJSON.Feature = {
   },
 }
 
-type LayerKey = 'power_lines' | 'static_sources' | 'flint_hills' | 'aoi'
+type LayerKey = 'power_lines' | 'static_sources' | 'flint_hills' | 'aoi' | 'district' | 'distribution_lines' | 'dry_grid' | 'wind_lines'
 
 const SWATCH: Record<LayerKey, string> = {
   aoi: 'h-0 w-4 border-t border-dashed border-sample/70',
+  district: 'h-2 w-4 border border-[#e6e8eb]/60',
   power_lines: 'h-px w-4 bg-[#c9d4e0]',
   static_sources: 'h-2 w-2 rounded-full border border-muted',
   flint_hills: 'h-2 w-4 border border-dashed border-ok/70',
+  distribution_lines: 'h-px w-4 bg-[#8fa3b8]',
+  dry_grid: 'h-2 w-2 rounded-full bg-[#ffb21a]',
+  wind_lines: 'h-0.5 w-4 bg-[#ff5c5c]',
 }
 
 export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Props) {
   const mapRef = useRef<MapRef>(null)
   const [panelOpen, setPanelOpen] = useState(() => window.innerWidth >= 1280)
-  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({ power_lines: true, static_sources: true, flint_hills: false, aoi: true })
+  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
+    power_lines: true,
+    static_sources: true,
+    flint_hills: false,
+    aoi: true,
+    district: true,
+    distribution_lines: false,
+    dry_grid: false,
+    wind_lines: false,
+  })
+  const district = useQuery({ queryKey: ['district'], queryFn: api.district, retry: false })
   const lines = useQuery({ queryKey: ['layer', 'power_lines'], queryFn: () => api.layer('power_lines') })
   const statics = useQuery({ queryKey: ['layer', 'static_sources'], queryFn: () => api.layer('static_sources') })
+  const dist = useQuery({ queryKey: ['layer', 'distribution_lines'], queryFn: () => api.layer('distribution_lines'), enabled: layers.distribution_lines })
+  const grid = useQuery({ queryKey: ['risk', 'grid'], queryFn: () => api.riskGrid(), enabled: layers.dry_grid })
+  const windLines = useQuery({ queryKey: ['risk', 'wind'], queryFn: () => api.linesUnderWind(), enabled: layers.wind_lines })
   const flint = useQuery({ queryKey: ['layer', 'flint_hills'], queryFn: () => api.layer('flint_hills') })
 
   const selected = alerts.find((a) => a.id === selectedId)
@@ -64,7 +81,8 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
     [selected],
   )
 
-  const ordered = [...alerts].sort((a, b) => (a.id === selectedId ? 1 : b.id === selectedId ? -1 : a.score - b.score))
+  const rank = (a: AlertSummary) => ['monitor', 'investigate', 'escalate'].indexOf(a.recommendation) * 1000 + (a.score ?? 100)
+  const ordered = [...alerts].sort((a, b) => (a.id === selectedId ? 1 : b.id === selectedId ? -1 : rank(a) - rank(b)))
 
   return (
     <div className="relative flex-1 bg-void">
@@ -83,6 +101,12 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
             <Layer id="aoi" type="line" paint={{ 'line-color': '#5cc8ff', 'line-width': 1, 'line-opacity': 0.35, 'line-dasharray': [6, 4] }} />
           </Source>
         )}
+        {layers.district && district.data && (
+          <Source id="district" type="geojson" data={district.data.boundary}>
+            <Layer id="district-fill" type="fill" paint={{ 'fill-color': '#e6e8eb', 'fill-opacity': 0.025 }} />
+            <Layer id="district-line" type="line" paint={{ 'line-color': '#e6e8eb', 'line-opacity': 0.45, 'line-width': 1 }} />
+          </Source>
+        )}
         {layers.flint_hills && flint.data && (
           <Source id="flint" type="geojson" data={flint.data}>
             <Layer id="flint-fill" type="fill" paint={{ 'fill-color': '#3ddc97', 'fill-opacity': 0.05 }} />
@@ -93,6 +117,21 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
           <Source id="lines" type="geojson" data={lines.data}>
             <Layer id="lines-glow" type="line" paint={{ 'line-color': '#c9d4e0', 'line-width': 4, 'line-opacity': 0.06 }} />
             <Layer id="lines" type="line" paint={{ 'line-color': '#c9d4e0', 'line-width': 1, 'line-opacity': 0.7 }} />
+          </Source>
+        )}
+        {layers.distribution_lines && dist.data && (
+          <Source id="dist" type="geojson" data={dist.data}>
+            <Layer id="dist" type="line" paint={{ 'line-color': '#8fa3b8', 'line-width': 0.8, 'line-opacity': 0.6 }} />
+          </Source>
+        )}
+        {layers.dry_grid && grid.data && (
+          <Source id="drygrid" type="geojson" data={grid.data}>
+            <Layer id="drygrid" type="circle" paint={{ 'circle-radius': 6, 'circle-color': ['interpolate', ['linear'], ['coalesce', ['get', 'rh'], 100], 10, '#ff5c5c', 25, '#ffb21a', 50, '#3ddc97'], 'circle-opacity': 0.45 }} />
+          </Source>
+        )}
+        {layers.wind_lines && windLines.data && (
+          <Source id="windlines" type="geojson" data={windLines.data}>
+            <Layer id="windlines" type="line" paint={{ 'line-color': '#ff5c5c', 'line-width': 2.5, 'line-opacity': 0.85 }} />
           </Source>
         )}
         {layers.static_sources && statics.data && (
@@ -152,7 +191,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
                   >
                     <span>{trackId(a.id)}</span>
                     <span className="font-semibold" style={{ color: active ? undefined : REC_META[a.recommendation].color }}>
-                      {a.score}
+                      {a.score ?? REC_META[a.recommendation].short}
                     </span>
                   </span>
                 )}
@@ -176,9 +215,13 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
               {(
                 [
                   ['aoi', 'Kansas AOI'],
+                  ['district', district.data?.settings.short_name ?? 'Fire district'],
                   ['power_lines', 'Transmission'],
                   ['static_sources', 'Known heat sources'],
                   ['flint_hills', 'Flint Hills'],
+                  ['distribution_lines', 'Distribution (partial)'],
+                  ['dry_grid', 'Dry air grid'],
+                  ['wind_lines', 'Lines under wind'],
                 ] as const
               ).map(([k, label]) => (
                 <label key={k} className="flex cursor-pointer items-center gap-2.5 text-[11.5px] text-muted hover:text-text">
@@ -200,7 +243,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
                     <TrackGlyph rec={r} size={r === 'monitor' ? 9 : 11} />
                   </span>
                   <span className="flex-1">{REC_META[r].label}</span>
-                  <span className="num text-[10px] text-dim">{r === 'escalate' ? '≥70' : r === 'investigate' ? '40–69' : '<40'}</span>
+                  <span className="num text-[10px] text-dim">{r === 'escalate' ? '2 SRC / ≥70' : r === 'investigate' ? '1 SRC / 40+' : '—'}</span>
                 </div>
               ))}
             </div>

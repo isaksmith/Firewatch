@@ -1,0 +1,1552 @@
+{
+ "profile": {
+  "raw_rows": 1913,
+  "rows": 1913,
+  "dropped": {
+   "missing_features": 0,
+   "degraded_weather": 0,
+   "no_terrain": 0
+  },
+  "events": 1114,
+  "rows_by_snapshot": {
+   "0": 1114,
+   "1": 549,
+   "2": 250
+  },
+  "by_kind": {
+   "rx": {
+    "events": 90,
+    "rows": 181,
+    "in_flint_hills": 0.267,
+    "march_april": 0.711,
+    "median_dist_town_km": 6.6,
+    "median_frp_max": 14.5,
+    "median_gust_kmh": 28.6,
+    "median_rh_pct": 40.0,
+    "median_n_detections": 2.0
+   },
+   "rx_weak": {
+    "events": 400,
+    "rows": 702,
+    "in_flint_hills": 1.0,
+    "march_april": 1.0,
+    "median_dist_town_km": 8.2,
+    "median_frp_max": 8.0,
+    "median_gust_kmh": 32.0,
+    "median_rh_pct": 37.0,
+    "median_n_detections": 2.0
+   },
+   "static": {
+    "events": 400,
+    "rows": 575,
+    "in_flint_hills": 0.355,
+    "march_april": 0.16,
+    "median_dist_town_km": 2.9,
+    "median_frp_max": 1.2,
+    "median_gust_kmh": 20.7,
+    "median_rh_pct": 70.0,
+    "median_n_detections": 1.0
+   },
+   "wf": {
+    "events": 224,
+    "rows": 455,
+    "in_flint_hills": 0.317,
+    "march_april": 0.75,
+    "median_dist_town_km": 8.7,
+    "median_frp_max": 19.0,
+    "median_gust_kmh": 40.7,
+    "median_rh_pct": 33.5,
+    "median_n_detections": 2.0
+   }
+  },
+  "events_by_year": {
+   "2016": {
+    "rx": 7,
+    "rx_weak": 55,
+    "static": 18,
+    "wf": 32
+   },
+   "2017": {
+    "rx": 1,
+    "rx_weak": 39,
+    "static": 30,
+    "wf": 22
+   },
+   "2018": {
+    "rx": 2,
+    "rx_weak": 24,
+    "static": 30,
+    "wf": 23
+   },
+   "2019": {
+    "rx": 9,
+    "rx_weak": 39,
+    "static": 42,
+    "wf": 12
+   },
+   "2020": {
+    "rx": 0,
+    "rx_weak": 54,
+    "static": 36,
+    "wf": 21
+   },
+   "2021": {
+    "rx": 14,
+    "rx_weak": 48,
+    "static": 42,
+    "wf": 24
+   },
+   "2022": {
+    "rx": 16,
+    "rx_weak": 43,
+    "static": 36,
+    "wf": 29
+   },
+   "2023": {
+    "rx": 14,
+    "rx_weak": 29,
+    "static": 42,
+    "wf": 26
+   },
+   "2024": {
+    "rx": 11,
+    "rx_weak": 31,
+    "static": 66,
+    "wf": 17
+   },
+   "2025": {
+    "rx": 16,
+    "rx_weak": 38,
+    "static": 58,
+    "wf": 18
+   }
+  }
+ },
+ "headline": {
+  "xgboost": {
+   "wildfire_vs_burns": 0.837,
+   "wildfire_vs_reported_rx": 0.72
+  },
+  "logistic": {
+   "wildfire_vs_burns": 0.872,
+   "wildfire_vs_reported_rx": 0.784
+  },
+  "rules-v0": {
+   "wildfire_vs_burns": 0.787,
+   "wildfire_vs_reported_rx": 0.603
+  }
+ },
+ "platt_train": {
+  "a": 0.7330751620769327,
+  "b": -0.04005780964721572
+ },
+ "bootstrap": {
+  "n_events": 200,
+  "n_boot": 2000,
+  "auc": {
+   "xgboost|all": {
+    "low": 0.771,
+    "median": 0.84,
+    "high": 0.9,
+    "share_above_zero": 1.0
+   },
+   "xgboost|rx": {
+    "low": 0.62,
+    "median": 0.725,
+    "high": 0.823,
+    "share_above_zero": 1.0
+   },
+   "logistic|all": {
+    "low": 0.815,
+    "median": 0.874,
+    "high": 0.924,
+    "share_above_zero": 1.0
+   },
+   "logistic|rx": {
+    "low": 0.692,
+    "median": 0.787,
+    "high": 0.865,
+    "share_above_zero": 1.0
+   },
+   "rules-v0|all": {
+    "low": 0.725,
+    "median": 0.789,
+    "high": 0.846,
+    "share_above_zero": 1.0
+   },
+   "rules-v0|rx": {
+    "low": 0.504,
+    "median": 0.605,
+    "high": 0.702,
+    "share_above_zero": 1.0
+   }
+  },
+  "diff": {
+   "xgboost-logistic|all": {
+    "low": -0.082,
+    "median": -0.034,
+    "high": 0.011,
+    "share_above_zero": 0.07
+   },
+   "xgboost-logistic|rx": {
+    "low": -0.135,
+    "median": -0.063,
+    "high": 0.007,
+    "share_above_zero": 0.04
+   },
+   "xgboost-rules-v0|all": {
+    "low": -0.016,
+    "median": 0.051,
+    "high": 0.115,
+    "share_above_zero": 0.938
+   },
+   "xgboost-rules-v0|rx": {
+    "low": 0.009,
+    "median": 0.119,
+    "high": 0.233,
+    "share_above_zero": 0.982
+   }
+  }
+ },
+ "by_year": {
+  "pooled_loyo": {
+   "xgboost": {
+    "wildfire_vs_burns_weighted": 0.846,
+    "wildfire_vs_burns": 0.894,
+    "wildfire_vs_reported_rx": 0.775
+   },
+   "logistic": {
+    "wildfire_vs_burns_weighted": 0.793,
+    "wildfire_vs_burns": 0.849,
+    "wildfire_vs_reported_rx": 0.71
+   },
+   "rules-v0": {
+    "wildfire_vs_burns_weighted": 0.763,
+    "wildfire_vs_burns": 0.852,
+    "wildfire_vs_reported_rx": 0.631
+   }
+  },
+  "years": [
+   {
+    "year": 2016,
+    "split": "loyo",
+    "wf": 32,
+    "rx_weak": 55,
+    "rx": 7,
+    "xgboost": {
+     "wildfire_vs_burns": 0.87,
+     "wildfire_vs_reported_rx": 0.828
+    },
+    "logistic": {
+     "wildfire_vs_burns": 0.797,
+     "wildfire_vs_reported_rx": 0.695
+    },
+    "rules-v0": {
+     "wildfire_vs_burns": 0.741,
+     "wildfire_vs_reported_rx": 0.578
+    }
+   },
+   {
+    "year": 2017,
+    "split": "loyo",
+    "wf": 22,
+    "rx_weak": 39,
+    "rx": 1,
+    "xgboost": {
+     "wildfire_vs_burns": 0.924,
+     "wildfire_vs_reported_rx": 0.714
+    },
+    "logistic": {
+     "wildfire_vs_burns": 0.875,
+     "wildfire_vs_reported_rx": 0.724
+    },
+    "rules-v0": {
+     "wildfire_vs_burns": 0.896,
+     "wildfire_vs_reported_rx": 0.448
+    }
+   },
+   {
+    "year": 2018,
+    "split": "loyo",
+    "wf": 23,
+    "rx_weak": 24,
+    "rx": 2,
+    "xgboost": {
+     "wildfire_vs_burns": 0.807,
+     "wildfire_vs_reported_rx": 0.687
+    },
+    "logistic": {
+     "wildfire_vs_burns": 0.78,
+     "wildfire_vs_reported_rx": 0.28
+    },
+    "rules-v0": {
+     "wildfire_vs_burns": 0.892,
+     "wildfire_vs_reported_rx": 0.65
+    }
+   },
+   {
+    "year": 2019,
+    "split": "loyo",
+    "rx_weak": 39,
+    "rx": 9,
+    "wf": 12,
+    "xgboost": {
+     "wildfire_vs_burns": 0.938,
+     "wildfire_vs_reported_rx": 0.852
+    },
+    "logistic": {
+     "wildfire_vs_burns": 0.848,
+     "wildfire_vs_reported_rx": 0.697
+    },
+    "rules-v0": {
+     "wildfire_vs_burns": 0.827,
+     "wildfire_vs_reported_rx": 0.592
+    }
+   },
+   {
+    "year": 2020,
+    "split": "loyo",
+    "wf": 21,
+    "rx_weak": 54,
+    "xgboost": {
+     "wildfire_vs_burns": 0.966,
+     "wildfire_vs_reported_rx": null
+    },
+    "logistic": {
+     "wildfire_vs_burns": 0.926,
+     "wildfire_vs_reported_rx": null
+    },
+    "rules-v0": {
+     "wildfire_vs_burns": 0.909,
+     "wildfire_vs_reported_rx": null
+    }
+   },
+   {
+    "year": 2021,
+    "split": "loyo",
+    "wf": 24,
+    "rx": 14,
+    "rx_weak": 48,
+    "xgboost": {
+     "wildfire_vs_burns": 0.957,
+     "wildfire_vs_reported_rx": 0.876
+    },
+    "logistic": {
+     "wildfire_vs_burns": 0.909,
+     "wildfire_vs_reported_rx": 0.753
+    },
+    "rules-v0": {
+     "wildfire_vs_burns": 0.891,
+     "wildfire_vs_reported_rx": 0.704
+    }
+   },
+   {
+    "year": 2022,
+    "split": "loyo",
+    "wf": 29,
+    "rx": 16,
+    "rx_weak": 43,
+    "xgboost": {
+     "wildfire_vs_burns": 0.919,
+     "wildfire_vs_reported_rx": 0.819
+    },
+    "logistic": {
+     "wildfire_vs_burns": 0.869,
+     "wildfire_vs_reported_rx": 0.797
+    },
+    "rules-v0": {
+     "wildfire_vs_burns": 0.89,
+     "wildfire_vs_reported_rx": 0.749
+    }
+   },
+   {
+    "year": 2023,
+    "split": "test",
+    "wf": 26,
+    "rx": 14,
+    "rx_weak": 29,
+    "xgboost": {
+     "wildfire_vs_burns": 0.74,
+     "wildfire_vs_reported_rx": 0.563
+    },
+    "logistic": {
+     "wildfire_vs_burns": 0.801,
+     "wildfire_vs_reported_rx": 0.677
+    },
+    "rules-v0": {
+     "wildfire_vs_burns": 0.701,
+     "wildfire_vs_reported_rx": 0.492
+    }
+   },
+   {
+    "year": 2024,
+    "split": "test",
+    "wf": 17,
+    "rx": 11,
+    "rx_weak": 31,
+    "xgboost": {
+     "wildfire_vs_burns": 0.864,
+     "wildfire_vs_reported_rx": 0.755
+    },
+    "logistic": {
+     "wildfire_vs_burns": 0.907,
+     "wildfire_vs_reported_rx": 0.849
+    },
+    "rules-v0": {
+     "wildfire_vs_burns": 0.848,
+     "wildfire_vs_reported_rx": 0.683
+    }
+   },
+   {
+    "year": 2025,
+    "split": "test",
+    "wf": 18,
+    "rx": 16,
+    "rx_weak": 38,
+    "xgboost": {
+     "wildfire_vs_burns": 0.967,
+     "wildfire_vs_reported_rx": 0.917
+    },
+    "logistic": {
+     "wildfire_vs_burns": 0.921,
+     "wildfire_vs_reported_rx": 0.854
+    },
+    "rules-v0": {
+     "wildfire_vs_burns": 0.841,
+     "wildfire_vs_reported_rx": 0.69
+    }
+   }
+  ]
+ },
+ "seeds": {
+  "seeds": 10,
+  "wildfire_vs_burns": {
+   "min": 0.828,
+   "max": 0.838,
+   "mean": 0.833,
+   "sd": 0.004
+  },
+  "wildfire_vs_reported_rx": {
+   "min": 0.7,
+   "max": 0.722,
+   "mean": 0.71,
+   "sd": 0.007
+  }
+ },
+ "hparams": {
+  "grid": [
+   {
+    "max_depth": 2,
+    "n_estimators": 100,
+    "wildfire_vs_burns_weighted": 0.82,
+    "wildfire_vs_burns": 0.873,
+    "wildfire_vs_reported_rx": 0.741
+   },
+   {
+    "max_depth": 2,
+    "n_estimators": 300,
+    "wildfire_vs_burns_weighted": 0.843,
+    "wildfire_vs_burns": 0.888,
+    "wildfire_vs_reported_rx": 0.777
+   },
+   {
+    "max_depth": 2,
+    "n_estimators": 600,
+    "wildfire_vs_burns_weighted": 0.846,
+    "wildfire_vs_burns": 0.89,
+    "wildfire_vs_reported_rx": 0.781
+   },
+   {
+    "max_depth": 3,
+    "n_estimators": 100,
+    "wildfire_vs_burns_weighted": 0.834,
+    "wildfire_vs_burns": 0.885,
+    "wildfire_vs_reported_rx": 0.758
+   },
+   {
+    "max_depth": 3,
+    "n_estimators": 300,
+    "wildfire_vs_burns_weighted": 0.846,
+    "wildfire_vs_burns": 0.894,
+    "wildfire_vs_reported_rx": 0.775
+   },
+   {
+    "max_depth": 3,
+    "n_estimators": 600,
+    "wildfire_vs_burns_weighted": 0.846,
+    "wildfire_vs_burns": 0.894,
+    "wildfire_vs_reported_rx": 0.774
+   },
+   {
+    "max_depth": 4,
+    "n_estimators": 100,
+    "wildfire_vs_burns_weighted": 0.834,
+    "wildfire_vs_burns": 0.886,
+    "wildfire_vs_reported_rx": 0.756
+   },
+   {
+    "max_depth": 4,
+    "n_estimators": 300,
+    "wildfire_vs_burns_weighted": 0.841,
+    "wildfire_vs_burns": 0.892,
+    "wildfire_vs_reported_rx": 0.765
+   },
+   {
+    "max_depth": 4,
+    "n_estimators": 600,
+    "wildfire_vs_burns_weighted": 0.84,
+    "wildfire_vs_burns": 0.893,
+    "wildfire_vs_reported_rx": 0.763
+   },
+   {
+    "max_depth": 6,
+    "n_estimators": 100,
+    "wildfire_vs_burns_weighted": 0.829,
+    "wildfire_vs_burns": 0.883,
+    "wildfire_vs_reported_rx": 0.75
+   },
+   {
+    "max_depth": 6,
+    "n_estimators": 300,
+    "wildfire_vs_burns_weighted": 0.84,
+    "wildfire_vs_burns": 0.893,
+    "wildfire_vs_reported_rx": 0.762
+   },
+   {
+    "max_depth": 6,
+    "n_estimators": 600,
+    "wildfire_vs_burns_weighted": 0.839,
+    "wildfire_vs_burns": 0.893,
+    "wildfire_vs_reported_rx": 0.759
+   }
+  ]
+ },
+ "ablations": {
+  "rows": [
+   {
+    "name": "All 27 features (v1)",
+    "n_features": 27,
+    "loyo": {
+     "wildfire_vs_burns_weighted": 0.846,
+     "wildfire_vs_burns": 0.894,
+     "wildfire_vs_reported_rx": 0.775
+    },
+    "test": {
+     "wildfire_vs_burns": 0.837,
+     "wildfire_vs_reported_rx": 0.72
+    }
+   },
+   {
+    "name": "Without in_flint_hills",
+    "n_features": 26,
+    "loyo": {
+     "wildfire_vs_burns_weighted": 0.788,
+     "wildfire_vs_burns": 0.817,
+     "wildfire_vs_reported_rx": 0.746
+    },
+    "test": {
+     "wildfire_vs_burns": 0.791,
+     "wildfire_vs_reported_rx": 0.73
+    }
+   },
+   {
+    "name": "Without region and season proxies",
+    "n_features": 22,
+    "loyo": {
+     "wildfire_vs_burns_weighted": 0.758,
+     "wildfire_vs_burns": 0.773,
+     "wildfire_vs_reported_rx": 0.737
+    },
+    "test": {
+     "wildfire_vs_burns": 0.776,
+     "wildfire_vs_reported_rx": 0.714
+    }
+   },
+   {
+    "name": "Without distance to town",
+    "n_features": 26,
+    "loyo": {
+     "wildfire_vs_burns_weighted": 0.846,
+     "wildfire_vs_burns": 0.893,
+     "wildfire_vs_reported_rx": 0.777
+    },
+    "test": {
+     "wildfire_vs_burns": 0.82,
+     "wildfire_vs_reported_rx": 0.688
+    }
+   },
+   {
+    "name": "Without infrastructure distances",
+    "n_features": 24,
+    "loyo": {
+     "wildfire_vs_burns_weighted": 0.854,
+     "wildfire_vs_burns": 0.9,
+     "wildfire_vs_reported_rx": 0.785
+    },
+    "test": {
+     "wildfire_vs_burns": 0.822,
+     "wildfire_vs_reported_rx": 0.679
+    }
+   },
+   {
+    "name": "Without weather",
+    "n_features": 20,
+    "loyo": {
+     "wildfire_vs_burns_weighted": 0.781,
+     "wildfire_vs_burns": 0.85,
+     "wildfire_vs_reported_rx": 0.679
+    },
+    "test": {
+     "wildfire_vs_burns": 0.828,
+     "wildfire_vs_reported_rx": 0.682
+    }
+   },
+   {
+    "name": "Satellite only",
+    "n_features": 11,
+    "loyo": {
+     "wildfire_vs_burns_weighted": 0.651,
+     "wildfire_vs_burns": 0.66,
+     "wildfire_vs_reported_rx": 0.639
+    },
+    "test": {
+     "wildfire_vs_burns": 0.646,
+     "wildfire_vs_reported_rx": 0.534
+    }
+   },
+   {
+    "name": "Weather only",
+    "n_features": 7,
+    "loyo": {
+     "wildfire_vs_burns_weighted": 0.707,
+     "wildfire_vs_burns": 0.699,
+     "wildfire_vs_reported_rx": 0.717
+    },
+    "test": {
+     "wildfire_vs_burns": 0.703,
+     "wildfire_vs_reported_rx": 0.683
+    }
+   },
+   {
+    "name": "Place and season only",
+    "n_features": 9,
+    "loyo": {
+     "wildfire_vs_burns_weighted": 0.75,
+     "wildfire_vs_burns": 0.814,
+     "wildfire_vs_reported_rx": 0.656
+    },
+    "test": {
+     "wildfire_vs_burns": 0.772,
+     "wildfire_vs_reported_rx": 0.687
+    }
+   }
+  ]
+ },
+ "calibration": {
+  "xgboost": {
+   "brier": 0.18,
+   "ece": 0.053,
+   "bins": [
+    {
+     "bin": "0\u20139",
+     "n": 62,
+     "mean_score": 6.7,
+     "observed_pct": 16.3
+    },
+    {
+     "bin": "10\u201319",
+     "n": 71,
+     "mean_score": 14.0,
+     "observed_pct": 20.9
+    },
+    {
+     "bin": "20\u201329",
+     "n": 53,
+     "mean_score": 24.7,
+     "observed_pct": 28.1
+    },
+    {
+     "bin": "30\u201339",
+     "n": 40,
+     "mean_score": 34.7,
+     "observed_pct": 41.5
+    },
+    {
+     "bin": "40\u201349",
+     "n": 38,
+     "mean_score": 44.6,
+     "observed_pct": 39.3
+    },
+    {
+     "bin": "50\u201359",
+     "n": 26,
+     "mean_score": 54.0,
+     "observed_pct": 52.2
+    },
+    {
+     "bin": "60\u201369",
+     "n": 22,
+     "mean_score": 64.8,
+     "observed_pct": 62.8
+    },
+    {
+     "bin": "70\u201379",
+     "n": 21,
+     "mean_score": 74.9,
+     "observed_pct": 70.4
+    },
+    {
+     "bin": "80\u201389",
+     "n": 21,
+     "mean_score": 85.3,
+     "observed_pct": 77.7
+    },
+    {
+     "bin": "90\u201399",
+     "n": 42,
+     "mean_score": 95.2,
+     "observed_pct": 95.3
+    }
+   ]
+  },
+  "logistic": {
+   "brier": 0.159,
+   "ece": 0.073,
+   "bins": [
+    {
+     "bin": "0\u20139",
+     "n": 48,
+     "mean_score": 7.2,
+     "observed_pct": 13.9
+    },
+    {
+     "bin": "10\u201319",
+     "n": 84,
+     "mean_score": 14.5,
+     "observed_pct": 12.8
+    },
+    {
+     "bin": "20\u201329",
+     "n": 63,
+     "mean_score": 25.0,
+     "observed_pct": 18.3
+    },
+    {
+     "bin": "30\u201339",
+     "n": 43,
+     "mean_score": 33.7,
+     "observed_pct": 45.7
+    },
+    {
+     "bin": "40\u201349",
+     "n": 35,
+     "mean_score": 43.6,
+     "observed_pct": 52.5
+    },
+    {
+     "bin": "50\u201359",
+     "n": 23,
+     "mean_score": 54.1,
+     "observed_pct": 64.8
+    },
+    {
+     "bin": "60\u201369",
+     "n": 17,
+     "mean_score": 63.9,
+     "observed_pct": 42.0
+    },
+    {
+     "bin": "70\u201379",
+     "n": 26,
+     "mean_score": 74.7,
+     "observed_pct": 68.3
+    },
+    {
+     "bin": "80\u201389",
+     "n": 24,
+     "mean_score": 85.3,
+     "observed_pct": 96.7
+    },
+    {
+     "bin": "90\u201399",
+     "n": 33,
+     "mean_score": 96.6,
+     "observed_pct": 100.0
+    }
+   ]
+  }
+ },
+ "thresholds": {
+  "table": [
+   {
+    "threshold": 30,
+    "wf": 0.846,
+    "rx": 0.683,
+    "rx_weak": 0.239,
+    "static": 0.583
+   },
+   {
+    "threshold": 40,
+    "wf": 0.762,
+    "rx": 0.537,
+    "rx_weak": 0.147,
+    "static": 0.438
+   },
+   {
+    "threshold": 50,
+    "wf": 0.677,
+    "rx": 0.329,
+    "rx_weak": 0.092,
+    "static": 0.342
+   },
+   {
+    "threshold": 60,
+    "wf": 0.6,
+    "rx": 0.232,
+    "rx_weak": 0.049,
+    "static": 0.237
+   },
+   {
+    "threshold": 70,
+    "wf": 0.515,
+    "rx": 0.159,
+    "rx_weak": 0.022,
+    "static": 0.146
+   },
+   {
+    "threshold": 80,
+    "wf": 0.415,
+    "rx": 0.085,
+    "rx_weak": 0.011,
+    "static": 0.062
+   }
+  ],
+  "guardrail_effect": {
+   "wf": {
+    "n": 130,
+    "raised": 0,
+    "lowered": 0,
+    "investigate_plus_before_guardrails": 0.762
+   },
+   "rx": {
+    "n": 82,
+    "raised": 0,
+    "lowered": 0,
+    "investigate_plus_before_guardrails": 0.537
+   },
+   "rx_weak": {
+    "n": 184,
+    "raised": 7,
+    "lowered": 0,
+    "investigate_plus_before_guardrails": 0.147
+   },
+   "static": {
+    "n": 240,
+    "raised": 0,
+    "lowered": 103,
+    "investigate_plus_before_guardrails": 0.438
+   }
+  }
+ },
+ "event_level": {
+  "xgboost": {
+   "rx": {
+    "events": 41,
+    "max_monitor": 0.415,
+    "max_investigate": 0.39,
+    "max_escalate": 0.195,
+    "first_pass_investigate_plus": 0.488
+   },
+   "rx_weak": {
+    "events": 98,
+    "max_monitor": 0.776,
+    "max_investigate": 0.184,
+    "max_escalate": 0.041,
+    "first_pass_investigate_plus": 0.184
+   },
+   "static": {
+    "events": 166,
+    "max_monitor": 0.988,
+    "max_investigate": 0.006,
+    "max_escalate": 0.006,
+    "first_pass_investigate_plus": 0.0
+   },
+   "wf": {
+    "events": 61,
+    "max_monitor": 0.131,
+    "max_investigate": 0.262,
+    "max_escalate": 0.607,
+    "first_pass_investigate_plus": 0.787
+   }
+  },
+  "logistic": {
+   "rx": {
+    "events": 41,
+    "max_monitor": 0.512,
+    "max_investigate": 0.366,
+    "max_escalate": 0.122,
+    "first_pass_investigate_plus": 0.439
+   },
+   "rx_weak": {
+    "events": 98,
+    "max_monitor": 0.837,
+    "max_investigate": 0.143,
+    "max_escalate": 0.02,
+    "first_pass_investigate_plus": 0.143
+   },
+   "static": {
+    "events": 166,
+    "max_monitor": 0.988,
+    "max_investigate": 0.006,
+    "max_escalate": 0.006,
+    "first_pass_investigate_plus": 0.0
+   },
+   "wf": {
+    "events": 61,
+    "max_monitor": 0.164,
+    "max_investigate": 0.164,
+    "max_escalate": 0.672,
+    "first_pass_investigate_plus": 0.787
+   }
+  },
+  "rules-v0": {
+   "rx": {
+    "events": 41,
+    "max_monitor": 0.488,
+    "max_investigate": 0.512,
+    "max_escalate": 0.0,
+    "first_pass_investigate_plus": 0.146
+   },
+   "rx_weak": {
+    "events": 98,
+    "max_monitor": 0.857,
+    "max_investigate": 0.143,
+    "max_escalate": 0.0,
+    "first_pass_investigate_plus": 0.051
+   },
+   "static": {
+    "events": 166,
+    "max_monitor": 1.0,
+    "max_investigate": 0.0,
+    "max_escalate": 0.0,
+    "first_pass_investigate_plus": 0.0
+   },
+   "wf": {
+    "events": 61,
+    "max_monitor": 0.344,
+    "max_investigate": 0.459,
+    "max_escalate": 0.197,
+    "first_pass_investigate_plus": 0.393
+   }
+  }
+ },
+ "snapshots": {
+  "0": {
+   "rows": 200,
+   "xgboost": 0.851,
+   "logistic": 0.883,
+   "rules-v0": 0.791
+  },
+  "1": {
+   "rows": 126,
+   "xgboost": 0.873,
+   "logistic": 0.903,
+   "rules-v0": 0.814
+  },
+  "2": {
+   "rows": 70,
+   "xgboost": 0.723,
+   "logistic": 0.785,
+   "rules-v0": 0.781
+  }
+ },
+ "subgroups": {
+  "xgboost": {
+   "rx|outside": {
+    "events": 28,
+    "investigate_plus": 0.643,
+    "escalate": 0.286
+   },
+   "rx|inside": {
+    "events": 13,
+    "investigate_plus": 0.462,
+    "escalate": 0.0
+   },
+   "wf|outside": {
+    "events": 34,
+    "investigate_plus": 0.941,
+    "escalate": 0.735
+   },
+   "wf|inside": {
+    "events": 27,
+    "investigate_plus": 0.778,
+    "escalate": 0.444
+   }
+  },
+  "logistic": {
+   "rx|outside": {
+    "events": 28,
+    "investigate_plus": 0.607,
+    "escalate": 0.179
+   },
+   "rx|inside": {
+    "events": 13,
+    "investigate_plus": 0.231,
+    "escalate": 0.0
+   },
+   "wf|outside": {
+    "events": 34,
+    "investigate_plus": 0.853,
+    "escalate": 0.735
+   },
+   "wf|inside": {
+    "events": 27,
+    "investigate_plus": 0.815,
+    "escalate": 0.593
+   }
+  },
+  "rules-v0": {
+   "rx|outside": {
+    "events": 28,
+    "investigate_plus": 0.679,
+    "escalate": 0.0
+   },
+   "rx|inside": {
+    "events": 13,
+    "investigate_plus": 0.154,
+    "escalate": 0.0
+   },
+   "wf|outside": {
+    "events": 34,
+    "investigate_plus": 0.647,
+    "escalate": 0.118
+   },
+   "wf|inside": {
+    "events": 27,
+    "investigate_plus": 0.667,
+    "escalate": 0.296
+   }
+  }
+ },
+ "label_design": {
+  "rows": [
+   {
+    "name": "v1: weak negatives at reduced weight",
+    "wildfire_vs_burns": 0.837,
+    "wildfire_vs_reported_rx": 0.72,
+    "loyo": {
+     "wildfire_vs_burns": 0.894,
+     "wildfire_vs_reported_rx": 0.775
+    },
+    "wf_vs_rx_inside_fh": 0.664,
+    "wf_vs_rx_outside_fh": 0.849,
+    "wf_vs_rx_weak": 0.889
+   },
+   {
+    "name": "Weak negatives at full weight",
+    "wildfire_vs_burns": 0.824,
+    "wildfire_vs_reported_rx": 0.632,
+    "loyo": {
+     "wildfire_vs_burns": 0.896,
+     "wildfire_vs_reported_rx": 0.736
+    },
+    "wf_vs_rx_inside_fh": 0.58,
+    "wf_vs_rx_outside_fh": 0.817,
+    "wf_vs_rx_weak": 0.91
+   },
+   {
+    "name": "No weak negatives",
+    "wildfire_vs_burns": 0.718,
+    "wildfire_vs_reported_rx": 0.813,
+    "loyo": {
+     "wildfire_vs_burns": 0.671,
+     "wildfire_vs_reported_rx": 0.818
+    },
+    "wf_vs_rx_inside_fh": 0.789,
+    "wf_vs_rx_outside_fh": 0.828,
+    "wf_vs_rx_weak": 0.675
+   },
+   {
+    "name": "No weak negatives, no in_flint_hills",
+    "wildfire_vs_burns": 0.728,
+    "wildfire_vs_reported_rx": 0.825,
+    "loyo": {
+     "wildfire_vs_burns": 0.674,
+     "wildfire_vs_reported_rx": 0.822
+    },
+    "wf_vs_rx_inside_fh": 0.788,
+    "wf_vs_rx_outside_fh": 0.839,
+    "wf_vs_rx_weak": 0.684
+   },
+   {
+    "name": "Weak negatives, no in_flint_hills",
+    "wildfire_vs_burns": 0.791,
+    "wildfire_vs_reported_rx": 0.73,
+    "loyo": {
+     "wildfire_vs_burns": 0.817,
+     "wildfire_vs_reported_rx": 0.746
+    },
+    "wf_vs_rx_inside_fh": 0.655,
+    "wf_vs_rx_outside_fh": 0.801,
+    "wf_vs_rx_weak": 0.818
+   }
+  ],
+  "test_events_inside_fh": {
+   "wf": 27,
+   "rx": 13,
+   "rx_weak": 98
+  }
+ },
+ "by_size": {
+  "rows": [
+   {
+    "size": "< 100 acres",
+    "events": 13,
+    "investigate_plus": 0.923,
+    "escalate": 0.538
+   },
+   {
+    "size": "100\u2013999 acres",
+    "events": 35,
+    "investigate_plus": 0.829,
+    "escalate": 0.6
+   },
+   {
+    "size": "\u2265 1,000 acres",
+    "events": 13,
+    "investigate_plus": 0.923,
+    "escalate": 0.692
+   }
+  ],
+  "unknown_size": 0
+ },
+ "errors": {
+  "highest_reported_rx": [
+   {
+    "incident": "South 19th RX",
+    "county": "Coffey",
+    "acres": 692,
+    "date": "2023-04-21",
+    "score": 93,
+    "snapshot": 2,
+    "in_flint_hills": 0,
+    "gust_kmh": 43.9,
+    "rh_pct": 26,
+    "dist_town_km": 3.5,
+    "frp_max": 19.1,
+    "top_contributions": [
+     "in_flint_hills +1.65",
+     "rh_pct +0.63",
+     "dist_line_km -0.52"
+    ]
+   },
+   {
+    "incident": "North Burgess RX",
+    "county": "Lyon",
+    "acres": 85,
+    "date": "2024-03-20",
+    "score": 91,
+    "snapshot": 2,
+    "in_flint_hills": 0,
+    "gust_kmh": 47.2,
+    "rh_pct": 33,
+    "dist_town_km": 3.7,
+    "frp_max": 22.59,
+    "top_contributions": [
+     "in_flint_hills +1.11",
+     "wind_kmh +1.10",
+     "pixel_km2_min +0.74"
+    ]
+   },
+   {
+    "incident": "Troublesome RX",
+    "county": "Coffey",
+    "acres": 80,
+    "date": "2025-05-15",
+    "score": 82,
+    "snapshot": 0,
+    "in_flint_hills": 0,
+    "gust_kmh": 44.3,
+    "rh_pct": 36,
+    "dist_town_km": 2.4,
+    "frp_max": 12.14,
+    "top_contributions": [
+     "wind_kmh +1.10",
+     "in_flint_hills +0.99",
+     "doy_cos -0.79"
+    ]
+   },
+   {
+    "incident": "Sargent RX",
+    "county": "Coffey",
+    "acres": 684,
+    "date": "2023-04-23",
+    "score": 80,
+    "snapshot": 0,
+    "in_flint_hills": 0,
+    "gust_kmh": 31.3,
+    "rh_pct": 28,
+    "dist_town_km": 6.4,
+    "frp_max": 76.4,
+    "top_contributions": [
+     "in_flint_hills +1.27",
+     "elevation_m +0.94",
+     "gust_kmh -0.45"
+    ]
+   },
+   {
+    "incident": "Burgess RX",
+    "county": "Lyon",
+    "acres": 400,
+    "date": "2025-03-26",
+    "score": 78,
+    "snapshot": 2,
+    "in_flint_hills": 0,
+    "gust_kmh": 36.0,
+    "rh_pct": 26,
+    "dist_town_km": 3.9,
+    "frp_max": 27.08,
+    "top_contributions": [
+     "in_flint_hills +1.37",
+     "rh_pct +0.50",
+     "elevation_m +0.36"
+    ]
+   },
+   {
+    "incident": "Coreopis RX",
+    "county": "Linn",
+    "acres": 98,
+    "date": "2023-04-21",
+    "score": 75,
+    "snapshot": 1,
+    "in_flint_hills": 0,
+    "gust_kmh": 45.4,
+    "rh_pct": 22,
+    "dist_town_km": 5.6,
+    "frp_max": 14.5,
+    "top_contributions": [
+     "in_flint_hills +1.26",
+     "rh_pct +0.73",
+     "gust_kmh +0.53"
+    ]
+   },
+   {
+    "incident": "Indian Hill RX",
+    "county": "Coffey",
+    "acres": 60,
+    "date": "2025-05-13",
+    "score": 74,
+    "snapshot": 0,
+    "in_flint_hills": 0,
+    "gust_kmh": 42.8,
+    "rh_pct": 42,
+    "dist_town_km": 3.6,
+    "frp_max": 6.03,
+    "top_contributions": [
+     "in_flint_hills +1.18",
+     "wind_kmh +1.17",
+     "doy_cos -0.82"
+    ]
+   },
+   {
+    "incident": "Boes RX",
+    "county": "Coffey",
+    "acres": 93,
+    "date": "2024-12-10",
+    "score": 72,
+    "snapshot": 0,
+    "in_flint_hills": 0,
+    "gust_kmh": 39.2,
+    "rh_pct": 47,
+    "dist_town_km": 6.2,
+    "frp_max": 2.71,
+    "top_contributions": [
+     "in_flint_hills +1.29",
+     "doy_cos +0.61",
+     "dist_line_km -0.49"
+    ]
+   }
+  ],
+  "lowest_wildfires": [
+   {
+    "incident": "North Pole",
+    "county": "Wabaunsee",
+    "acres": 600,
+    "date": "2023-04-11",
+    "score": 10,
+    "snapshot": 0,
+    "in_flint_hills": 1,
+    "gust_kmh": 22.7,
+    "rh_pct": 91,
+    "dist_town_km": 11.1,
+    "frp_max": 1.45,
+    "top_contributions": [
+     "in_flint_hills -1.42",
+     "local_hour +0.50",
+     "rh_pct -0.41"
+    ]
+   },
+   {
+    "incident": "Deep Creek",
+    "county": "Riley",
+    "acres": 350,
+    "date": "2023-03-04",
+    "score": 10,
+    "snapshot": 0,
+    "in_flint_hills": 1,
+    "gust_kmh": 34.2,
+    "rh_pct": 48,
+    "dist_town_km": 4.5,
+    "frp_max": 11.05,
+    "top_contributions": [
+     "in_flint_hills -1.05",
+     "dist_town_km -0.54",
+     "rh_pct -0.46"
+    ]
+   },
+   {
+    "incident": "North Pole",
+    "county": "Wabaunsee",
+    "acres": 600,
+    "date": "2023-04-10",
+    "score": 17,
+    "snapshot": 0,
+    "in_flint_hills": 1,
+    "gust_kmh": 31.3,
+    "rh_pct": 38,
+    "dist_town_km": 13.3,
+    "frp_max": 38.0,
+    "top_contributions": [
+     "in_flint_hills -1.02",
+     "precip_72h_mm +0.45",
+     "gust_kmh -0.43"
+    ]
+   },
+   {
+    "incident": "Deerhead East",
+    "county": "Barber",
+    "acres": 450,
+    "date": "2024-05-07",
+    "score": 30,
+    "snapshot": 0,
+    "in_flint_hills": 0,
+    "gust_kmh": 29.2,
+    "rh_pct": 21,
+    "dist_town_km": 26.9,
+    "frp_max": 9.99,
+    "top_contributions": [
+     "in_flint_hills +1.09",
+     "doy_cos -0.83",
+     "rh_pct +0.80"
+    ]
+   },
+   {
+    "incident": "Indian Hills",
+    "county": "Riley",
+    "acres": 500,
+    "date": "2023-04-07",
+    "score": 30,
+    "snapshot": 1,
+    "in_flint_hills": 1,
+    "gust_kmh": 43.9,
+    "rh_pct": 14,
+    "dist_town_km": 5.5,
+    "frp_max": 22.5,
+    "top_contributions": [
+     "in_flint_hills -1.43",
+     "rh_pct +0.65",
+     "precip_72h_mm +0.39"
+    ]
+   },
+   {
+    "incident": "Otter Creek",
+    "county": "Geary",
+    "acres": 700,
+    "date": "2023-04-10",
+    "score": 35,
+    "snapshot": 1,
+    "in_flint_hills": 1,
+    "gust_kmh": 20.9,
+    "rh_pct": 24,
+    "dist_town_km": 9.2,
+    "frp_max": 191.8,
+    "top_contributions": [
+     "in_flint_hills -0.82",
+     "frp_max +0.64",
+     "rh_pct +0.61"
+    ]
+   },
+   {
+    "incident": "Border Patrol",
+    "county": "Cherokee",
+    "acres": 8,
+    "date": "2024-10-12",
+    "score": 37,
+    "snapshot": 0,
+    "in_flint_hills": 0,
+    "gust_kmh": 28.8,
+    "rh_pct": 30,
+    "dist_town_km": 5.3,
+    "frp_max": 3.18,
+    "top_contributions": [
+     "in_flint_hills +0.97",
+     "gust_kmh -0.49",
+     "temp_c -0.43"
+    ]
+   },
+   {
+    "incident": "Wagstaff",
+    "county": "Wabaunsee",
+    "acres": 2000,
+    "date": "2023-04-12",
+    "score": 38,
+    "snapshot": 2,
+    "in_flint_hills": 1,
+    "gust_kmh": 36.4,
+    "rh_pct": 59,
+    "dist_town_km": 14.6,
+    "frp_max": 165.88,
+    "top_contributions": [
+     "in_flint_hills -1.24",
+     "frp_max +0.66",
+     "pixel_km2_min +0.57"
+    ]
+   }
+  ],
+  "rx_weak_reaching_70": 4,
+  "rx_weak_events": 98
+ },
+ "importance": {
+  "mean_abs": [
+   {
+    "feature": "in_flint_hills",
+    "mean_abs_contribution": 0.9955
+   },
+   {
+    "feature": "gust_kmh",
+    "mean_abs_contribution": 0.4311
+   },
+   {
+    "feature": "dist_town_km",
+    "mean_abs_contribution": 0.3525
+   },
+   {
+    "feature": "wind_kmh",
+    "mean_abs_contribution": 0.3115
+   },
+   {
+    "feature": "doy_cos",
+    "mean_abs_contribution": 0.3025
+   },
+   {
+    "feature": "rh_pct",
+    "mean_abs_contribution": 0.2964
+   },
+   {
+    "feature": "slope_deg",
+    "mean_abs_contribution": 0.2672
+   },
+   {
+    "feature": "elevation_m",
+    "mean_abs_contribution": 0.2668
+   },
+   {
+    "feature": "frp_max",
+    "mean_abs_contribution": 0.2356
+   },
+   {
+    "feature": "doy_sin",
+    "mean_abs_contribution": 0.2202
+   },
+   {
+    "feature": "nearby_events_24h",
+    "mean_abs_contribution": 0.2124
+   },
+   {
+    "feature": "precip_72h_mm",
+    "mean_abs_contribution": 0.2047
+   },
+   {
+    "feature": "frp_sum",
+    "mean_abs_contribution": 0.1993
+   },
+   {
+    "feature": "dist_substation_km",
+    "mean_abs_contribution": 0.165
+   },
+   {
+    "feature": "gfdi",
+    "mean_abs_contribution": 0.164
+   },
+   {
+    "feature": "is_night",
+    "mean_abs_contribution": 0.1488
+   },
+   {
+    "feature": "dist_line_km",
+    "mean_abs_contribution": 0.1389
+   },
+   {
+    "feature": "local_hour",
+    "mean_abs_contribution": 0.1388
+   },
+   {
+    "feature": "brightness_max",
+    "mean_abs_contribution": 0.0802
+   },
+   {
+    "feature": "temp_c",
+    "mean_abs_contribution": 0.0794
+   },
+   {
+    "feature": "pixel_km2_min",
+    "mean_abs_contribution": 0.0561
+   },
+   {
+    "feature": "frp_growth",
+    "mean_abs_contribution": 0.0507
+   },
+   {
+    "feature": "minutes_active",
+    "mean_abs_contribution": 0.0347
+   },
+   {
+    "feature": "n_detections",
+    "mean_abs_contribution": 0.0341
+   },
+   {
+    "feature": "conf_high_frac",
+    "mean_abs_contribution": 0.0144
+   },
+   {
+    "feature": "n_satellites",
+    "mean_abs_contribution": 0.0
+   },
+   {
+    "feature": "thunder_24h",
+    "mean_abs_contribution": 0.0
+   }
+  ],
+  "in_flint_hills_contribution": {
+   "inside": -0.989,
+   "outside": 1.011
+  }
+ },
+ "lead_time": {
+  "n": 209,
+  "quantiles_min": {
+   "p10": -272.2,
+   "p25": -104.0,
+   "p50": 8.0,
+   "p75": 90.0,
+   "p90": 640.8000000000004
+  },
+  "share_before": 0.474,
+  "share_more_than_1h_before": 0.311,
+  "share_more_than_6h_after": 0.144,
+  "median_ge_1000_acres": 13.0,
+  "n_ge_1000_acres": 64,
+  "median_lt_100_acres": -59.0,
+  "n_lt_100_acres": 50
+ }
+}

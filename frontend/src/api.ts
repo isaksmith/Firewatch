@@ -19,24 +19,74 @@ export interface AlertSummary {
   first_seen: string
   last_seen: string
   status: Status
-  score: number
+  /** Satellite score; null when the event has only line-fault or people signals. */
+  score: number | null
   recommendation: Recommendation
   score_trend: number[]
   degraded: boolean
   guardrail: string | null
-  suppression: 'static_source' | 'likely_prescribed' | 'low_signal' | null
+  suppression: Suppression | null
   reraised: boolean
   sources: Record<string, number>
+  signals: Record<string, number>
   top_reason: string | null
+  level_reason: string | null
+  evidence: Evidence[]
+  response: ResponseBrief | null
   is_sample: boolean
   sample_slug: string | null
+}
+
+export type Suppression = 'static_source' | 'likely_prescribed' | 'registered_burn' | 'low_signal'
+
+export interface Evidence {
+  kind: 'satellite' | 'line_fault' | 'report' | 'neighbor_reply' | 'camera_smoke' | 'burn_notice'
+  label: string
+  at: string
+  counts: 'strong' | 'yes' | 'weak' | 'no'
+  note?: string
+  source?: string
+}
+
+export interface ResponseBrief {
+  investigate_at: string | null
+  escalate_at: string | null
+  awaiting: string | null
+  decision: 'page' | 'no' | null
+  decision_by: string | null
+  decision_at: string | null
+  page_at: string | null
+  ladder: { step: number; at: string }[]
+  responders: { contact_id: number; name: string; role: string; at: string }[]
+  mutual_aid: { reason: string; drafted_at: string; sent_at?: string; sent_by?: string } | null
+  plan: {
+    acres_60: number
+    area_60_ha: number
+    wind: { from: string; mph: number }
+    downwind: { contact_id: number; name: string; eta_min: number }[]
+    helpers: { contact_id: number; name: string; role: string }[]
+  } | null
+  texts_sent: number
+}
+
+export interface Message {
+  id: number
+  event_id: number | null
+  direction: 'in' | 'out'
+  purpose: string | null
+  body: string
+  status: string
+  created_at: string
+  phone: string | null
+  contact_name: string | null
+  contact_role: string | null
 }
 
 export interface AlertsResponse {
   mode: 'sample' | 'live'
   generated_at: string
   alerts: AlertSummary[]
-  suppressed: { total: number; static_source: number; likely_prescribed: number; low_signal: number }
+  suppressed: { total: number } & Record<Suppression, number>
 }
 
 export interface Detection {
@@ -59,6 +109,9 @@ export interface AlertDetail extends AlertSummary {
     gust_kmh?: number
     wind_dir_deg?: number
     rh_pct?: number
+    dew_point_c?: number
+    pressure_hpa?: number
+    vpd_kpa?: number
     temp_c?: number
     precip_72h_mm?: number
     source?: string
@@ -70,8 +123,44 @@ export interface AlertDetail extends AlertSummary {
   scorer: string | null
   score_history: { scored_at: string; score: number; recommendation: Recommendation; scorer: string; guardrail: string | null }[]
   actions: { action: ActionName; operator: string; note: string | null; created_at: string }[]
+  signal_list: { id: number; kind: string; lat: number; lon: number; observed_at: string; source: string; value: string | null; contact_name: string | null }[]
+  messages: Message[]
   nearest_assets: { kind: string; name: string; distance_km: number }[]
 }
+
+export interface Milestone {
+  key: string
+  t: number | null
+  label: string
+}
+
+export interface ScenarioStatus {
+  slug: string
+  title: string
+  story: string
+  synthetic: boolean
+  t0: string
+  t0_local: string
+  duration_min: number
+  ignition: { lat: number; lon: number; cause: string }
+  weather: { wind_kmh: number; wind_dir_deg: number; rh_pct: number; temp_c: number; gfdi: number; gfdi_band: string }
+  running: boolean
+  t_min: number | null
+  baseline: Milestone[]
+  firewatch: Milestone[]
+  size_on_scene: { baseline: { acres: number; head_mi: number } | null; firewatch: { acres: number; head_mi: number } | null }
+  growth: { minute: number; acres: number; head_mi: number }[]
+  events: { id: number; place_label: string; recommendation: Recommendation; level_reason: string; suppression: string | null; texts_sent: number }[]
+  texts_sent: number
+}
+
+export interface District {
+  slug: string
+  settings: Record<string, string | number | number[]> & { name: string; short_name: string }
+  boundary: GeoJSON.FeatureCollection
+}
+
+export const SCENARIO = 'cottonwood-creek'
 
 export interface SimulationResult {
   event_id: number
@@ -125,7 +214,14 @@ export const api = {
     return request<SimulationResult>(`/alerts/${id}/simulate${q}`)
   },
   layer: (name: string) => request<GeoJSON.FeatureCollection>(`/layers/${name}`),
+  riskGrid: () => request<GeoJSON.FeatureCollection>('/risk/grid'),
+  linesUnderWind: () => request<GeoJSON.FeatureCollection>('/risk/lines-under-wind'),
   health: () => request<Health>('/health'),
   replay: () => request<{ status: string }>('/sample/replay?duration_s=60', { method: 'POST' }),
   ingest: () => request<unknown>('/ingest/run', { method: 'POST' }),
+  decide: (id: number, action: 'page' | 'no' | 'send', operator: string) =>
+    request<AlertDetail>(`/alerts/${id}/decision`, { method: 'POST', body: JSON.stringify({ action, operator }) }),
+  district: () => request<District>('/district'),
+  scenario: (slug: string) => request<ScenarioStatus>(`/scenario/${slug}`),
+  runScenario: (slug: string) => request<{ status: string }>(`/scenario/${slug}/run`, { method: 'POST' }),
 }

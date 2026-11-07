@@ -1,0 +1,21 @@
+{
+ "count": 1,
+ "items": [
+  {
+   "name": "Sample fixture incident",
+   "type": "WF",
+   "acres": 120,
+   "county": "Chase",
+   "discovered": "2021-12-15T21:00:00Z",
+   "modified": null,
+   "irwin_id": null,
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -96.6,
+     38.3
+    ]
+   }
+  }
+ ]
+}

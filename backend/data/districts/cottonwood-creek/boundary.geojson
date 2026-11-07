@@ -1,0 +1,40 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "name": "Cottonwood Creek Fire District (stand-in)",
+    "area_sq_mi": 450,
+    "note": "Stand-in boundary: a 450 sq mi square centered on Coldwater, KS (Comanche County). Replace with the real district polygon."
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -99.5195,
+       37.1145
+      ],
+      [
+       -99.1341,
+       37.1145
+      ],
+      [
+       -99.1341,
+       37.4233
+      ],
+      [
+       -99.5195,
+       37.4233
+      ],
+      [
+       -99.5195,
+       37.1145
+      ]
+     ]
+    ]
+   }
+  }
+ ]
+}

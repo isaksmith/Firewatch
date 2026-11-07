@@ -7,7 +7,7 @@ from app.main import app
 from app.sim.ensemble import forecast
 from app.sim.fuels import FUEL_KEYS, FuelGrid, multipliers
 from app.sim.spread import SpreadInput, WeatherStep, _blocks, _step_multipliers, block_rates, build_domain, propagate
-from app.situation import Ignition, Provenance, Situation, Weather, WeatherHour, list_scenarios, load_scenario
+from app.situation import Ignition, Provenance, Situation, Weather, WeatherHour, scenario_situation
 
 LAT, LON = 38.8, -99.45
 T0 = datetime(2026, 3, 17, 19, tzinfo=timezone.utc)
@@ -99,16 +99,14 @@ def test_ensemble_ranges_are_ordered_and_reproducible():
     assert r1["provenance"]["spread"]["kind"] == "simulated"
 
 
-def test_scenarios_validate_against_the_contract():
-    slugs = [s["slug"] for s in list_scenarios()]
-    assert "cottonwood-creek" in slugs
-    for slug in slugs:
-        meta, sit = load_scenario(slug)
-        assert meta["synthetic"]
-        assert sit.weather_steps()[0].t_min < 0  # weather starts before ignition, for interpolation
-    _, front = load_scenario("cottonwood-creek-front")
-    _, base = load_scenario("cottonwood-creek")
-    assert front.wind_shift_deg(240) > 90 > base.wind_shift_deg(240)
+def test_scenario_builds_a_situation():
+    sit = scenario_situation("cottonwood-creek")
+    assert sit.red_flag and sit.curing and sit.curing.pct == 98
+    assert sit.weather_steps()[0].t_min < 0  # weather starts before ignition, for interpolation
+    assert {r.kind for r in sit.resources} >= {"brush", "tanker", "water_truck", "disc"}
+    assert [b.status for b in sit.burn_permits] == ["extinguished", "extinguished"]  # the packet's weekend burns
+    front = scenario_situation("cottonwood-creek", "front")
+    assert front.wind_shift_deg(240) > 90 > sit.wind_shift_deg(240)
 
 
 def test_forecast_api_accepts_a_situation():
@@ -118,5 +116,6 @@ def test_forecast_api_accepts_a_situation():
         assert r.status_code == 200
         out = r.json()
         assert out["isochrones"]["features"] and "_arrival" not in out
-        assert client.get("/api/scenarios/nope/forecast").status_code == 404
+        assert client.get("/api/scenario/nope/forecast").status_code == 404
+        assert client.get("/api/scenario/cottonwood-creek/forecast", params={"weather": "nope"}).status_code == 404
         assert client.post("/api/forecast", json={"weather": {}}).status_code == 422

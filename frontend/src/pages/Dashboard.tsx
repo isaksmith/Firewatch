@@ -1,10 +1,11 @@
-import { useQuery } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { api } from '../api'
+import { SCENARIO, api } from '../api'
 import { AlertDrawer } from '../components/AlertDrawer'
 import { AlertList } from '../components/AlertList'
 import { MapView } from '../components/MapView'
+import { ScenarioStrip } from '../components/ScenarioStrip'
 import { TopBar } from '../components/TopBar'
 import { SUPPRESSION_LABEL } from '../lib/format'
 import { filterQueue, type QueueTab } from '../lib/queue'
@@ -12,19 +13,47 @@ import { filterQueue, type QueueTab } from '../lib/queue'
 export function Dashboard() {
   const params = useParams()
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const selectedId = params.id ? Number(params.id) : null
   const [hoveredId, setHoveredId] = useState<number | null>(null)
   const [tab, setTab] = useState<QueueTab>('active')
+  const [scenarioHidden, setScenarioHidden] = useState(false)
 
+  const scenario = useQuery({
+    queryKey: ['scenario', SCENARIO],
+    queryFn: () => api.scenario(SCENARIO),
+    refetchInterval: (q) => (q.state.data?.running ? 1_000 : 10_000),
+    retry: false,
+  })
+  const running = scenario.data?.running ?? false
   const alerts = useQuery({
     queryKey: ['alerts'],
     queryFn: () => api.alerts(true),
-    refetchInterval: 5_000,
+    refetchInterval: running ? 1_500 : 5_000,
   })
+  // Follow the scenario's fire once it appears, so the drawer shows the texts as they go out.
+  const autoSelected = useRef(false)
+  const runScenario = useMutation({
+    mutationFn: () => api.runScenario(SCENARIO),
+    onSuccess: () => {
+      setScenarioHidden(false)
+      autoSelected.current = false
+      setTimeout(() => qc.invalidateQueries(), 400)
+    },
+  })
+  const fireId = scenario.data?.events[0]?.id
+  useEffect(() => {
+    if (running && fireId && !autoSelected.current) {
+      autoSelected.current = true
+      navigate(`/alerts/${fireId}`)
+    }
+  }, [running, fireId, navigate])
+
   const all = alerts.data?.alerts ?? []
   const suppressed = alerts.data?.suppressed
   const onMap = tab === 'suppressed' ? all : filterQueue(all, tab)
   const close = useCallback(() => navigate('/'), [navigate])
+  const showStrip = !scenarioHidden && scenario.data && scenario.data.t_min != null
 
   const counts = {
     escalate: all.filter((a) => a.recommendation === 'escalate').length,
@@ -33,7 +62,15 @@ export function Dashboard() {
 
   return (
     <div className="flex h-full flex-col bg-bg">
-      <TopBar />
+      <TopBar onRunScenario={() => runScenario.mutate()} scenarioRunning={running || runScenario.isPending} />
+      {showStrip && (
+        <ScenarioStrip
+          s={scenario.data!}
+          onClose={() => setScenarioHidden(true)}
+          onReplay={() => runScenario.mutate()}
+          replaying={running || runScenario.isPending}
+        />
+      )}
       <div className="flex min-h-0 flex-1">
         <AlertList
           alerts={all}

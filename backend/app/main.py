@@ -1,53 +1,122 @@
 import asyncio
+import hmac
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Literal
+from urllib.parse import parse_qsl
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+import numpy as np
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import sample
-from .config import get_settings
-from .db import connect, init_db, iso, loads, parse_iso, utcnow
+from . import notify, sample, scenario
+from .config import DATA_DIR, get_settings
+from .confirm import evaluate_event
+from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
+from .district import boundary_geojson, load_district, sync_roster
 from .fire_weather import default_curing, gfdi_band
-from .layers import LAYER_NAMES, load_layer, nearest_assets
+from .ingest import hms, landsat_nrt, lsr, metar, nws, risk_grid, spc, wfigs
+from .layers import LAYER_NAMES, load_layer, nearest_assets, segment_index
 from .pipeline import poll_firms_once
+from .signals import add_signal
 from .sim.ensemble import forecast
 from .sim.spread import SpreadInput, simulate
-from .situation import Situation, list_scenarios, load_scenario
+from .situation import Situation, scenario_situation
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # INFO logs full URLs, and the FIRMS key is in the path
 log = logging.getLogger("firewatch")
 
-_poll_task: asyncio.Task | None = None
+_tasks: list[asyncio.Task] = []
+TICK_SECONDS = 30
 
 
-async def _poll_loop() -> None:
-    minutes = get_settings().poll_minutes
+async def _source_loop(name: str, interval_s: int, job) -> None:
+    """Poll one source forever. A failure is logged and recorded, never raised."""
     while True:
         try:
-            summary = await asyncio.to_thread(poll_firms_once)
-            log.info("FIRMS poll: %s", summary)
+            result = await asyncio.to_thread(job)
+            log.info("%s poll: %s", name, result)
+        except Exception as e:
+            log.exception("%s poll failed", name)
+            try:
+                with connect() as conn:
+                    mark_source(conn, name, ok=False, error=str(e))
+            except Exception:
+                log.exception("could not record failure for %s", name)
+        await asyncio.sleep(interval_s)
+
+
+def poll_jobs() -> dict:
+    """Source name -> callable. Sources without a job here are not polled."""
+    jobs = {
+        "firms": poll_firms_once,
+        "nws_alerts": nws.poll,
+        "lsr": lsr.poll,
+        "wfigs_incidents": wfigs.poll_incidents,
+        "wfigs_perimeters": wfigs.poll_perimeters,
+        "metar": metar.poll,
+        "open_meteo": risk_grid.poll,
+        "spc": spc.poll,
+        "hms": hms.poll,
+    }
+    if get_settings().firms_map_key:
+        jobs["landsat_nrt"] = landsat_nrt.poll
+    return jobs
+
+
+def _tick_live() -> None:
+    with connect() as conn:
+        notify.tick(conn, utcnow(), is_sample=False)
+
+
+async def _tick_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(_tick_live)
         except Exception:
-            log.exception("FIRMS poll failed")
-        await asyncio.sleep(minutes * 60)
+            log.exception("response tick failed")
+        await asyncio.sleep(TICK_SECONDS)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _poll_task
     init_db()
     s = get_settings()
+    try:
+        with connect() as conn:
+            log.info("district %s: %d contacts", s.district, sync_roster(conn))
+    except FileNotFoundError:
+        log.warning("no district data for %s; texting is off", s.district)
     if s.mode == "sample" and not sample.has_sample_events():
         n = await asyncio.to_thread(sample.load_all_now)
         log.info("loaded %d sample fixtures", n)
     if s.mode == "live":
-        _poll_task = asyncio.create_task(_poll_loop())
+        intervals = s.source_intervals
+        _tasks.extend(asyncio.create_task(_source_loop(n, intervals[n], job)) for n, job in poll_jobs().items())
+    _tasks.append(asyncio.create_task(_tick_loop()))
     yield
-    if _poll_task:
-        _poll_task.cancel()
+    for t in _tasks:
+        t.cancel()
+    _tasks.clear()
+
+
+def require_token(x_firewatch_token: str = Header(default="")) -> None:
+    token = get_settings().api_token
+    if token and not hmac.compare_digest(token, x_firewatch_token):
+        raise HTTPException(401, "missing or wrong X-Firewatch-Token")
 
 
 app = FastAPI(title="Firewatch Confirmation Layer", lifespan=lifespan)
@@ -102,9 +171,53 @@ def _summary(conn, ev) -> dict:
         "suppression": ev["suppression"],
         "reraised": bool(ev["reraised"]),
         "sources": _sources(conn, ev["id"]),
+        "signals": _signal_counts(conn, ev["id"]),
         "top_reason": top["label"] if top else None,
+        "level_reason": ev["level_reason"],
+        "evidence": loads(ev["evidence_json"], []),
+        "response": _response_brief(conn, ev),
         "is_sample": bool(ev["is_sample"]),
         "sample_slug": ev["sample_slug"],
+    }
+
+
+def _signal_counts(conn, event_id: int) -> dict[str, int]:
+    return {r["kind"]: r["n"] for r in conn.execute(
+        "SELECT kind, COUNT(*) n FROM signals WHERE event_id = ? GROUP BY kind", (event_id,)
+    )}
+
+
+def _response_brief(conn, ev) -> dict | None:
+    """Where the response stands: who Firewatch is waiting on, and what has gone out."""
+    state = loads(ev["response_json"], None)
+    if not state:
+        return None
+    awaiting = None
+    if not state.get("decision"):
+        if state.get("escalate_at"):
+            step = state.get("ladder_step", 1) - 1
+            ladder = [r["name"] for r in conn.execute(
+                "SELECT name FROM contacts WHERE ladder_rank IS NOT NULL ORDER BY ladder_rank"
+            )]
+            awaiting = ladder[step] if 0 <= step < len(ladder) else "County Dispatch (voice call)"
+        else:
+            awaiting = "neighbor replies"
+    ma = state.get("mutual_aid")
+    return {
+        "investigate_at": state.get("investigate_at"),
+        "escalate_at": state.get("escalate_at"),
+        "awaiting": awaiting,
+        "decision": state.get("decision"),
+        "decision_by": state.get("decision_by"),
+        "decision_at": state.get("decision_at"),
+        "page_at": state.get("page_at"),
+        "ladder": state.get("ladder", []),
+        "responders": state.get("responders", []),
+        "mutual_aid": ma,
+        "plan": state.get("plan"),
+        "texts_sent": conn.execute(
+            "SELECT COUNT(*) n FROM messages WHERE event_id = ? AND direction = 'out'", (ev["id"],)
+        ).fetchone()["n"],
     }
 
 
@@ -120,10 +233,11 @@ def list_alerts(
     with connect() as conn:
         rows = conn.execute(
             f"SELECT * FROM events WHERE status IN ({','.join('?' * len(statuses))}) "
-            "AND score IS NOT NULL AND (is_sample = 1 OR last_seen >= ?)",
+            "AND recommendation IS NOT NULL AND (is_sample = 1 OR last_seen >= ?)",
             (*statuses, since),
         ).fetchall()
-        alerts, suppressed = [], {"total": 0, "static_source": 0, "likely_prescribed": 0, "low_signal": 0}
+        suppressed = {"total": 0, "static_source": 0, "likely_prescribed": 0, "registered_burn": 0, "low_signal": 0}
+        alerts = []
         for ev in rows:
             if ev["recommendation"] == "monitor":
                 suppressed["total"] += 1
@@ -131,10 +245,15 @@ def list_alerts(
                     suppressed[ev["suppression"]] += 1
                 if not include_monitor:
                     continue
-            if ev["score"] < min_score:
+            # Signal-only events have no satellite score; the score filter applies to satellite evidence.
+            if ev["score"] is not None and ev["score"] < min_score:
                 continue
             alerts.append(_summary(conn, ev))
-    alerts.sort(key=lambda a: (RECOMMENDATION_ORDER.get(a["recommendation"], 9), -a["score"], a["last_seen"]))
+    alerts.sort(key=lambda a: (
+        RECOMMENDATION_ORDER.get(a["recommendation"], 9),
+        -(a["score"] if a["score"] is not None else 101),
+        a["last_seen"],
+    ))
     return {"mode": get_settings().mode, "generated_at": iso(utcnow()), "alerts": alerts, "suppressed": suppressed}
 
 
@@ -173,8 +292,31 @@ def get_alert(event_id: int):
         out["actions"] = [dict(r) for r in conn.execute(
             "SELECT action, operator, note, created_at FROM actions WHERE event_id = ? ORDER BY id DESC", (event_id,)
         )]
+        out["signal_list"] = [dict(r) for r in conn.execute(
+            "SELECT s.id, s.kind, s.lat, s.lon, s.observed_at, s.source, s.value, c.name AS contact_name "
+            "FROM signals s LEFT JOIN contacts c ON c.id = s.contact_id WHERE s.event_id = ? ORDER BY s.observed_at",
+            (event_id,),
+        )]
+        out["messages"] = _messages(conn, event_id=event_id)
         out["nearest_assets"] = nearest_assets(ev["lat"], ev["lon"])
     return out
+
+
+def _mask(phone: str | None) -> str | None:
+    return None if phone is None else f"…{phone[-4:]}"
+
+
+def _messages(conn, event_id: int | None = None, limit: int = 300) -> list[dict]:
+    q = (
+        "SELECT m.id, m.event_id, m.direction, m.purpose, m.body, m.status, m.created_at, m.phone, "
+        "c.name AS contact_name, c.role AS contact_role FROM messages m LEFT JOIN contacts c ON c.id = m.contact_id"
+    )
+    args: tuple = ()
+    if event_id is not None:
+        q += " WHERE m.event_id = ?"
+        args = (event_id,)
+    rows = conn.execute(q + " ORDER BY m.id DESC LIMIT ?", (*args, limit)).fetchall()
+    return [{**dict(r), "phone": _mask(r["phone"])} for r in reversed(rows)]
 
 
 class ActionIn(BaseModel):
@@ -226,7 +368,7 @@ def simulate_alert(
             lat=ev["lat"], lon=ev["lon"], wind_kmh=key[2], wind_from_deg=key[3] % 360,
             temp_c=f.get("temp_c", 15.0), rh_pct=f.get("rh_pct", 50.0),
             curing_pct=f.get("curing_pct", default_curing(month)),
-            minutes=minutes, ignitions=[(r["lat"], r["lon"]) for r in dets], use_fuel=True, month=month,
+            minutes=minutes, ignitions=[(r["lat"], r["lon"]) for r in dets] or None, use_fuel=True, month=month,
         ))
         result["event_id"] = event_id
         result["observed_wind"] = {"from_deg": round(observed_dir), "kmh": round(observed_wind, 1)}
@@ -239,32 +381,32 @@ def _public(result: dict) -> dict:
     return {k: v for k, v in result.items() if not k.startswith("_")}
 
 
-@api.get("/scenarios")
-def get_scenarios():
-    return list_scenarios()
-
-
-@api.get("/scenarios/{slug}")
-def get_scenario(slug: str):
-    try:
-        meta, sit = load_scenario(slug)
-    except FileNotFoundError:
-        raise HTTPException(404, "unknown scenario")
-    return meta | {"slug": slug, "situation": sit.model_dump(mode="json")}
-
-
 _forecast_cache: dict[tuple, dict] = {}
 
 
-@api.get("/scenarios/{slug}/forecast")
-def scenario_forecast(slug: str, minutes: int = Query(120, ge=10, le=240), members: int = Query(24, ge=1, le=64)):
-    key = (slug, minutes, members)
+@api.get("/scenario/{slug}/situation")
+def get_scenario_situation(slug: str, weather: str | None = None):
+    """The scenario as a Situation: the forecast's input, with provenance on every block."""
+    try:
+        return scenario_situation(slug, weather).model_dump(mode="json")
+    except FileNotFoundError:
+        raise HTTPException(404, "unknown scenario or weather variant") from None
+
+
+@api.get("/scenario/{slug}/forecast")
+def scenario_forecast(
+    slug: str,
+    minutes: int = Query(120, ge=10, le=240),
+    members: int = Query(24, ge=1, le=64),
+    weather: str | None = Query(None, description="named weather variant, e.g. 'front'"),
+):
+    key = (slug, weather, minutes, members)
     if key not in _forecast_cache:
         try:
-            _, sit = load_scenario(slug)
+            sit = scenario_situation(slug, weather)
         except FileNotFoundError:
-            raise HTTPException(404, "unknown scenario")
-        _forecast_cache[key] = _public(forecast(sit, minutes, members)) | {"scenario": slug}
+            raise HTTPException(404, "unknown scenario or weather variant") from None
+        _forecast_cache[key] = _public(forecast(sit, minutes, members)) | {"scenario": slug, "weather_variant": weather}
     return _forecast_cache[key]
 
 
@@ -280,6 +422,63 @@ def get_layer(name: str):
     return load_layer(name)
 
 
+FEEDS_DIR = DATA_DIR / "samples" / "feeds"
+FEED_NAMES = tuple(n for n in get_settings().source_intervals if n != "firms")
+
+
+@api.get("/feeds/{name}")
+def get_feed(name: str):
+    """Latest snapshot of a context feed. In sample mode or before the first poll, a labeled fixture."""
+    if name not in FEED_NAMES:
+        raise HTTPException(404, f"unknown feed; choose from {', '.join(FEED_NAMES)}")
+    if get_settings().mode != "sample":
+        with connect() as conn:
+            snap = load_snapshot(conn, name)
+        if snap:
+            return {"feed": name, "fixture": False, **snap}
+    path = FEEDS_DIR / f"{name}.json"
+    if not path.exists():
+        raise HTTPException(404, f"no data yet for {name}")
+    return {"feed": name, "fixture": True, "fetched_at": None, "data": json.loads(path.read_text())}
+
+
+def _grid_cells() -> list[dict]:
+    return get_feed("open_meteo")["data"]["cells"]
+
+
+@api.get("/risk/grid")
+def risk_grid_route():
+    feed = get_feed("open_meteo")
+    feats = [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [c["lon"], c["lat"]]},
+              "properties": {k: v for k, v in c.items() if k not in ("lat", "lon")}} for c in feed["data"]["cells"]]
+    return {"type": "FeatureCollection", "features": feats, "fixture": feed["fixture"], "fetched_at": feed["fetched_at"]}
+
+
+@api.get("/risk/lines-under-wind")
+def lines_under_wind():
+    """Transmission lines whose nearest grid cell forecasts gusts at or above the flag threshold in the next 12 h."""
+    feed = get_feed("open_meteo")
+    cells = feed["data"]["cells"]
+    thr = get_settings().wind_gust_flag_kmh
+    seg = segment_index()
+    out: dict[int, float] = {}
+    if cells and len(seg.owner):
+        cy = np.array([c["lat"] for c in cells])
+        cx = np.array([c["lon"] for c in cells])
+        cg = np.array([c["gust_max_12h_kmh"] if c["gust_max_12h_kmh"] is not None else -1.0 for c in cells])
+        mx, my = (seg.ax + seg.bx) / 2, (seg.ay + seg.by) / 2
+        for k in range(0, len(mx), 2000):
+            d = (mx[k:k + 2000, None] - cx[None]) ** 2 + (my[k:k + 2000, None] - cy[None]) ** 2
+            g = cg[d.argmin(axis=1)]
+            for o, gv in zip(seg.owner[k:k + 2000], g):
+                if gv >= thr:
+                    out[int(o)] = max(out.get(int(o), 0.0), float(gv))
+    feats = [{"type": "Feature", "geometry": load_layer("power_lines")["features"][o]["geometry"],
+              "properties": {**seg.props[o], "max_gust_kmh": round(g, 1)}} for o, g in out.items()]
+    return {"type": "FeatureCollection", "features": feats, "threshold_kmh": thr,
+            "fixture": feed["fixture"], "fetched_at": feed["fetched_at"]}
+
+
 @api.get("/health")
 def health():
     s = get_settings()
@@ -287,18 +486,23 @@ def health():
     sources = {}
     with connect() as conn:
         rows = {r["source"]: r for r in conn.execute("SELECT * FROM source_health")}
-    for name in ("firms", "open_meteo"):
+    for name, interval_s in s.source_intervals.items():
         r = rows.get(name)
         if s.mode == "sample":
-            sources[name] = {"status": "sample", "age_min": None, "last_ok": None, "last_error": None}
+            sources[name] = {"status": "sample", "age_min": None, "last_ok": None, "last_error": None,
+                             "interval_s": interval_s}
             continue
+        last_error = redact(r["last_error"]) if r else None
         if r is None or r["last_ok"] is None:
-            sources[name] = {"status": "down", "age_min": None, "last_ok": None,
-                             "last_error": r["last_error"] if r else None}
+            status = "skipped" if name in ("firms", "landsat_nrt") and not s.firms_map_key else "down"
+            sources[name] = {"status": status, "age_min": None, "last_ok": None, "last_error": last_error,
+                             "interval_s": interval_s}
             continue
-        age = (now - parse_iso(r["last_ok"])).total_seconds() / 60
-        status = "ok" if age < 15 else "stale" if age < 60 else "down"
-        sources[name] = {"status": status, "age_min": round(age), "last_ok": r["last_ok"], "last_error": r["last_error"]}
+        age_s = (now - parse_iso(r["last_ok"])).total_seconds()
+        # stale at 3 intervals, down at 12
+        status = "ok" if age_s < 3 * interval_s else "stale" if age_s < 12 * interval_s else "down"
+        sources[name] = {"status": status, "age_min": round(age_s / 60), "last_ok": r["last_ok"],
+                         "last_error": last_error, "interval_s": interval_s}
     return {
         "mode": s.mode,
         "firms_key_configured": bool(s.firms_map_key),
@@ -332,6 +536,139 @@ def sample_fixtures():
         {k: fx.get(k) for k in ("slug", "title", "expected", "story", "approximate", "synthetic")}
         for fx in sample.load_fixtures()
     ]
+
+
+class SignalIn(BaseModel):
+    kind: Literal["line_fault", "report", "camera_smoke"]
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    observed_at: str | None = None
+    source: str = Field(min_length=1, max_length=80)
+    value: str | None = Field(default=None, max_length=200)
+
+
+@api.post("/signals", dependencies=[Depends(require_token)])
+def post_signal(body: SignalIn):
+    """Line faults (co-op feed), camera smoke, or a located report. Attaches to an event and re-levels it."""
+    observed = body.observed_at or iso(utcnow())
+    try:
+        parse_iso(observed)
+    except ValueError:
+        raise HTTPException(422, "observed_at must be ISO 8601") from None
+    sample_mode = get_settings().mode == "sample"
+    with connect() as conn:
+        eid = add_signal(conn, body.kind, body.lat, body.lon, observed, body.source, body.value, is_sample=sample_mode)
+        result = evaluate_event(conn, eid)
+    return {"event_id": eid, **result}
+
+
+@api.post("/sms/inbound")
+async def sms_inbound(request: Request):
+    """Twilio inbound webhook (form-encoded From/Body). Replies go out through the gateway, not TwiML."""
+    s = get_settings()
+    params = dict(parse_qsl((await request.body()).decode()))
+    if s.sms_gateway == "twilio":
+        url = f"{s.public_base_url.rstrip('/')}{request.url.path}"
+        if not notify.valid_twilio_signature(s.twilio_auth_token, url, params, request.headers.get("X-Twilio-Signature", "")):
+            raise HTTPException(403, "bad Twilio signature")
+    phone, text = params.get("From"), params.get("Body", "")
+    if not phone:
+        raise HTTPException(422, "From is required")
+
+    def handle():
+        with connect() as conn:
+            notify.handle_inbound(conn, phone, text, utcnow(), is_sample=s.mode == "sample")
+
+    await asyncio.to_thread(handle)
+    return Response('<?xml version="1.0" encoding="UTF-8"?><Response/>', media_type="application/xml")
+
+
+class SimulatedSms(BaseModel):
+    from_: str = Field(alias="from", min_length=3, max_length=20)
+    body: str = Field(min_length=1, max_length=320)
+
+
+@api.post("/sms/simulate", dependencies=[Depends(require_token)])
+def sms_simulate(msg: SimulatedSms):
+    """Pretend a phone texted Firewatch (sample mode only, so it never texts real people)."""
+    if get_settings().mode != "sample":
+        raise HTTPException(400, "simulated texts are only allowed in sample mode")
+    with connect() as conn:
+        return notify.handle_inbound(conn, msg.from_, msg.body, utcnow(), is_sample=True)
+
+
+@api.get("/messages")
+def list_messages(event_id: int | None = None, limit: int = Query(300, ge=1, le=2000)):
+    with connect() as conn:
+        return _messages(conn, event_id=event_id, limit=limit)
+
+
+@api.get("/contacts")
+def list_contacts():
+    with connect() as conn:
+        return [
+            {**dict(r), "phone": _mask(r["phone"])}
+            for r in conn.execute("SELECT * FROM contacts ORDER BY ladder_rank IS NULL, ladder_rank, role, name")
+        ]
+
+
+@api.get("/district")
+def get_district():
+    try:
+        d = load_district()
+    except FileNotFoundError:
+        raise HTTPException(404, "no district configured") from None
+    return {"slug": d.slug, "settings": d.settings, "boundary": boundary_geojson(d.slug)}
+
+
+class DecisionIn(BaseModel):
+    action: Literal["page", "no", "send"]
+    operator: str = Field(min_length=1, max_length=80)
+
+
+@api.post("/alerts/{event_id}/decision", dependencies=[Depends(require_token)])
+def alert_decision(event_id: int, body: DecisionIn):
+    """PAGE / NO / SEND from the console; the same path as the duty officer texting it."""
+    with connect() as conn:
+        ev = _get_event(conn, event_id)
+        if not ev["response_json"]:
+            raise HTTPException(409, "this alert has no response in progress")
+        now = scenario.clock_now(ev["sample_slug"]) if ev["is_sample"] else None
+        notify.decide(conn, event_id, body.action, body.operator, now or utcnow())
+    return get_alert(event_id)
+
+
+@api.get("/scenarios")
+def list_scenarios():
+    return scenario.list_scenarios()
+
+
+@api.get("/scenario/{slug}")
+def get_scenario(slug: str):
+    try:
+        return scenario.status(slug)
+    except KeyError:
+        raise HTTPException(404, "unknown scenario") from None
+
+
+@api.post("/scenario/{slug}/run")
+async def run_scenario(slug: str, seconds_per_minute: float | None = Query(None, ge=0.05, le=60)):
+    """Replay the scenario on a scaled clock (default 2 s per scenario minute)."""
+    try:
+        scenario.start(slug, seconds_per_minute)
+    except KeyError:
+        raise HTTPException(404, "unknown scenario") from None
+    return {"status": "started", "slug": slug}
+
+
+@api.post("/scenario/{slug}/load")
+async def load_scenario_now(slug: str):
+    """Run the whole scenario instantly (no animation)."""
+    try:
+        await asyncio.to_thread(scenario.run_now, slug)
+    except KeyError:
+        raise HTTPException(404, "unknown scenario") from None
+    return scenario.status(slug)
 
 
 app.include_router(api)

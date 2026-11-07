@@ -10,7 +10,13 @@ from ..config import get_settings
 from ..db import iso, parse_iso
 from ..fire_weather import default_curing, gfdi
 from ..geo import KM_PER_DEG_LAT, haversine_km, km_per_deg_lon
-from ..layers import in_flint_hills, nearest_line, nearest_static_source, nearest_substation, nearest_town
+from ..layers import (
+    in_flint_hills,
+    nearest_line,
+    nearest_static_source,
+    nearest_substation,
+    nearest_town,
+)
 from ..terrain import TerrainUnavailable, point_elevation_and_slope
 
 log = logging.getLogger(__name__)
@@ -50,8 +56,6 @@ def build_features(
 
     first_seen = parse_iso(dets[0]["acq_time"])
     last_seen = parse_iso(dets[-1]["acq_time"])
-    local = first_seen.astimezone(CENTRAL)
-    doy = local.timetuple().tm_yday
 
     f: dict[str, float] = {
         "frp_max": max(frps),
@@ -64,6 +68,27 @@ def build_features(
         "minutes_active": (last_seen - first_seen).total_seconds() / 60,
         "frp_growth": (last_frp / first_frp) if first_frp > 0 and len(ordered) > 1 else 1.0,
         "is_night": float(any(d["daynight"] == "N" for d in dets)),
+    }
+    ctx, degraded = context_features(conn, event_id, ev["is_sample"], lat, lon, first_seen, last_seen, weather)
+    f.update(ctx)
+    return {k: round(v, 4) if isinstance(v, float) else v for k, v in f.items()}, degraded
+
+
+def context_features(
+    conn: sqlite3.Connection,
+    event_id: int,
+    is_sample: int,
+    lat: float,
+    lon: float,
+    first_seen: datetime,
+    last_seen: datetime,
+    weather: dict | None,
+) -> tuple[dict, bool]:
+    """Time, weather, fire danger, terrain, and infrastructure context. Needs no satellite pixels, so events
+    opened by a line fault or a text get it too."""
+    local = first_seen.astimezone(CENTRAL)
+    doy = local.timetuple().tm_yday
+    f: dict[str, float] = {
         "local_hour": local.hour,
         "month": local.month,
         "doy_sin": math.sin(2 * math.pi * doy / 365.25),
@@ -96,8 +121,7 @@ def build_features(
     f["dist_town_km"] = nearest_town(lat, lon).distance_km
     f["dist_static_km"] = nearest_static_source(lat, lon).distance_km
     f["in_flint_hills"] = float(in_flint_hills(lat, lon))
-    f["nearby_events_24h"] = _nearby_events(conn, event_id, ev["is_sample"], lat, lon, last_seen)
-
+    f["nearby_events_24h"] = _nearby_events(conn, event_id, is_sample, lat, lon, last_seen)
     return {k: round(v, 4) if isinstance(v, float) else v for k, v in f.items()}, degraded
 
 

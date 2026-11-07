@@ -217,14 +217,21 @@ def propagate(dom: Domain, rates: list[list[float]], ignitions: list[tuple[float
     return np.array(arrival).reshape(n, n)
 
 
-def simulate(inp: SpreadInput) -> dict:
-    steps = weather_steps(inp)
-    blocks = _blocks(steps, inp.minutes)
+def run(inp: SpreadInput) -> tuple[Domain, np.ndarray, list[float]]:
+    """One deterministic run: the domain, arrival minutes per cell (inf = unburned), head ROS per weather block."""
+    blocks = _blocks(weather_steps(inp), inp.minutes)
     rates, heads = block_rates(blocks, inp.curing_pct)
     dom = build_domain(inp, blocks, max(heads))
     arrival = propagate(dom, rates, inp.ignitions or [(inp.lat, inp.lon)], inp.minutes, inp.fire_age_min)
+    return dom, arrival, heads
+
+
+def simulate(inp: SpreadInput, points: list[tuple[float, float]] | None = None) -> dict:
+    """Isochrones and impacts. `points` (lat, lon) adds `point_minutes`: arrival at each, None if not reached."""
+    dom, arrival, heads = run(inp)
+    steps = weather_steps(inp)
     first = interp_weather(steps, 0.0)
-    return {
+    out = {
         "assumptions": assumptions(inp, first, dom, steps),
         "head_ros_kmh": round(heads[0], 2),
         "length_to_breadth": round(length_to_breadth(first.wind_kmh), 2),
@@ -234,6 +241,32 @@ def simulate(inp: SpreadInput) -> dict:
         "wind_vector": {"from_deg": round(first.wind_from_deg % 360), "kmh": round(first.wind_kmh, 1)},
         "grid": {"cell_m": round(dom.cell_m, 1), "n": dom.n},
     }
+    if points is not None:
+        t = _arrival_many(arrival, dom.lats, dom.lons, np.array([p[0] for p in points]), np.array([p[1] for p in points]))
+        out["point_minutes"] = [round(float(x), 1) if x <= inp.minutes else None for x in t]
+    return out
+
+
+def growth_curve(inp: SpreadInput) -> list[dict]:
+    """Burned area and head-fire distance from ignition at each whole minute up to inp.minutes."""
+    dom, arrival, _ = run(inp)
+    return growth(arrival, dom, inp.lat, inp.lon, inp.minutes)
+
+
+def growth(arrival: np.ndarray, dom: Domain, lat: float, lon: float, minutes: int) -> list[dict]:
+    kx, ky = km_per_deg_lon(lat), KM_PER_DEG_LAT
+    yy, xx = np.meshgrid((dom.lats - lat) * ky, (dom.lons - lon) * kx, indexing="ij")
+    dist = np.hypot(yy, xx)
+    cell_ha = dom.cell_m**2 / 10_000
+    out = []
+    for m in range(minutes + 1):
+        burned = arrival <= m
+        out.append({
+            "minute": m,
+            "area_ha": round(float(burned.sum()) * cell_ha, 1),
+            "head_km": round(float(dist[burned].max()) if burned.any() else 0.0, 2),
+        })
+    return out
 
 
 def assumptions(inp: SpreadInput, first: WeatherStep, dom: Domain, steps: list[WeatherStep]) -> dict:

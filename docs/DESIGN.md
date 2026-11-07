@@ -1,41 +1,53 @@
-# Firewatch Confirmation Layer — Design
+# Firewatch — Design
 
-Companion to [PLAN.md](PLAN.md). The plan says *what* we build and *when*; this document says *how*, precisely enough that each workstream can build its piece without waiting on the others.
+Companion to [PLAN.md](PLAN.md). The plan says *what* we build and *why*; this document says *how*, precisely enough that each workstream can build its piece without waiting on the others.
 
-**Decided:** primary customer is a Kansas rural fire district dispatcher (Kansas Forest Service as statewide operator; utilities secondary). Frontend is React + MapLibre + deck.gl.
+**Decided:** the customer is the chief of a rural volunteer district (the Cottonwood Creek scenario: 450 sq mi, 18 volunteers, one bar of cell). Field interaction is SMS; the React + MapLibre console serves the station, the county, and the pitch.
 
 ---
 
 ## 1. Design principles
 
-1. **One alert per fire.** Operators see events, not pixels.
-2. **Every score explains itself.** No number appears without its top reasons.
-3. **Fail visible.** Missing data degrades the score and says so; it never hides an event.
-4. **Humans decide.** The system ranks, explains, and previews. It never dispatches.
-5. **Same code path for live and sample.** Sample mode feeds fixtures into the real pipeline, so the demo exercises the real system.
-6. **Same features in training and serving.** Every feature is computable from historical data, so the model sees in production what it saw in training.
+1. **One alert per fire.** Every signal (satellite pixel, line fault, text) attaches to one event; people see events.
+2. **Every decision explains itself.** No score or level appears without its reasons ("Line fault 1:50 on a High fire-danger day").
+3. **SMS first.** Anything a person in the field must do fits in a 160-character text and a one-digit reply. Nothing in the field needs data service.
+4. **No page on one weak signal.** Escalation needs two independent signals, or a strong multi-pass satellite score. False pages have a budget, and we measure it.
+5. **Fail visible.** Missing data degrades the decision and says so; a silent source shows as "no data," never "no fire."
+6. **Humans decide.** The system confirms, explains, and drafts; a person replies PAGE. Paging goes through county dispatch, not around it.
+7. **Same code path for live and sample.** Sample mode feeds fixtures (satellite passes, line faults, texts, replies) into the real pipeline.
+8. **Same features in training and serving** for the ML score.
 
 ## 2. Users and jobs
 
 | Persona | Situation | Job to be done |
 |---|---|---|
-| **County dispatcher** (primary) | Rural Kansas 911/dispatch center, handles all call types, fire is a fraction of the work | "Tell me, within minutes, which satellite detections in my county are worth a call to the chief, and why." |
-| **Fire chief / duty officer** | Volunteer district, decides whether to page out a crew | "Show me where this could be in an hour so I know who to page and what to protect." |
-| **Kansas Forest Service duty officer** | Statewide view, coordinates mutual aid on red-flag days | "Rank everything in the state; show me what my districts are doing with it." |
-| **Utility monitor** (secondary) | Watches transmission corridors | "Alert me when a likely wildfire is near or heading toward my lines." |
+| **Duty officer / chief** (primary) | Volunteer, at a day job, phone in pocket, one bar | "Text me only when it's probably real, tell me where and why, and let me page with one reply." |
+| **Volunteers** (18; ~5 free on a weekday) | Paged through county dispatch or a paging app | "Tell me where to go and what's coming." |
+| **Ranchers, lease pumpers, water-truck driver, disc owners** | Already in the district, often closest to the fire | Signal: "I can report smoke or a burn by text." Recipient: "Tell me early if it's coming my way and what would help." |
+| **County dispatcher** | Tones the district, handles all call types | "Give me a clear request to tone out, with a location." |
+| **Electric co-op** | Sees feeder faults and outages first | "Share lockouts on fire-weather days; it lowers our line-caused ignition risk." |
+| **Kansas Forest Service** | Statewide; grants and mutual aid | "One hosted instance for many districts; a statewide view on red-flag days." |
 
 ## 3. Domain model
 
 ```mermaid
 erDiagram
   DETECTION }o--|| EVENT : "clustered into"
+  SIGNAL }o--|| EVENT : "attached to"
   EVENT ||--o{ SCORE : "scored as (history)"
   EVENT ||--o{ ACTION : "acted on"
   EVENT ||--o| SIMULATION : "previewed by (cached)"
+  EVENT ||--o{ MESSAGE : "texts about"
+  CONTACT ||--o{ MESSAGE : "sent to / from"
+  CONTACT ||--o{ BURN_NOTICE : "registers"
 ```
 
 - **Detection:** one satellite hotspot pixel from one overpass.
-- **Event:** a cluster of detections believed to be one fire. This is the unit the user sees and acts on (the "alert").
+- **Signal:** any non-satellite evidence with a place and time: line fault, texted report, neighbor reply, camera smoke (section 4.5).
+- **Event:** detections and signals believed to be one fire. This is the unit people see and act on (the "alert").
+- **Contact:** a person in the district roster with a phone, a role, and usually a location.
+- **Message:** one SMS in or out, linked to an event when it's about one.
+- **Burn notice:** a registered controlled burn (area, day, who); a negative signal.
 - **Score:** a timestamped scoring of an event. Kept as history so the UI can show score trend.
 - **Action:** an operator's acknowledge / dismiss / escalate with a note.
 - **Simulation:** cached spread output for an event under a given wind.
@@ -100,10 +112,62 @@ CREATE TABLE actions (
 );
 
 CREATE TABLE source_health (
-  source        TEXT PRIMARY KEY,           -- firms_viirs, firms_goes, open_meteo, nws
+  source        TEXT PRIMARY KEY,           -- firms_viirs, firms_goes, open_meteo, nws, coop, sms
   last_ok       TEXT,
   last_error    TEXT,
   last_error_at TEXT
+);
+
+CREATE TABLE signals (
+  id           INTEGER PRIMARY KEY,
+  event_id     INTEGER REFERENCES events(id),
+  kind         TEXT NOT NULL,              -- line_fault | report | neighbor_reply | camera_smoke
+  lat          REAL NOT NULL,
+  lon          REAL NOT NULL,
+  observed_at  TEXT NOT NULL,              -- when it happened (fault time, text received)
+  source       TEXT NOT NULL,              -- coop:<feeder id>, sms:<contact id or number>, camera:<node>
+  value        TEXT,                       -- reply digit, report text, fault type (lockout | momentary)
+  contact_id   INTEGER REFERENCES contacts(id),
+  is_sample    INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL
+);
+
+CREATE TABLE contacts (
+  id            INTEGER PRIMARY KEY,
+  name          TEXT NOT NULL,
+  phone         TEXT UNIQUE NOT NULL,      -- E.164
+  role          TEXT NOT NULL,             -- duty_officer | chief | volunteer | rancher | pumper | water_truck | disc | dispatch | mutual_aid
+  lat           REAL,                      -- home, pasture, or lease location
+  lon           REAL,
+  weekday_avail INTEGER NOT NULL DEFAULT 0,
+  ladder_rank   INTEGER,                   -- order in the duty escalation ladder
+  opted_in      INTEGER NOT NULL DEFAULT 1, -- STOP sets 0
+  registered    INTEGER NOT NULL DEFAULT 1  -- 0 for unknown numbers that texted in
+);
+
+CREATE TABLE messages (
+  id           INTEGER PRIMARY KEY,
+  event_id     INTEGER REFERENCES events(id),
+  contact_id   INTEGER REFERENCES contacts(id), -- null for a number not in the roster
+  phone        TEXT NOT NULL,
+  direction    TEXT NOT NULL,              -- out | in
+  purpose      TEXT,                       -- ask_neighbor | duty_fyi | duty_escalate | ladder | ladder_dispatch | page | page_dispatch | downwind | helper | mutual_aid_draft | mutual_aid | reply
+  body         TEXT NOT NULL,              -- ≤ 160 chars for outbound
+  status       TEXT NOT NULL,              -- sent | failed | received
+  gateway_id   TEXT,                       -- Twilio SID; outbox-… in sample mode
+  is_sample    INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL               -- the response clock (the scenario's own time during a replay)
+);
+
+CREATE TABLE burn_notices (
+  id          INTEGER PRIMARY KEY,
+  contact_id  INTEGER NOT NULL REFERENCES contacts(id),
+  lat         REAL NOT NULL,
+  lon         REAL NOT NULL,
+  radius_km   REAL NOT NULL DEFAULT 1.5,
+  burn_date   TEXT NOT NULL,              -- local date
+  is_sample   INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL
 );
 ```
 
@@ -207,6 +271,37 @@ McArthur Mk 4 grassland fire danger index (Noble et al., 1980), used both as a m
 
 *Verify constants against the source before relying on exact values.* NWS Wichita publishes its own grassland fire danger product; we display theirs when available but always compute ours for the model so historical and live values match.
 
+### 4.5 Signals and confirmation
+
+Satellite detections go through 4.1–4.4 and get an ML score (section 5). Every other kind of evidence arrives as a **signal** and attaches to an event the same way detections do: within 3 km and 6 h of the event's detections or signals. Otherwise it opens a new event at the signal's location.
+
+| Signal | Arrives via | Counts as independent evidence when |
+|---|---|---|
+| `line_fault` | Co-op adapter: `POST /api/signals` from a feed, or a poller on the co-op's public outage map (sample mode: fixture) | Fault type is a lockout (not a momentary), the location is in grass (not in town), **and** fire danger at the location is High or above (GFDI ≥ 12) |
+| `report` | Inbound SMS `FIRE <where>` (place text geocoded against roads and towns; the sender's roster location as fallback) | Always for Investigate; for Escalate only from a registered number |
+| `neighbor_reply` | Inbound SMS reply to an ask-the-neighbor text | Reply `1` (smoke). Reply `3` from the contact who registered a burn here today makes the event a registered burn. Reply `2` is recorded but doesn't lower the level, because the neighbor may not have a view. |
+| `camera_smoke` | Phase 3 camera node | Detector confidence above its threshold on two consecutive frames |
+| Satellite | Section 4.1 | ML score ≥ 40 |
+
+**Level rules** (evaluated after every new detection, signal, or reply; each rule that fires becomes a reason):
+
+```
+independent = distinct kinds among qualifying evidence (satellite counts once however many passes)
+if registered_burn(event) and not escaped(event):      level = monitor     reason "Registered burn by <name> today"
+elif sat_score >= 70 or independent >= 2:              level = escalate
+elif independent >= 1:                                 level = investigate
+else:                                                  level = monitor
+then apply guardrails (5.4): near a town or line → at least investigate; known heat source, not growing → monitor
+```
+
+- `registered_burn`: the event lies within a burn notice's radius on the notice's local date.
+- `escaped`: a detection or report more than 1 km outside the notice radius, GFDI ≥ 25 (Very High), or a `report` / `neighbor_reply 1` from someone other than the burner saying it's spreading.
+- The event's `score` column stays the satellite ML score (null when there is no satellite evidence). `recommendation` is the level above.
+
+**Ask the neighbor.** When an event first reaches Investigate, text up to 3 opted-in contacts with a location within 3 miles of the event, nearest first. Duty officers are skipped because they're already being told. Each contact gets at most one ask per event and at most 3 per day. Replies are matched to the open ask from that number in the last 2 hours.
+
+**Burn notices.** Inbound `BURN` registers a burn for today at the sender's roster location. `BURN <where>` registers it at a geocoded place, and `BURN TOMORROW` registers it for the next day. Firewatch confirms the registration by text, including the place it understood. This digitizes the "call dispatch before you burn" practice many Kansas counties already have.
+
 ## 5. Scoring
 
 ### 5.1 Output contract
@@ -273,7 +368,36 @@ When a guardrail changes the recommendation, `guardrail` is set and shown in the
 
 ### 5.5 Re-scoring and notification
 
-Rescore an event when a detection joins it, or hourly while open (weather changes). Notify (toast + sound in UI; SMS/email stretch) only when the recommendation **rises**: monitor → investigate, investigate → escalate. Never notify on a falling score.
+Rescore an event when a detection or signal joins it, when a reply arrives, or hourly while open (weather changes). Notify only when the level **rises** (monitor → investigate → escalate), or when an escalated fire's direction or threatened contacts change. Never notify on a falling level.
+
+### 5.6 Response planner and messaging
+
+**Escalation ladder** (timers in config):
+
+| Trigger | Message | If no reply |
+|---|---|---|
+| Event reaches Investigate | `duty_fyi` to the duty officer; ask-the-neighbor texts | Nothing; the duty officer may reply PAGE anyway |
+| Event reaches Escalate | `duty_escalate` to the duty officer: place, signals, wind, `Reply PAGE or NO` | After 3 min: the next contact by `ladder_rank` (chief). After 6 min: automated voice call to county dispatch with the same text. |
+| Reply `PAGE` | `page` request to county dispatch (SMS + email; voice in live mode), plus the district's paging app by email-to-page if configured; `downwind` texts | — |
+| 5 min after PAGE with fewer than 2 volunteers replying `R` (responding), or the 60-min footprint exceeds the district's capacity setting | `mutual_aid` draft to the chief: `Reply SEND to request <neighbor district> + county EM` | — |
+
+**Who gets a downwind text.** Run the spread estimate for 60 minutes at the event's observed wind. Text any opted-in rancher, pumper, water-truck driver, or disc owner whose location the fire reaches within 60 minutes, or who is within 2 miles. Order the texts by arrival time. The text includes direction, distance, and the estimated arrival rounded to 5 minutes, and always "Only if safe." Water-truck and disc owners get an ask (`Reply 1 if you can help`); ranchers get a heads-up.
+
+**Message templates** (≤ 160 characters, plain text, no links required):
+
+```
+duty_escalate  FIREWATCH ESC: grass fire likely {dist} mi {dir} of {town}. {signals}. Wind {wdir} {wmph} mph. Reply PAGE or NO
+duty_fyi       FIREWATCH: possible fire {dist} mi {dir} of {town} ({signal}). Asking neighbors. Reply PAGE to page now
+ask_neighbor   Firewatch: possible fire near {place}. See smoke? Reply 1 yes, 2 no, 3 it's my burn
+page           FIREWATCH PAGE for {district}: grass fire {dist} mi {dir} of {town}, {lat},{lon}. Wind {wdir} {wmph}. Confirmed by {signals}
+downwind       FIREWATCH: grass fire {dist} mi {dir} of you, wind {wdir} {wmph} mph, could reach you in ~{eta} min. {ask} Only if safe.
+mutual_aid     FIREWATCH: {n} responding for {district} fire {dist} mi {dir} of {town}. Reply SEND to request {neighbor} + county EM
+health         FIREWATCH 7AM: satellites OK, co-op feed {coop_status}, SMS OK. {n_burns} burns registered today
+```
+
+**Inbound parsing** (case-insensitive, first word): `FIRE` → report; `BURN` → burn notice; `1` / `2` / `3` → neighbor reply; `PAGE` / `NO` / `SEND` → duty decisions, accepted only from the ladder; `R` → responding; `STOP` / `START` → opt-out and opt-in (carrier requirement). Anything else gets a one-line help reply.
+
+**Gateway.** One `SmsGateway` interface with two implementations: `OutboxGateway` (sample mode: writes `messages` rows and shows them in the console's outbox) and `TwilioGateway` (live: sends, and receives on `POST /api/sms/inbound`, with the webhook signature verified). Outbound is rate-limited per contact (at most 1 message a minute; batched FYIs at most once every 15 minutes).
 
 ## 6. Spread simulation
 
@@ -392,16 +516,17 @@ The forecast and the recommendation layer read only a `Situation`, a pydantic mo
 | `use_fuel_map`, `use_terrain` | no | true |
 
 API:
-- `GET /api/scenarios`
-- `GET /api/scenarios/{slug}`
-- `GET /api/scenarios/{slug}/forecast?minutes=120&members=24`
+- `GET /api/scenario/{slug}/situation[?weather=front]`: the replay scenario and its district, as a `Situation`
+- `GET /api/scenario/{slug}/forecast?minutes=120&members=24[&weather=front]`
 - `POST /api/forecast`, with a `Situation` as the JSON body
 
-Scenarios live in `backend/data/scenarios/`:
-- `cottonwood-creek` is the packet scenario, placed at Coldwater, KS.
-- `cottonwood-creek-front` is a what-if in which a cold front swings the wind to the northwest at 4 pm.
+`scenario_situation()` builds the `Situation` from the replay scenario (section 10) and its district:
+- ignition, `weather_hourly`, `curing_pct`, `red_flag` and the packet's weekend `burn_permits` come from the scenario
+- texted BURN notices in the timeline also become permits
+- apparatus at the station and mutual aid come from the district `settings.json`
+- the water truck and disc owners come from the roster
 
-Both are labeled synthetic.
+`weather_variants.front` is a what-if in which a cold front swings the wind to the northwest at 4 pm.
 
 ## 7. API contract
 
@@ -454,6 +579,15 @@ Query: `minutes` (default 60, max 120), optional `wind_kmh`, `wind_from_deg`. Re
 - `GET /api/health` → `{"mode": "live", "sources": {"firms_viirs": {"last_ok": "...", "age_min": 4, "status": "ok"}, "open_meteo": {...}}}`. Status is `ok` (< 15 min), `stale` (< 60 min), or `down`.
 - `POST /api/ingest/run` → runs one poll immediately.
 - `POST /api/sample/replay` → clears sample events and streams fixtures in over `duration_s` (default 60).
+- `POST /api/signals` → `{kind, lat, lon, observed_at, source, value}`; used by the co-op adapter and by tests. Returns the event it attached to.
+- `POST /api/sms/inbound` → Twilio webhook (form-encoded `From`, `Body`); signature-checked when `SMS_GATEWAY=twilio`. `POST /api/sms/simulate` (`{from, body}`) does the same without a signature, in sample mode only, so the console can play a reply without texting anyone real.
+- `GET /api/messages?event_id=&limit=` → outbox and inbox, oldest first.
+- `GET /api/contacts` → the roster (phone numbers masked except the last 4 digits).
+- `GET /api/district` → district settings and boundary GeoJSON (drawn on the map).
+- `POST /api/alerts/{id}/decision` → `{action: page | no | send, operator}`; the console's equivalent of a duty officer's reply.
+- `GET /api/scenario/{slug}` → scenario timeline: baseline milestones, Firewatch milestones as they happen, the fire's growth curve, and size at first truck on scene. `POST /api/scenario/{slug}/run` replays it; `POST /api/scenario/{slug}/load` runs it instantly.
+
+When `API_TOKEN` is set, the endpoints that can text people (`/signals`, `/sms/simulate`, `/alerts/{id}/decision`) require it in `X-Firewatch-Token`.
 
 ## 8. Frontend design
 
@@ -591,7 +725,17 @@ Rendering:
 - A cyan `SAMPLE` badge replaces `● LIVE` in the header, and every sample card shows a small "sample" tag.
 - "Replay sample" clears sample events and streams the fixtures in over 60 s so the demo shows alerts arriving and scores rising.
 
-### 8.7 Component map
+### 8.7 Respond panel, scenario clock, and the field page
+
+- **Signals in the drawer:** the reasons list includes non-satellite evidence with its time ("Co-op lockout, Feeder 4 · 1:50"; "Rancher J. Miller: smoke · 1:57"). Each line has its own glyph (bolt for line fault, speech bubble for a text, satellite for a pass).
+- **Message log in the drawer:** every text in and out for the event, in time order, with delivery status. In sample mode, inbound replies can be played from here.
+- **Decision bar:** PAGE / NO / SEND MUTUAL AID, mirroring the duty officer's text replies; disabled until the level allows it.
+- **Contacts on the map:** roster locations as small glyphs by role (only for the selected event, to keep the map quiet). In the 3D view, a contact turns red when the front reaches it, with its ETA in the impacts list.
+- **Scenario clock (sample mode):** a strip under the top bar showing `T+08 min since ignition`, the brief's baseline milestones (2:17 seen, 2:21 911, 2:34 roll, 2:52 on scene) as ghost ticks, Firewatch milestones as solid ticks as they happen, and fire size at the current time from the spread estimate.
+- **Phone mockups (pitch only):** a side panel rendering the outbox as three phone screens (duty officer, downwind rancher, water truck), so judges see exactly what lands on one bar of cell.
+- **Field page `/m/{token}`:** linked from texts when data works. Plain HTML under 50 KB: level, place, reasons, wind, and a static map image. No JavaScript is required.
+
+### 8.8 Component map
 
 ```
 App
@@ -622,7 +766,34 @@ THRESHOLD_INVESTIGATE=40
 CURING_PCT_OVERRIDE=       # blank = seasonal default
 NWS_USER_AGENT=firewatch-demo (you@example.com)
 VITE_API_BASE=http://localhost:8000/api
+
+SCORER=auto                # auto | model | rules
+DISTRICT=cottonwood-creek  # backend/data/districts/<slug>/: boundary.geojson, roster.csv, settings.json
+SMS_GATEWAY=outbox         # outbox (records only) | twilio; sample events always use the outbox
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_FROM=
+PUBLIC_BASE_URL=           # used to check Twilio signatures and in console links
+API_TOKEN=                 # when set, required on endpoints that can text people
 ```
+
+`backend/data/districts/<slug>/settings.json` holds what a chief tunes:
+
+```json
+{
+  "name": "Cottonwood Creek Fire District",
+  "neighbor_district": "<neighboring district>",
+  "capacity_ha_60min": 150,
+  "ask_neighbor_radius_mi": 3,
+  "ladder_minutes": [3, 6],
+  "mutual_aid_after_min": 5,
+  "min_responding": 2,
+  "line_fault_min_gfdi": 12,
+  "false_page_budget_per_month": 2
+}
+```
+
+The roster is a CSV the chief already has in some form (`name, phone, role, lat, lon, weekday_avail, ladder_rank`). Ranchers and pumpers can also join by texting `JOIN` plus a road or landmark.
 
 ## 10. Sample fixture format
 
@@ -648,6 +819,36 @@ VITE_API_BASE=http://localhost:8000/api
 
 Each pass is one satellite overpass; during replay a pass is fed in at `replay_offset_s + offset_s` (scaled to the replay duration), so scores visibly change as passes arrive. `approximate` marks fixtures whose locations and detections are reconstructed rather than copied from the FIRMS archive; `synthetic` marks invented scenarios. Weather is stored in the fixture so the demo runs offline; for non-synthetic fixtures it comes from the Open-Meteo archive (`scripts/backfill_sample_weather.py`).
 
+**Scenario fixtures** (`data/scenarios/<slug>.json`) add timed signals and inbound texts alongside passes, plus the baseline timeline. Times are minutes after ignition (`t0`), so the scenario clock and the spread estimate share one axis. The packet is canonical: 1:50 pm CDT on Tuesday 17 March 2026 is 18:50Z (daylight time starts 8 March). The district is placed at Coldwater, KS (Comanche County), and the ignition is 11 mi NW of the station. Turnout and drive minutes come from the district settings.
+
+```json
+{
+  "slug": "cottonwood-creek",
+  "title": "Cottonwood Creek: red-flag Tuesday line-down grass fire",
+  "synthetic": true,
+  "district": "cottonwood-creek",
+  "t0": "2026-03-17T18:50:00Z",
+  "duration_min": 62,
+  "ignition": {"lat": 37.3821, "lon": -99.4681, "cause": "downed distribution line (lease service)"},
+  "weather": {"wind_kmh": 56, "gust_kmh": 90, "wind_dir_deg": 185, "rh_pct": 11, "temp_c": 25.6, "precip_72h_mm": 0, "thunder_24h": 0},
+  "weather_hourly": [{"time": "2026-03-17T17:00:00Z", "wind_kmh": 50, "wind_from_deg": 175, "temp_c": 24.0, "rh_pct": 14}],
+  "weather_variants": {"front": {"note": "...", "hours": []}},
+  "red_flag": true,
+  "curing_pct": 98,
+  "burn_permits": [{"id": "permit-sat", "lat": 37.384, "lon": -99.585, "status": "extinguished"}],
+  "baseline": {"milestones": [{"key": "visual", "t": 27}, {"key": "call", "t": 31}, {"key": "roll", "t": 44}, {"key": "on_scene", "t": 62}]},
+  "timeline": [
+    {"t": 0,  "type": "signal", "kind": "line_fault", "lat": 37.3821, "lon": -99.4681, "source": "coop:feeder-4", "value": "lockout"},
+    {"t": 8,  "type": "sms", "from": "+13165550131", "body": "1"},
+    {"t": 9,  "type": "sms", "from": "+13165550101", "body": "PAGE"},
+    {"t": 12, "type": "sms", "from": "+13165550102", "body": "SEND"},
+    {"t": 38, "type": "detections", "detections": [{"source": "VIIRS_NOAA20_NRT", "...": "..."}]}
+  ]
+}
+```
+
+Texts name a roster phone number (the reserved 555-01xx range). The packet's two pasture burns were over the weekend, so they are extinguished permits, not same-day BURN notices. A same-day burn on this red-flag day would count as escaped anyway (GFDI ≥ `burn_escape_gfdi`). The "registered burn texts nobody" rule is covered by unit tests on a milder day. The replay runs each scenario minute through the real code (`add_signal`, `handle_inbound`, `process_detections`, then `notify.tick`) on the scenario's clock: `POST /api/scenario/{slug}/run` animates it at 2 s per minute, and `POST /api/scenario/{slug}/load` runs it instantly.
+
 ## 11. Testing
 
 Kept small and aimed at the things that would embarrass us in a demo:
@@ -657,6 +858,11 @@ Kept small and aimed at the things that would embarrass us in a demo:
 - **Spread:** zero-wind symmetry, wind elongation, direction mirroring, < 500 ms runtime.
 - **API:** invalid action transition returns 400; `/health` reports `down` when a source has never succeeded.
 - **End to end:** `MODE=sample`, replay, and assert all fixtures appear with expected recommendations.
+- **Confirmation rules:** a line fault alone on a High day → Investigate; on a Low day → Monitor; line fault + neighbor `1` → Escalate; a satellite hotspot inside today's burn notice → Monitor; the same hotspot 2 km outside → escalates normally.
+- **Response planner:** downwind contacts are chosen by spread arrival and ordered by ETA; an upwind contact gets nothing; no contact gets two asks for one event; STOP is honored.
+- **Ladder:** no PAGE reply in 3 min → the chief is texted; PAGE from a number outside the ladder is ignored.
+- **Messages:** every rendered template is ≤ 160 characters for the longest town name in the district.
+- **Scenario:** the Cottonwood Creek replay reaches Escalate at T+8 and PAGE at T+9, and the first truck is on scene at T+38 (packet: T+62).
 
 ## 12. Data attribution (shown in the app footer and slides)
 
