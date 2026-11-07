@@ -78,9 +78,10 @@ cd backend
 .venv/bin/python -m ml.download                        # FIRMS Kansas archive 2016–2025 + WFIGS incidents (~5 min)
 .venv/bin/python -m ml.build_dataset --rebuild-history # replay history, derive heat sources, label, build features (~15 min)
 .venv/bin/python -m ml.train                           # evaluate, export data/model/, write ml/report.md
+.venv/bin/python -m ml.analyze                         # deeper analyses + figures for the research report (~2 min)
 ```
 
-Results are in [backend/ml/report.md](backend/ml/report.md). `SCORER=auto` (default) uses the model when it's present and weather is available, and falls back to the rules scorer otherwise.
+Results are in [backend/ml/report.md](backend/ml/report.md); the full analysis of the v1 training run is in [docs/research/scorer-v1-training-run.md](docs/research/scorer-v1-training-run.md). `SCORER=auto` (default) uses the model when it's present and weather is available, and falls back to the rules scorer otherwise.
 
 | Path | What it is |
 |---|---|
