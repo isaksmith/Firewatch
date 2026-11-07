@@ -45,7 +45,9 @@ def qualifying(points: list[dict]) -> list[dict]:
 def burn_covers(conn: sqlite3.Connection, lat: float, lon: float, at: datetime, is_sample: int) -> bool:
     day = at.astimezone(CENTRAL).date().isoformat()
     rows = conn.execute(
-        "SELECT lat, lon, radius_km FROM burn_notices WHERE burn_date = ? AND is_sample = ?", (day, is_sample)
+        "SELECT lat, lon, radius_km FROM burn_notices WHERE is_sample = ? AND ("
+        "(start_at IS NULL AND burn_date = ?) OR (start_at IS NOT NULL AND start_at <= ? AND end_at >= ?))",
+        (is_sample, day, iso(at), iso(at)),
     ).fetchall()
     return any(haversine_km(lat, lon, b["lat"], b["lon"]) <= b["radius_km"] for b in rows)
 

@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import numpy as np
 
-from . import mesh
+from . import livesend, mesh
 from .config import get_settings
 from .db import iso, loads, parse_iso
 from .district import LADDER_ROLES, NEIGHBOR_ROLES, VOLUNTEER_ROLES, load_district
@@ -69,6 +69,11 @@ class TwilioGateway:
         )
         r.raise_for_status()
         return r.json()["sid"]
+
+
+def _why_failed(e: Exception) -> str:
+    code = getattr(getattr(e, "response", None), "status_code", None)
+    return f"{type(e).__name__}" + (f" (HTTP {code})" if code else "") if isinstance(e, httpx.HTTPError) else str(e)
 
 
 def gateway_for(is_sample: bool) -> SmsGateway:
@@ -185,11 +190,18 @@ def send(
     first = None
     for channel, to, gateway in routes:
         status, gid = "sent", None
-        try:
-            gid = gateway.send(to, body)
-        except (httpx.HTTPError if channel == "sms" else Exception) as e:
-            log.warning("%s to %s failed: %s", channel, to, e)
-            status = "failed"
+        # A reply answers a text the person just sent (Twilio-signed webhook), so it is exempt from the live guard.
+        held = isinstance(gateway, TwilioGateway) and purpose != "reply" and livesend.check(conn, event_id, now)
+        if held:
+            log.warning("live SMS for event %s held: %s", event_id, held)
+            status = "held"
+        else:
+            try:
+                gid = gateway.send(to, body)
+            except (httpx.HTTPError if channel == "sms" else Exception) as e:
+                # Not str(e): an HTTP error repeats the Twilio URL, which carries the account SID.
+                log.warning("%s to %s failed: %s", channel, to, _why_failed(e))
+                status = "failed"
         cur = conn.execute(
             "INSERT INTO messages(event_id, contact_id, phone, direction, purpose, body, status, gateway_id, is_sample, created_at, channel) "
             "VALUES (?, ?, ?, 'out', ?, ?, ?, ?, ?, ?, ?)",

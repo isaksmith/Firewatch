@@ -18,7 +18,9 @@ from .db import connect, iso, parse_iso, utcnow
 from .geo import KM_PER_MILE, bearing_deg, compass, haversine_km
 
 log = logging.getLogger(__name__)
-MESH_MAX_BYTES = 200
+MESH_MAX_BYTES = 233  # meshtastic 2.7.11 DATA_PAYLOAD_LEN: the radio refuses a longer text payload
+OPEN_TIMEOUT_S = 15.0  # no radio found must be a clear error this soon, not a hang
+POSITION_PAD_KM = 40.0  # inbound GPS fixes must fall inside the district box padded by this much
 POSITION_FRESH = timedelta(minutes=30)
 QUIET_MIN = 15
 ACK_RETRY_S = 2.0
@@ -41,8 +43,44 @@ def node_id(num: int) -> str:
 
 
 def _fit(body: str) -> str:
+    """At most MESH_MAX_BYTES of UTF-8, cut on a character boundary (never mid-character)."""
     raw = body.encode()
-    return raw[:MESH_MAX_BYTES].decode(errors="ignore") if len(raw) > MESH_MAX_BYTES else body
+    if len(raw) <= MESH_MAX_BYTES:
+        return body
+    cut = MESH_MAX_BYTES
+    while cut > 0 and (raw[cut] & 0xC0) == 0x80:  # raw[cut] is a continuation byte: step back to the lead byte
+        cut -= 1
+    return raw[:cut].decode()
+
+
+def _district_box() -> tuple[float, float, float, float] | None:
+    """(south, west, north, east) of the district boundary padded by POSITION_PAD_KM; None if there is no district."""
+    from .district import load_district
+    from .geo import KM_PER_DEG_LAT, km_per_deg_lon
+
+    try:
+        pts = [p for ring in load_district().rings for p in ring]
+    except FileNotFoundError:
+        return None
+    if not pts:
+        return None
+    lons, lats = [p[0] for p in pts], [p[1] for p in pts]
+    mid = (min(lats) + max(lats)) / 2
+    dlat, dlon = POSITION_PAD_KM / KM_PER_DEG_LAT, POSITION_PAD_KM / km_per_deg_lon(mid)
+    return min(lats) - dlat, min(lons) - dlon, max(lats) + dlat, max(lons) + dlon
+
+
+def plausible_position(lat, lon) -> bool:
+    """A usable GPS fix: real numbers, not 0,0 (no fix), and inside the padded district box."""
+    if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+        return False
+    if lat != lat or lon != lon or (lat == 0 and lon == 0):
+        return False
+    box = _district_box()
+    if box is None:
+        return abs(lat) <= 90 and abs(lon) <= 180
+    s, w, n, e = box
+    return s <= lat <= n and w <= lon <= e
 
 
 def _is_keyword(text: str) -> bool:
@@ -166,7 +204,7 @@ def handle_packet(conn, packet: dict, my_num: int | None) -> str | None:
         p = decoded.get("position") or {}
         lat = p.get("latitude", p.get("latitudeI", 0) * 1e-7)
         lon = p.get("longitude", p.get("longitudeI", 0) * 1e-7)
-        if lat or lon:  # 0,0 means no GPS fix
+        if plausible_position(lat, lon):  # 0,0 means no GPS fix; a fix far outside the district is a bad one
             conn.execute(
                 "UPDATE mesh_nodes SET lat = ?, lon = ?, position_at = ? WHERE node_id = ?",
                 (round(lat, 6), round(lon, 6), iso(utcnow()), nid),
@@ -302,6 +340,8 @@ def _seed_nodes(conn, iface) -> int:
         at = iso(datetime.fromtimestamp(heard, tz=timezone.utc))
         u, p = node.get("user") or {}, node.get("position") or {}
         lat, lon = p.get("latitude"), p.get("longitude")
+        if not plausible_position(lat, lon):
+            lat = lon = None
         conn.execute(
             "INSERT INTO mesh_nodes(node_id, long_name, short_name, hw_model, lat, lon, position_at, battery_pct, snr, last_heard) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(node_id) DO UPDATE SET "
@@ -312,7 +352,7 @@ def _seed_nodes(conn, iface) -> int:
             "last_heard = MAX(excluded.last_heard, mesh_nodes.last_heard)",
             (
                 nid.lower(), u.get("longName"), u.get("shortName"), u.get("hwModel"),
-                lat if lat or lon else None, lon if lat or lon else None, at if lat or lon else None,
+                lat, lon, at if lat is not None else None,
                 (node.get("deviceMetrics") or {}).get("batteryLevel"), node.get("snr"), at,
             ),
         )
@@ -324,6 +364,35 @@ def _seed_nodes(conn, iface) -> int:
 
 
 def _open_interface():
+    """Open the radio, or raise within OPEN_TIMEOUT_S. meshtastic 2.7.11 returns an unconnected interface when
+    a serial device is missing, and a TCP host that does not answer can hang, so both run on a worker thread."""
+    box: dict = {}
+
+    def work():
+        try:
+            box["iface"] = _open_raw()
+        except (Exception, SystemExit) as e:
+            box["error"] = e
+
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    t.join(OPEN_TIMEOUT_S)
+    if t.is_alive():
+        raise RuntimeError(f"no Meshtastic radio answered within {OPEN_TIMEOUT_S:g} s")
+    if "error" in box:
+        raise box["error"]
+    iface = box["iface"]
+    connected = getattr(iface, "isConnected", None)
+    if connected is not None and not connected.is_set():
+        try:
+            iface.close()
+        except Exception:
+            pass
+        raise RuntimeError("no Meshtastic radio found (the interface did not connect)")
+    return iface
+
+
+def _open_raw():
     s = get_settings()
     if s.mesh_gateway == "tcp":
         from meshtastic.tcp_interface import TCPInterface

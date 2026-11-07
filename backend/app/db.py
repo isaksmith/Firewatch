@@ -163,13 +163,17 @@ CREATE INDEX IF NOT EXISTS idx_sensor_node_time ON sensor_readings(node_id, at);
 
 CREATE TABLE IF NOT EXISTS burn_notices (
   id          INTEGER PRIMARY KEY,
-  contact_id  INTEGER NOT NULL REFERENCES contacts(id),
+  contact_id  INTEGER REFERENCES contacts(id),   -- NULL for a burn the dispatcher logged by phone (see caller)
   lat         REAL NOT NULL,
   lon         REAL NOT NULL,
   radius_km   REAL NOT NULL DEFAULT 1.5,
-  burn_date   TEXT NOT NULL,               -- local date, YYYY-MM-DD
+  burn_date   TEXT NOT NULL,               -- local date, YYYY-MM-DD (a logged burn: the date it starts)
   is_sample   INTEGER NOT NULL DEFAULT 0,
-  created_at  TEXT NOT NULL
+  created_at  TEXT NOT NULL,               -- a logged burn: when it was called in
+  start_at    TEXT,                        -- logged burns only: the window, UTC ISO (NULL = the whole burn_date)
+  end_at      TEXT,
+  caller      TEXT,
+  label       TEXT
 );
 """
 
@@ -178,6 +182,7 @@ MIGRATIONS = {
     "events": {"evidence_json": "TEXT", "level_reason": "TEXT", "response_json": "TEXT"},
     "contacts": {"mesh_id": "TEXT"},
     "messages": {"channel": "TEXT NOT NULL DEFAULT 'sms'"},
+    "burn_notices": {"start_at": "TEXT", "end_at": "TEXT", "caller": "TEXT", "label": "TEXT"},
 }
 POST_MIGRATION = """
 CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_mesh ON contacts(mesh_id);
@@ -224,9 +229,27 @@ def init_db(path: str | None = None) -> None:
             for col, decl in cols.items():
                 if col not in have:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        _burn_contact_nullable(conn)
         # Errors stored before keys were redacted can hold a FIRMS URL with the key in it.
         conn.execute("UPDATE source_health SET last_error = NULL WHERE last_error LIKE '%/api/area/csv/%'")
         conn.executescript(POST_MIGRATION)
+
+
+def _burn_contact_nullable(conn: sqlite3.Connection) -> None:
+    """Older databases made burn_notices.contact_id NOT NULL; a logged burn has no contact, so rebuild the table."""
+    col = next((r for r in conn.execute("PRAGMA table_info(burn_notices)") if r["name"] == "contact_id"), None)
+    if col is None or not col["notnull"]:
+        return
+    conn.executescript(
+        "ALTER TABLE burn_notices RENAME TO burn_notices_old;"
+        "CREATE TABLE burn_notices (id INTEGER PRIMARY KEY, contact_id INTEGER REFERENCES contacts(id), "
+        "lat REAL NOT NULL, lon REAL NOT NULL, radius_km REAL NOT NULL DEFAULT 1.5, burn_date TEXT NOT NULL, "
+        "is_sample INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, start_at TEXT, end_at TEXT, caller TEXT, label TEXT);"
+        "INSERT INTO burn_notices(id, contact_id, lat, lon, radius_km, burn_date, is_sample, created_at, start_at, end_at, caller, label) "
+        "SELECT id, contact_id, lat, lon, radius_km, burn_date, is_sample, created_at, start_at, end_at, caller, label "
+        "FROM burn_notices_old;"
+        "DROP TABLE burn_notices_old;"
+    )
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

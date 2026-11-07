@@ -5,6 +5,7 @@ import logging
 import math
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Annotated, Literal
 from urllib.parse import parse_qsl
 
@@ -20,9 +21,10 @@ from fastapi import (
     Response,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from fastapi.middleware.gzip import GZipMiddleware
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from . import climate, mesh, notify, planner, playbook, sample, scenario
+from . import cap, climate, livesend, mesh, notify, planner, playbook, sample, scenario
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
@@ -31,6 +33,7 @@ from .fire_weather import default_curing, gfdi_band
 from .geo import compass
 from .ingest import goes_fire, goes_lightning, goes_smoke, hms, landsat_nrt, lsr, metar, ngfs, nws, risk_grid, rtma_ru, spc, wfigs
 from .layers import LAYER_NAMES, load_layer, nearest_assets, segment_index
+from .lite import router as lite_router
 from .pipeline import poll_firms_once
 from .signals import add_signal
 from .sim.ensemble import forecast
@@ -148,6 +151,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=500)
 api = APIRouter(prefix="/api")
 
 RECOMMENDATION_ORDER = {"escalate": 0, "investigate": 1, "monitor": 2}
@@ -370,6 +374,21 @@ def act_on_alert(event_id: int, body: ActionIn):
         )
         conn.execute("UPDATE events SET status = ?, updated_at = ? WHERE id = ?", (new_status, now, event_id))
     return get_alert(event_id)
+
+
+@api.get("/alerts/{event_id}/cap.xml")
+def alert_cap(event_id: int, polygon: bool = False):
+    """The alert as CAP 1.2 (status Exercise for scenario, replay and sample events). `polygon=true` adds the
+    60-minute forecast outline, which runs the forecast (cached after the first call)."""
+    d = get_alert(event_id)
+    ring = None
+    if polygon:
+        try:
+            step = next(st for st in alert_forecast(event_id)["steps"] if st["ahead_min"] == 60)
+            ring = cap.ring_from_multipolygon(step["likely"]["coordinates"])
+        except Exception:  # the outline is a nice-to-have; the circle on the fire always goes out
+            log.exception("cap polygon unavailable for event %s", event_id)
+    return Response(cap.to_cap(d, area_ring=ring), media_type="application/cap+xml")
 
 
 _sim_cache: dict[tuple, dict] = {}
@@ -611,7 +630,14 @@ def sample_fixtures():
     ]
 
 
+SIGNAL_PAST = timedelta(hours=48)
+SIGNAL_FUTURE = timedelta(minutes=10)
+
+
 class SignalIn(BaseModel):
+    """`line_fault` is the co-op feed. `report` is the public report (a located text from someone: it counts as a
+    weak source, so it reaches Investigate alone and Escalate with a second source). Both are accepted here already."""
+
     kind: Literal["line_fault", "report", "camera_smoke", "sensor_smoke"]
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
@@ -619,20 +645,112 @@ class SignalIn(BaseModel):
     source: str = Field(min_length=1, max_length=80)
     value: str | None = Field(default=None, max_length=200)
 
+    @field_validator("source", "value")
+    @classmethod
+    def _strip(cls, v: str | None):
+        return v.strip() if isinstance(v, str) else v
+
+    @field_validator("observed_at")
+    @classmethod
+    def _recent(cls, v: str | None):
+        """Within the last 48 hours and at most 10 minutes ahead (clocks drift)."""
+        if v is None:
+            return v
+        try:
+            t = parse_iso(v)
+        except ValueError:
+            raise ValueError("observed_at must be ISO 8601") from None
+        t = t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        now = utcnow()
+        if t < now - SIGNAL_PAST or t > now + SIGNAL_FUTURE:
+            raise ValueError("observed_at must be within the last 48 hours and at most 10 minutes ahead")
+        return iso(t)
+
+    @model_validator(mode="after")
+    def _needs_text(self):
+        if self.source == "":
+            raise ValueError("source must not be blank")
+        if self.kind == "report" and not self.value:
+            raise ValueError("a report needs its text")
+        return self
+
 
 @api.post("/signals", dependencies=[Depends(require_token)])
-def post_signal(body: SignalIn):
-    """Line faults (co-op feed), camera smoke, or a located report. Attaches to an event and re-levels it."""
+def post_signal(body: SignalIn, x_firewatch_operator_token: str = Header(default="")):
+    """Line faults (co-op feed), camera smoke, or a located public report. Attaches to an event and re-levels it.
+    Any texts this causes are real only with the operator token; without it they are held (see livesend.py)."""
     observed = body.observed_at or iso(utcnow())
-    try:
-        parse_iso(observed)
-    except ValueError:
-        raise HTTPException(422, "observed_at must be ISO 8601") from None
     sample_mode = get_settings().mode == "sample"
-    with connect() as conn:
+    with livesend.operator(x_firewatch_operator_token), connect() as conn:
         eid = add_signal(conn, body.kind, body.lat, body.lon, observed, body.source, body.value, is_sample=sample_mode)
         result = evaluate_event(conn, eid)
     return {"event_id": eid, **result}
+
+
+class BurnIn(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    start: datetime
+    end: datetime
+    called_in: datetime | None = None
+    caller: str = Field(min_length=1, max_length=80)
+    label: str | None = Field(default=None, max_length=120)
+
+    @field_validator("caller", "label")
+    @classmethod
+    def _strip(cls, v: str | None):
+        return v.strip() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _window(self):
+        # A logged burn hides real fires near it, so its window is bounded.
+        utc = lambda t: t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        start, end = utc(self.start), utc(self.end)
+        if end <= start:
+            raise ValueError("end must be after start")
+        if end - start > timedelta(hours=24):
+            raise ValueError("a burn window can be at most 24 hours")
+        if start - utcnow() > timedelta(days=14):
+            raise ValueError("a burn can be logged at most 14 days ahead")
+        if not self.caller:
+            raise ValueError("caller must not be blank")
+        self.start, self.end = start, end
+        if self.called_in is not None:
+            self.called_in = utc(self.called_in)
+        return self
+
+
+def _burn_row(b) -> dict:
+    return {"id": b["id"], "lat": b["lat"], "lon": b["lon"], "start": b["start_at"], "end": b["end_at"],
+            "called_in": b["created_at"], "caller": b["caller"], "label": b["label"], "is_sample": bool(b["is_sample"])}
+
+
+@api.post("/burns", status_code=201, dependencies=[Depends(require_token)])
+def post_burn(body: BurnIn):
+    """Log a burn someone phoned in. It goes in the same table as text-registered burns (the permits), so confirm.py
+    treats it the same way: a detection inside its radius and window stays at Monitor until the fire shows escape."""
+    try:
+        radius = float(load_district().settings.get("burn_radius_km", 1.5))
+    except FileNotFoundError:
+        radius = 1.5
+    called_in = body.called_in or utcnow()
+    local_date = body.start.astimezone(ZoneInfo("America/Chicago")).date().isoformat()
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO burn_notices(contact_id, lat, lon, radius_km, burn_date, is_sample, created_at, start_at, end_at, caller, label) "
+            "VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (body.lat, body.lon, radius, local_date, int(get_settings().mode == "sample"), iso(called_in),
+             iso(body.start), iso(body.end), body.caller, body.label),
+        )
+        return _burn_row(conn.execute("SELECT * FROM burn_notices WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+@api.get("/burns")
+def list_burns():
+    """Logged burns (called in with a window), soonest first."""
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM burn_notices WHERE start_at IS NOT NULL ORDER BY start_at, id").fetchall()
+    return {"burns": [_burn_row(b) for b in rows]}
 
 
 @api.post("/sms/inbound")
@@ -763,14 +881,17 @@ class DecisionIn(BaseModel):
 
 
 @api.post("/alerts/{event_id}/decision", dependencies=[Depends(require_token)])
-def alert_decision(event_id: int, body: DecisionIn):
+def alert_decision(event_id: int, body: DecisionIn, x_firewatch_operator_token: str = Header(default="")):
     """PAGE / NO / SEND from the console; the same path as the duty officer texting it."""
     with connect() as conn:
         ev = _get_event(conn, event_id)
         if not ev["response_json"]:
             raise HTTPException(409, "this alert has no response in progress")
         now = scenario.clock_now(ev["sample_slug"]) if ev["is_sample"] else None
-        notify.decide(conn, event_id, body.action, body.operator, now or utcnow())
+        if livesend.real_sms_possible(bool(ev["is_sample"])):
+            livesend.precheck(x_firewatch_operator_token, conn, event_id)  # real texts: operator token, 2-minute cooldown
+        with livesend.operator(x_firewatch_operator_token):
+            notify.decide(conn, event_id, body.action, body.operator, now or utcnow())
     return get_alert(event_id)
 
 
@@ -786,10 +907,14 @@ class OptionIn(BaseModel):
 
 
 @api.post("/alerts/{event_id}/options/{option_id}", dependencies=[Depends(require_token)])
-def choose_option(event_id: int, option_id: str, body: OptionIn):
+def choose_option(event_id: int, option_id: str, body: OptionIn, x_firewatch_operator_token: str = Header(default="")):
     with connect() as conn:
+        ev = _get_event(conn, event_id)
+        if livesend.real_sms_possible(bool(ev["is_sample"])):
+            livesend.precheck(x_firewatch_operator_token, conn, event_id)  # real texts: operator token, 2-minute cooldown
         try:
-            return playbook.execute(conn, _get_event(conn, event_id), option_id, body.operator)
+            with livesend.operator(x_firewatch_operator_token):
+                return playbook.execute(conn, ev, option_id, body.operator)
         except ValueError as e:
             raise HTTPException(409, str(e)) from None
 
@@ -879,6 +1004,7 @@ async def load_scenario_now(slug: str):
 
 
 app.include_router(api)
+app.include_router(lite_router)
 
 
 @app.get("/")

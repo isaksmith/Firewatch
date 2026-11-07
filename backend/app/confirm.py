@@ -295,10 +295,14 @@ def _registered_burn(conn, ev, signals) -> tuple[dict | None, list[str], bool]:
     someone other than the burner, or fire seen outside the notice. Fire danger is a condition, not evidence,
     and a satellite detection is not evidence either: a registered burn is visible from space."""
     burn_date = parse_iso(ev["first_seen"]).astimezone(CENTRAL).date().isoformat()
+    # A text-registered notice covers its local date. A burn logged by phone (start_at/end_at set) counts only
+    # while its window overlaps the event's lifetime, so a burn that ended before the fire started suppresses nothing.
     rows = conn.execute(
-        "SELECT b.*, c.name FROM burn_notices b JOIN contacts c ON c.id = b.contact_id "
-        "WHERE b.burn_date = ? AND b.is_sample = ? ORDER BY b.created_at",
-        (burn_date, ev["is_sample"]),
+        "SELECT b.*, COALESCE(c.name, b.label, b.caller, 'Logged burn') AS name FROM burn_notices b "
+        "LEFT JOIN contacts c ON c.id = b.contact_id WHERE b.is_sample = ? AND ("
+        "(b.start_at IS NULL AND b.burn_date = ?) OR (b.start_at IS NOT NULL AND b.start_at <= ? AND b.end_at >= ?)) "
+        "ORDER BY b.created_at",
+        (ev["is_sample"], burn_date, iso(parse_iso(ev["last_seen"])), iso(parse_iso(ev["first_seen"]))),
     ).fetchall()
     first = parse_iso(ev["first_seen"])
     covering = [dict(b) for b in rows if haversine_km(ev["lat"], ev["lon"], b["lat"], b["lon"]) <= b["radius_km"]]

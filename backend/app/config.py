@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     mesh_channel_feed: bool = True  # copy every mesh text to the district channel as well as the person's radio
     scenario_seconds_per_minute: float = 2.0
     api_token: str = ""  # when set, required (X-Firewatch-Token) on endpoints that can text people
+    # FIREWATCH_SECRET signs the /lite form tokens (a random per-process key when unset).
+    # FIREWATCH_OPERATOR_TOKEN unlocks real SMS (X-Firewatch-Operator-Token); unset means live texting is off.
+    firewatch_secret: str = ""
+    firewatch_operator_token: str = ""
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @property
