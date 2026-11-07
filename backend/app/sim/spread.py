@@ -35,7 +35,63 @@ class SpreadInput:
     use_terrain: bool = True
 
 
-def simulate(inp: SpreadInput) -> dict:
+@dataclass
+class Grid:
+    arrival: np.ndarray  # minutes since ignition; inf where the fire does not reach within the run
+    lats: np.ndarray
+    lons: np.ndarray
+    cell_m: float
+    ros_kmh: float
+    lb: float
+    terrain_note: str
+
+
+def simulate(inp: SpreadInput, points: list[tuple[float, float]] | None = None) -> dict:
+    """Isochrones and impacts. `points` (lat, lon) adds `point_minutes`: arrival at each, None if not reached."""
+    g = arrival_grid(inp)
+    out = {
+        "assumptions": {
+            "wind_kmh": round(inp.wind_kmh, 1),
+            "wind_from_deg": round(inp.wind_from_deg % 360),
+            "temp_c": round(inp.temp_c, 1),
+            "rh_pct": round(inp.rh_pct),
+            "curing_pct": round(inp.curing_pct),
+            "fuel": "grassland",
+            "model": "CSIRO grassland + elliptical + slope",
+            "terrain": g.terrain_note,
+        },
+        "head_ros_kmh": round(g.ros_kmh, 2),
+        "length_to_breadth": round(g.lb, 2),
+        "isochrones": _isochrones(g.arrival, g.lats, g.lons, inp.minutes, g.cell_m),
+        "impacts": _impacts(g.arrival, g.lats, g.lons, inp.minutes),
+        "wind_vector": {"from_deg": round(inp.wind_from_deg % 360), "kmh": round(inp.wind_kmh, 1)},
+        "grid": {"cell_m": round(g.cell_m, 1), "n": GRID_N},
+    }
+    if points is not None:
+        t = _arrival_many(g.arrival, g.lats, g.lons, np.array([p[0] for p in points]), np.array([p[1] for p in points]))
+        out["point_minutes"] = [round(float(x), 1) if x <= inp.minutes else None for x in t]
+    return out
+
+
+def growth_curve(inp: SpreadInput) -> list[dict]:
+    """Burned area and head-fire distance from ignition at each whole minute up to inp.minutes."""
+    g = arrival_grid(inp)
+    kx, ky = km_per_deg_lon(inp.lat), KM_PER_DEG_LAT
+    yy, xx = np.meshgrid((g.lats - inp.lat) * ky, (g.lons - inp.lon) * kx, indexing="ij")
+    dist = np.hypot(yy, xx)
+    cell_ha = g.cell_m**2 / 10_000
+    out = []
+    for m in range(inp.minutes + 1):
+        burned = g.arrival <= m
+        out.append({
+            "minute": m,
+            "area_ha": round(float(burned.sum()) * cell_ha, 1),
+            "head_km": round(float(dist[burned].max()) if burned.any() else 0.0, 2),
+        })
+    return out
+
+
+def arrival_grid(inp: SpreadInput) -> Grid:
     ros_kmh = head_ros_kmh(inp.wind_kmh, inp.temp_c, inp.rh_pct, inp.curing_pct)
     lb = length_to_breadth(inp.wind_kmh)
     ecc = math.sqrt(1 - 1 / lb**2)
@@ -95,27 +151,7 @@ def simulate(inp: SpreadInput) -> dict:
                 arrival[ni, nj] = nt
                 heapq.heappush(heap, (nt, ni, nj))
 
-    isochrones = _isochrones(arrival, lats, lons, inp.minutes, cell_m)
-    impacts = _impacts(arrival, lats, lons, inp.minutes)
-
-    return {
-        "assumptions": {
-            "wind_kmh": round(inp.wind_kmh, 1),
-            "wind_from_deg": round(inp.wind_from_deg % 360),
-            "temp_c": round(inp.temp_c, 1),
-            "rh_pct": round(inp.rh_pct),
-            "curing_pct": round(inp.curing_pct),
-            "fuel": "grassland",
-            "model": "CSIRO grassland + elliptical + slope",
-            "terrain": terrain_note,
-        },
-        "head_ros_kmh": round(ros_kmh, 2),
-        "length_to_breadth": round(lb, 2),
-        "isochrones": isochrones,
-        "impacts": impacts,
-        "wind_vector": {"from_deg": round(inp.wind_from_deg % 360), "kmh": round(inp.wind_kmh, 1)},
-        "grid": {"cell_m": round(cell_m, 1), "n": GRID_N},
-    }
+    return Grid(arrival, lats, lons, cell_m, ros_kmh, lb, terrain_note)
 
 
 def _isochrones(arrival: np.ndarray, lats: np.ndarray, lons: np.ndarray, minutes: int, cell_m: float) -> dict:

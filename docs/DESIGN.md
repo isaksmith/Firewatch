@@ -148,13 +148,15 @@ CREATE TABLE contacts (
 CREATE TABLE messages (
   id           INTEGER PRIMARY KEY,
   event_id     INTEGER REFERENCES events(id),
-  contact_id   INTEGER REFERENCES contacts(id),
+  contact_id   INTEGER REFERENCES contacts(id), -- null for a number not in the roster
+  phone        TEXT NOT NULL,
   direction    TEXT NOT NULL,              -- out | in
-  purpose      TEXT,                       -- duty_escalate | duty_fyi | ask_neighbor | page | downwind | mutual_aid | health | reply | report | burn
+  purpose      TEXT,                       -- ask_neighbor | duty_fyi | duty_escalate | ladder | ladder_dispatch | page | page_dispatch | downwind | helper | mutual_aid_draft | mutual_aid | reply
   body         TEXT NOT NULL,              -- ≤ 160 chars for outbound
-  status       TEXT NOT NULL,              -- queued | sent | delivered | failed | received
-  gateway_id   TEXT,                       -- Twilio SID; null in sample mode
-  created_at   TEXT NOT NULL
+  status       TEXT NOT NULL,              -- sent | failed | received
+  gateway_id   TEXT,                       -- Twilio SID; outbox-… in sample mode
+  is_sample    INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL               -- the response clock (the scenario's own time during a replay)
 );
 
 CREATE TABLE burn_notices (
@@ -164,6 +166,7 @@ CREATE TABLE burn_notices (
   lon         REAL NOT NULL,
   radius_km   REAL NOT NULL DEFAULT 1.5,
   burn_date   TEXT NOT NULL,              -- local date
+  is_sample   INTEGER NOT NULL DEFAULT 0,
   created_at  TEXT NOT NULL
 );
 ```
@@ -499,11 +502,14 @@ Query: `minutes` (default 60, max 120), optional `wind_kmh`, `wind_from_deg`. Re
 - `POST /api/ingest/run` → runs one poll immediately.
 - `POST /api/sample/replay` → clears sample events and streams fixtures in over `duration_s` (default 60).
 - `POST /api/signals` → `{kind, lat, lon, observed_at, source, value}`; used by the co-op adapter and by tests. Returns the event it attached to.
-- `POST /api/sms/inbound` → Twilio webhook (form-encoded `From`, `Body`); signature-checked in live mode. `POST /api/sms/simulate` does the same without a signature in sample mode, so the console can play a reply.
-- `GET /api/messages?event_id=&since=` → outbox and inbox, newest first.
+- `POST /api/sms/inbound` → Twilio webhook (form-encoded `From`, `Body`); signature-checked when `SMS_GATEWAY=twilio`. `POST /api/sms/simulate` (`{from, body}`) does the same without a signature, in sample mode only, so the console can play a reply without texting anyone real.
+- `GET /api/messages?event_id=&limit=` → outbox and inbox, oldest first.
 - `GET /api/contacts` → the roster (phone numbers masked except the last 4 digits).
-- `POST /api/alerts/{id}/decision` → `{decision: page | no | send_mutual_aid, operator}`; the console's equivalent of a duty officer's reply.
-- `GET /api/scenario/{slug}` → scenario timeline: baseline milestones, Firewatch milestones as they happen, and spread size at each.
+- `GET /api/district` → district settings and boundary GeoJSON (drawn on the map).
+- `POST /api/alerts/{id}/decision` → `{action: page | no | send, operator}`; the console's equivalent of a duty officer's reply.
+- `GET /api/scenario/{slug}` → scenario timeline: baseline milestones, Firewatch milestones as they happen, the fire's growth curve, and size at first truck on scene. `POST /api/scenario/{slug}/run` replays it; `POST /api/scenario/{slug}/load` runs it instantly.
+
+When `API_TOKEN` is set, the endpoints that can text people (`/signals`, `/sms/simulate`, `/alerts/{id}/decision`) require it in `X-Firewatch-Token`.
 
 ## 8. Frontend design
 
@@ -685,10 +691,12 @@ VITE_API_BASE=http://localhost:8000/api
 
 SCORER=auto                # auto | model | rules
 DISTRICT=cottonwood-creek  # backend/data/districts/<slug>/: boundary.geojson, roster.csv, settings.json
-SMS_GATEWAY=outbox         # outbox (sample) | twilio
+SMS_GATEWAY=outbox         # outbox (records only) | twilio; sample events always use the outbox
 TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_FROM=
+PUBLIC_BASE_URL=           # used to check Twilio signatures and in console links
+API_TOKEN=                 # when set, required on endpoints that can text people
 ```
 
 `backend/data/districts/<slug>/settings.json` holds what a chief tunes:
@@ -733,28 +741,31 @@ The roster is a CSV the chief already has in some form (`name, phone, role, lat,
 
 Each pass is one satellite overpass; during replay a pass is fed in at `replay_offset_s + offset_s` (scaled to the replay duration), so scores visibly change as passes arrive. `approximate` marks fixtures whose locations and detections are reconstructed rather than copied from the FIRMS archive; `synthetic` marks invented scenarios. Weather is stored in the fixture so the demo runs offline; for non-synthetic fixtures it comes from the Open-Meteo archive (`scripts/backfill_sample_weather.py`).
 
-**Scenario fixtures** add timed signals and inbound texts alongside passes, plus the baseline timeline. Times are minutes after ignition, so the scenario clock and the spread estimate share one axis:
+**Scenario fixtures** (`data/scenarios/<slug>.json`) add timed signals and inbound texts alongside passes, plus the baseline timeline. Times are minutes after ignition (`t0`), so the scenario clock and the spread estimate share one axis. 1:50 pm CDT on 14 March 2026 is 18:50Z (daylight time starts 8 March). Turnout and drive minutes come from the district settings.
 
 ```json
 {
   "slug": "cottonwood-creek",
-  "title": "Cottonwood Creek: line down on a red-flag afternoon (synthetic)",
+  "title": "Cottonwood Creek: Saturday line-down grass fire",
   "synthetic": true,
-  "ignition": {"lat": 37.80, "lon": -96.70, "time": "2026-03-14T19:50:00Z"},
-  "weather": {"wind_kmh": 26, "gust_kmh": 45, "wind_dir_deg": 200, "rh_pct": 18, "temp_c": 24, "precip_72h_mm": 0, "thunder_24h": 0, "source": "synthetic"},
-  "baseline": [{"t_min": 27, "label": "First seen"}, {"t_min": 31, "label": "911 call"}, {"t_min": 44, "label": "Truck rolls"}, {"t_min": 62, "label": "On scene"}],
-  "turnout_min": 13, "drive_min": 18,
+  "district": "cottonwood-creek",
+  "t0": "2026-03-14T18:50:00Z",
+  "duration_min": 62,
+  "ignition": {"lat": 37.77, "lon": -96.66, "cause": "downed distribution line"},
+  "weather": {"wind_kmh": 26, "gust_kmh": 45, "wind_dir_deg": 200, "rh_pct": 18, "temp_c": 24, "precip_72h_mm": 0, "thunder_24h": 0},
+  "baseline": {"milestones": [{"key": "visual", "t": 27}, {"key": "call", "t": 31}, {"key": "roll", "t": 44}, {"key": "on_scene", "t": 62}]},
   "timeline": [
-    {"t_min": 0,  "signal": {"kind": "line_fault", "source": "coop:feeder-4", "value": "lockout"}},
-    {"t_min": 8,  "sms_in": {"from_role": "rancher", "body": "1"}},
-    {"t_min": 9,  "sms_in": {"from_role": "duty_officer", "body": "PAGE"}},
-    {"t_min": 38, "pass": {"detections": [{"source": "VIIRS_NOAA20_NRT", "...": "..."}]}}
-  ],
-  "also": [{"slug": "cottonwood-registered-burn", "t_min": 15}]
+    {"t": -230, "type": "sms", "from": "+13165550135", "body": "BURN"},
+    {"t": 0,  "type": "signal", "kind": "line_fault", "lat": 37.77, "lon": -96.66, "source": "coop:feeder-4", "value": "lockout"},
+    {"t": 8,  "type": "sms", "from": "+13165550131", "body": "1"},
+    {"t": 9,  "type": "sms", "from": "+13165550101", "body": "PAGE"},
+    {"t": 12, "type": "sms", "from": "+13165550102", "body": "SEND"},
+    {"t": 38, "type": "detections", "detections": [{"source": "VIIRS_NOAA20_NRT", "...": "..."}]}
+  ]
 }
 ```
 
-`sms_in.from_role` resolves to the nearest roster contact with that role, so the fixture survives roster edits.
+Texts name a roster phone number (the reserved 555-01xx range). The registered burn is registered by text that morning and first appears on the T+38 satellite pass, which sees both fires; it stays at Monitor and texts nobody. The replay runs each scenario minute through the real code (`add_signal`, `handle_inbound`, `process_detections`, then `notify.tick`) on the scenario's clock: `POST /api/scenario/{slug}/run` animates it at 2 s per minute, and `POST /api/scenario/{slug}/load` runs it instantly.
 
 ## 11. Testing
 

@@ -1,0 +1,527 @@
+"""Respond: who gets texted, when, and what (docs/DESIGN.md section 5.6).
+
+Every text is one SMS (<= 160 chars) because the district has one bar of cell and no data. All functions
+take an explicit `now` so the scenario replay can run the same code on its own clock.
+"""
+
+import base64
+import hashlib
+import hmac
+import json
+import logging
+import re
+import sqlite3
+import uuid
+from datetime import datetime, timedelta
+from typing import Protocol
+from zoneinfo import ZoneInfo
+
+import httpx
+
+from .config import get_settings
+from .db import iso, loads, parse_iso
+from .district import LADDER_ROLES, NEIGHBOR_ROLES, VOLUNTEER_ROLES, load_district
+from .fire_weather import default_curing
+from .geo import KM_PER_MILE, bearing_deg, compass, haversine_km
+from .sim.spread import SpreadInput, simulate
+
+log = logging.getLogger(__name__)
+CENTRAL = ZoneInfo("America/Chicago")
+SMS_MAX = 160
+HA_PER_ACRE = 0.404686
+HELPER_ROLES = ("water_truck", "disc")
+HELPER_RADIUS_KM = 10.0
+PLAN_MINUTES = 60
+DECIDERS = ("duty_fyi", "duty_escalate", "ladder", "mutual_aid_draft")
+
+
+# --- gateways -------------------------------------------------------------------------------------------
+
+
+class SmsGateway(Protocol):
+    name: str
+
+    def send(self, to: str, body: str) -> str: ...
+
+
+class OutboxGateway:
+    """Records messages without sending them (sample mode, the scenario, and tests)."""
+
+    name = "outbox"
+
+    def send(self, to: str, body: str) -> str:
+        return f"outbox-{uuid.uuid4().hex[:12]}"
+
+
+class TwilioGateway:
+    name = "twilio"
+
+    def __init__(self, account_sid: str, auth_token: str, from_number: str):
+        self.sid, self.token, self.from_number = account_sid, auth_token, from_number
+
+    def send(self, to: str, body: str) -> str:
+        r = httpx.post(
+            f"https://api.twilio.com/2010-04-01/Accounts/{self.sid}/Messages.json",
+            data={"To": to, "From": self.from_number, "Body": body},
+            auth=(self.sid, self.token),
+            timeout=10,
+        )
+        r.raise_for_status()
+        return r.json()["sid"]
+
+
+def gateway_for(is_sample: bool) -> SmsGateway:
+    s = get_settings()
+    if is_sample or s.sms_gateway != "twilio":
+        return OutboxGateway()
+    return TwilioGateway(s.twilio_account_sid, s.twilio_auth_token, s.twilio_from)
+
+
+def valid_twilio_signature(auth_token: str, url: str, params: dict[str, str], signature: str) -> bool:
+    payload = url + "".join(k + params[k] for k in sorted(params))
+    digest = base64.b64encode(hmac.new(auth_token.encode(), payload.encode(), hashlib.sha1).digest()).decode()
+    return hmac.compare_digest(digest, signature or "")
+
+
+# --- templates (each must fit one SMS; tests check the worst case) ---------------------------------------
+
+
+def _short_place(ev) -> str:
+    return (ev["place_label"] or f"{ev['lat']:.3f},{ev['lon']:.3f}").split(",")[0]
+
+
+def _rel(ev, contact) -> str:
+    km = haversine_km(contact["lat"], contact["lon"], ev["lat"], ev["lon"])
+    return f"{km / KM_PER_MILE:.1f} mi {compass(bearing_deg(contact['lat'], contact['lon'], ev['lat'], ev['lon']))}"
+
+
+def _with_link(body: str, event_id: int) -> str:
+    """Append the console link only when it still fits in one SMS."""
+    base = get_settings().public_base_url
+    link = f" {base.rstrip('/')}/#/e/{event_id}" if base else ""
+    return body + link if len(body) + len(link) <= SMS_MAX else body
+
+
+def t_duty_fyi(ev, why: str, n_asked: int) -> str:
+    body = f"FIREWATCH check: {why}, {_short_place(ev)}. Asked {n_asked} neighbors. Reply PAGE to page, NO to stand down."
+    return _with_link(body, ev["id"])
+
+
+def t_ask_neighbor(ev, contact, short_name: str) -> str:
+    return f"{short_name}: possible fire {_rel(ev, contact)} of you. See smoke? Reply 1 smoke, 2 no, 3 my burn. STOP to opt out"
+
+
+def t_duty_escalate(ev, why: str, prefix: str = "") -> str:
+    return _with_link(f"FIREWATCH FIRE {_short_place(ev)}: {why}. {prefix}Reply PAGE to page, NO to stand down.", ev["id"])
+
+
+def t_dispatch_ladder(ev, why: str) -> str:
+    return f"FIREWATCH: no answer from duty or chief. Likely fire {_short_place(ev)}: {why}. Calling you now."
+
+
+def t_page(ev, plan: dict) -> str:
+    w = plan["wind"]
+    return (
+        f"FIRE {_short_place(ev)}. Grass, wind {w['from']} {w['mph']} mph, ~{plan['acres_60']} ac in 1 hr. "
+        f"{ev['lat']:.4f},{ev['lon']:.4f} Reply R if responding"
+    )
+
+
+def t_page_dispatch(ev, short_name: str, by: str) -> str:
+    return f"{short_name} PAGE: grass fire {_short_place(ev)}, {ev['lat']:.4f},{ev['lon']:.4f}. Tone out the district. Paged by {by} via Firewatch"
+
+
+def t_downwind(ev, contact, eta: int, short_name: str) -> str:
+    return f"{short_name}: grass fire {_rel(ev, contact)} of you, moving your way. Could reach you in ~{eta} min. Move stock and vehicles. Crews paged."
+
+
+def t_helper(ev, contact, short_name: str) -> str:
+    kind = "water truck" if contact["role"] == "water_truck" else "disc"
+    return f"{short_name}: grass fire {_rel(ev, contact)} of you. Can you bring your {kind}? Reply R if heading there. Stay off the fire's head."
+
+
+def t_mutual_aid_draft(reason: str, neighbor: str) -> str:
+    return f"FIREWATCH mutual aid: {reason}. Reply SEND to request {neighbor}."
+
+
+def t_mutual_aid(ev, short_name: str, plan: dict, n_resp: int) -> str:
+    return (
+        f"{short_name} requests mutual aid: grass fire {_short_place(ev)}, {ev['lat']:.4f},{ev['lon']:.4f}, "
+        f"~{plan['acres_60']} ac in 1 hr, {n_resp} responding."
+    )
+
+
+# --- sending ---------------------------------------------------------------------------------------------
+
+
+def send(
+    conn: sqlite3.Connection, contact, body: str, purpose: str, event_id: int | None, now: datetime, is_sample: bool
+) -> dict | None:
+    if not contact["opted_in"] and purpose != "reply":
+        return None
+    if len(body) > SMS_MAX:
+        log.warning("%s text is %d chars; truncating", purpose, len(body))
+        body = body[: SMS_MAX - 1] + "…"
+    status, gid = "sent", None
+    try:
+        gid = gateway_for(is_sample).send(contact["phone"], body)
+    except httpx.HTTPError as e:
+        log.warning("SMS to %s failed: %s", contact["phone"], e)
+        status = "failed"
+    cur = conn.execute(
+        "INSERT INTO messages(event_id, contact_id, phone, direction, purpose, body, status, gateway_id, is_sample, created_at) "
+        "VALUES (?, ?, ?, 'out', ?, ?, ?, ?, ?, ?)",
+        (event_id, contact["id"], contact["phone"], purpose, body, status, gid, int(is_sample), iso(now)),
+    )
+    return {"id": cur.lastrowid, "to": contact["name"], "purpose": purpose, "body": body, "status": status}
+
+
+def _contacts(conn, roles: tuple[str, ...]) -> list[sqlite3.Row]:
+    return conn.execute(
+        f"SELECT * FROM contacts WHERE role IN ({','.join('?' * len(roles))}) ORDER BY ladder_rank IS NULL, ladder_rank, id",
+        roles,
+    ).fetchall()
+
+
+def _ladder(conn) -> list[sqlite3.Row]:
+    return [c for c in _contacts(conn, LADDER_ROLES) if c["ladder_rank"] is not None]
+
+
+def _one(conn, role: str):
+    rows = _contacts(conn, (role,))
+    return rows[0] if rows else None
+
+
+def _state(ev) -> dict:
+    return loads(ev["response_json"], {}) or {}
+
+
+def _save(conn, event_id: int, state: dict) -> None:
+    conn.execute("UPDATE events SET response_json = ? WHERE id = ?", (json.dumps(state), event_id))
+
+
+def _event(conn, event_id: int):
+    return conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+
+
+WHY_MAX = 45
+
+
+def _why(ev) -> str:
+    """The level reason without its prefix, cut at a word to fit the templates."""
+    why = (ev["level_reason"] or "").split(": ", 1)[-1].split(", needs")[0]
+    if len(why) > WHY_MAX:
+        why = why[: WHY_MAX - 1].rsplit(" ", 1)[0] + "…"
+    return why
+
+
+# --- level changes ---------------------------------------------------------------------------------------
+
+
+def on_level(conn: sqlite3.Connection, event_id: int, level: str, now: datetime) -> None:
+    ev = _event(conn, event_id)
+    state = _state(ev)
+    sample = bool(ev["is_sample"])
+    if level in ("investigate", "escalate") and "investigate_at" not in state:
+        state["investigate_at"] = iso(now)
+        if level == "investigate":
+            asked = ask_neighbors(conn, ev, now)
+            state["asked"] = [a["contact_id"] for a in asked]
+            duty = _ladder(conn)[:1]
+            if duty:
+                send(conn, duty[0], t_duty_fyi(ev, _why(ev), len(asked)), "duty_fyi", event_id, now, sample)
+    if level == "escalate" and "escalate_at" not in state:
+        state["escalate_at"] = iso(now)
+        state["ladder_step"] = 0
+        _save(conn, event_id, state)
+        if not state.get("decision"):
+            _ladder_step(conn, ev, state, now)
+        return
+    _save(conn, event_id, state)
+
+
+def ask_neighbors(conn: sqlite3.Connection, ev, now: datetime) -> list[dict]:
+    """Text up to N opted-in neighbors within the ask radius, nearest first."""
+    d = load_district()
+    radius_km = d.settings.get("ask_neighbor_radius_mi", 3) * KM_PER_MILE
+    reporters = {r["contact_id"] for r in conn.execute("SELECT contact_id FROM signals WHERE event_id = ?", (ev["id"],))}
+    near = []
+    for c in _contacts(conn, NEIGHBOR_ROLES):
+        if c["lat"] is None or not c["opted_in"] or c["id"] in reporters:
+            continue
+        km = haversine_km(ev["lat"], ev["lon"], c["lat"], c["lon"])
+        if km <= radius_km:
+            near.append((km, c))
+    near.sort(key=lambda kc: kc[0])
+    out = []
+    for km, c in near[: d.settings.get("ask_neighbor_max", 3)]:
+        send(conn, c, t_ask_neighbor(ev, c, d.short_name), "ask_neighbor", ev["id"], now, bool(ev["is_sample"]))
+        out.append({"contact_id": c["id"], "name": c["name"], "km": round(km, 2)})
+    return out
+
+
+def _ladder_step(conn, ev, state: dict, now: datetime) -> None:
+    step = state.get("ladder_step", 0)
+    ladder = _ladder(conn)
+    sample = bool(ev["is_sample"])
+    why = _why(ev)
+    if step < len(ladder):
+        c = ladder[step]
+        if step == 0:
+            body = t_duty_escalate(ev, why)
+            purpose = "duty_escalate"
+        else:
+            body = t_duty_escalate(ev, why, "No answer from duty officer. ")
+            purpose = "ladder"
+        send(conn, c, body, purpose, ev["id"], now, sample)
+    else:
+        dispatch = _one(conn, "dispatch")
+        if dispatch:
+            send(conn, dispatch, t_dispatch_ladder(ev, why), "ladder_dispatch", ev["id"], now, sample)
+    state.setdefault("ladder", []).append({"step": step, "at": iso(now)})
+    state["ladder_step"] = step + 1
+    _save(conn, ev["id"], state)
+
+
+# --- clock -----------------------------------------------------------------------------------------------
+
+
+def tick(conn: sqlite3.Connection, now: datetime, is_sample: bool | None = None) -> None:
+    """Advance timers: the no-answer ladder, and mutual aid when too few respond."""
+    d = load_district()
+    waits = d.settings.get("ladder_minutes", [3, 6])
+    q = "SELECT * FROM events WHERE response_json IS NOT NULL AND status != 'closed'"
+    args: tuple = ()
+    if is_sample is not None:
+        q += " AND is_sample = ?"
+        args = (int(is_sample),)
+    for ev in conn.execute(q, args).fetchall():
+        state = _state(ev)
+        if state.get("escalate_at") and not state.get("decision"):
+            step = state.get("ladder_step", 0)
+            if 1 <= step <= len(waits):
+                due = parse_iso(state["escalate_at"]) + timedelta(minutes=sum(waits[:step]))
+                if now >= due:
+                    _ladder_step(conn, ev, state, now)
+        if state.get("page_at") and not state.get("mutual_aid"):
+            after = parse_iso(state["page_at"]) + timedelta(minutes=d.settings.get("mutual_aid_after_min", 5))
+            n = _n_responding(state)
+            if now >= after and n < d.settings.get("min_responding", 2):
+                _draft_mutual_aid(conn, ev, state, f"{n} responding {d.settings.get('mutual_aid_after_min', 5)} min after page", now)
+
+
+def _n_responding(state: dict) -> int:
+    return sum(1 for r in state.get("responders", []) if r["role"] in VOLUNTEER_ROLES)
+
+
+# --- decisions -------------------------------------------------------------------------------------------
+
+
+def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: datetime) -> dict:
+    """PAGE / NO / SEND from the duty officer or chief (by text or the console)."""
+    ev = _event(conn, event_id)
+    state = _state(ev)
+    d = load_district()
+    sample = bool(ev["is_sample"])
+    if action == "page":
+        if state.get("decision") == "page":
+            return state
+        state.update(decision="page", decision_by=by, decision_at=iso(now), page_at=iso(now))
+        plan = plan_response(conn, ev, now)
+        state["plan"] = plan
+        dispatch = _one(conn, "dispatch")
+        if dispatch:
+            send(conn, dispatch, t_page_dispatch(ev, d.short_name, by), "page_dispatch", event_id, now, sample)
+        for c in _contacts(conn, VOLUNTEER_ROLES):
+            send(conn, c, t_page(ev, plan), "page", event_id, now, sample)
+        contacts = {c["id"]: c for c in conn.execute("SELECT * FROM contacts")}
+        for w in plan["downwind"]:
+            send(conn, contacts[w["contact_id"]], t_downwind(ev, contacts[w["contact_id"]], w["eta_min"], d.short_name), "downwind", event_id, now, sample)
+        for h in plan["helpers"]:
+            send(conn, contacts[h["contact_id"]], t_helper(ev, contacts[h["contact_id"]], d.short_name), "helper", event_id, now, sample)
+        cap_ha = d.settings.get("capacity_ha_60min", 150)
+        if plan["area_60_ha"] > cap_ha:
+            _draft_mutual_aid(
+                conn, ev, state,
+                f"~{plan['acres_60']} ac in 1 hr, over the {round(cap_ha / HA_PER_ACRE)} ac 2 trucks can hold",
+                now,
+            )
+        conn.execute("UPDATE events SET status = 'escalated' WHERE id = ? AND status IN ('new', 'acknowledged')", (event_id,))
+    elif action == "no":
+        state.update(decision="no", decision_by=by, decision_at=iso(now))
+        conn.execute("UPDATE events SET status = 'dismissed' WHERE id = ?", (event_id,))
+    elif action == "send":
+        if not state.get("mutual_aid"):
+            _draft_mutual_aid(conn, ev, state, f"requested by {by}", now)
+        ma = state["mutual_aid"]
+        if not ma.get("sent_at"):
+            target = _one(conn, "mutual_aid")
+            plan = state.get("plan") or plan_response(conn, ev, now)
+            if target:
+                send(conn, target, t_mutual_aid(ev, d.short_name, plan, _n_responding(state)), "mutual_aid", event_id, now, sample)
+            ma.update(sent_at=iso(now), sent_by=by)
+    else:
+        raise ValueError(f"unknown decision {action!r}")
+    conn.execute(
+        "INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, ?, ?, ?)",
+        (event_id, {"page": "escalate", "no": "dismiss", "send": "escalate"}[action], by, f"{action.upper()} via Firewatch", iso(now)),
+    )
+    _save(conn, event_id, state)
+    return state
+
+
+def _draft_mutual_aid(conn, ev, state: dict, reason: str, now: datetime) -> None:
+    d = load_district()
+    state["mutual_aid"] = {"reason": reason, "drafted_at": iso(now)}
+    chief = next((c for c in _ladder(conn) if c["role"] == "chief"), None)
+    if chief:
+        send(conn, chief, t_mutual_aid_draft(reason, d.neighbor_district), "mutual_aid_draft", ev["id"], now, bool(ev["is_sample"]))
+    _save(conn, ev["id"], state)
+
+
+def plan_response(conn: sqlite3.Connection, ev, now: datetime) -> dict:
+    """Spread from the event over the next hour: footprint, downwind contacts with ETAs, nearby helpers."""
+    f = loads(ev["features_json"], {})
+    w = loads(ev["weather_json"], {})
+    elapsed = max(0, round((now - parse_iso(ev["first_seen"])).total_seconds() / 60))
+    horizon = elapsed + PLAN_MINUTES
+    contacts = [c for c in conn.execute("SELECT * FROM contacts WHERE lat IS NOT NULL AND opted_in = 1")]
+    wind = w.get("wind_kmh") or f.get("wind_kmh", 0.0)
+    wdir = w.get("wind_dir_deg") if w.get("wind_dir_deg") is not None else f.get("wind_dir_deg", 0.0)
+    sim = simulate(
+        SpreadInput(
+            lat=ev["lat"], lon=ev["lon"], wind_kmh=wind, wind_from_deg=wdir,
+            temp_c=f.get("temp_c", 15.0), rh_pct=f.get("rh_pct", 50.0),
+            curing_pct=f.get("curing_pct", default_curing(parse_iso(ev["first_seen"]).month)),
+            minutes=horizon, use_terrain=not ev["is_sample"],
+        ),
+        points=[(c["lat"], c["lon"]) for c in contacts],
+    )
+    area = next((iso_["properties"]["area_ha"] for iso_ in reversed(sim["isochrones"]["features"])), 0.0)
+    downwind, helpers = [], []
+    for c, t in zip(contacts, sim["point_minutes"]):
+        if c["role"] in HELPER_ROLES and haversine_km(ev["lat"], ev["lon"], c["lat"], c["lon"]) <= HELPER_RADIUS_KM:
+            helpers.append({"contact_id": c["id"], "name": c["name"], "role": c["role"]})
+        elif c["role"] in NEIGHBOR_ROLES and t is not None:
+            eta = max(5, int(5 * round((t - elapsed) / 5)))
+            downwind.append({"contact_id": c["id"], "name": c["name"], "eta_min": eta})
+    downwind.sort(key=lambda x: x["eta_min"])
+    return {
+        "minutes": horizon,
+        "area_60_ha": round(area, 1),
+        "acres_60": int(round(area / HA_PER_ACRE, -1)),
+        "wind": {"from": compass(wdir), "mph": round(wind / KM_PER_MILE)},
+        "downwind": downwind,
+        "helpers": helpers,
+    }
+
+
+def _latest_open_response(conn, is_sample: bool) -> int | None:
+    """The newest event with a response under way, for a ladder member who was not texted about it."""
+    r = conn.execute(
+        "SELECT id FROM events WHERE response_json IS NOT NULL AND status NOT IN ('closed', 'dismissed') "
+        "AND is_sample = ? ORDER BY updated_at DESC, id DESC LIMIT 1",
+        (int(is_sample),),
+    ).fetchone()
+    return r["id"] if r else None
+
+
+# --- inbound ---------------------------------------------------------------------------------------------
+
+HELP = "{name} Firewatch: text FIRE to report a fire, BURN to register a burn today, STOP to opt out."
+
+
+def handle_inbound(conn: sqlite3.Connection, phone: str, body: str, now: datetime, is_sample: bool = False) -> dict:
+    """Parse one inbound text. Returns {"action", "event_id", "reply"}; the reply is also sent."""
+    from .confirm import evaluate_event
+    from .signals import add_signal
+
+    d = load_district()
+    contact = conn.execute("SELECT * FROM contacts WHERE phone = ?", (phone,)).fetchone()
+    words = re.findall(r"[A-Za-z0-9]+", body.upper())
+    word = words[0] if words else ""
+    rest = body.strip()[len(words[0]):].strip(" :-,") if words else ""
+    conn.execute(
+        "INSERT INTO messages(event_id, contact_id, phone, direction, purpose, body, status, is_sample, created_at) "
+        "VALUES (NULL, ?, ?, 'in', NULL, ?, 'received', ?, ?)",
+        (contact["id"] if contact else None, phone, body, int(is_sample), iso(now)),
+    )
+    msg_id = conn.execute("SELECT last_insert_rowid() id").fetchone()["id"]
+    out: dict = {"action": "help", "event_id": None, "reply": None}
+
+    def latest_event(purposes: tuple[str, ...]) -> int | None:
+        if contact is None:
+            return None
+        r = conn.execute(
+            f"SELECT event_id FROM messages WHERE contact_id = ? AND direction = 'out' AND event_id IS NOT NULL "
+            f"AND purpose IN ({','.join('?' * len(purposes))}) ORDER BY id DESC LIMIT 1",
+            (contact["id"], *purposes),
+        ).fetchone()
+        return r["event_id"] if r else None
+
+    if word == "STOP":
+        if contact:
+            conn.execute("UPDATE contacts SET opted_in = 0 WHERE id = ?", (contact["id"],))
+        out.update(action="stop", reply="Firewatch: you won't get more texts. Text START to opt back in.")
+    elif word == "START":
+        if contact:
+            conn.execute("UPDATE contacts SET opted_in = 1 WHERE id = ?", (contact["id"],))
+        out.update(action="start", reply="Firewatch: you're back on. Text STOP to opt out.")
+    elif word == "JOIN":
+        if contact is None:
+            conn.execute(
+                "INSERT INTO contacts(name, phone, role, registered) VALUES (?, ?, 'pending', 0)",
+                (rest[:60] or "Unregistered", phone),
+            )
+        out.update(action="join", reply=f"Firewatch: thanks. {d.short_name} will confirm your number and place.")
+    elif word in ("1", "2", "3") and (eid := latest_event(("ask_neighbor",))):
+        add_signal(conn, "neighbor_reply", contact["lat"], contact["lon"], iso(now), f"sms:{phone}", word,
+                   contact["id"], is_sample, event_id=eid)
+        evaluate_event(conn, eid, None, now)
+        out.update(action="neighbor_reply", event_id=eid, reply="Thanks. The fire district has your answer.")
+    elif word in ("PAGE", "NO", "SEND") and contact and contact["role"] in LADDER_ROLES:
+        purposes = ("mutual_aid_draft",) + DECIDERS if word == "SEND" else DECIDERS
+        eid = latest_event(purposes) or _latest_open_response(conn, is_sample)
+        if eid is None:
+            out.update(action="help", reply="Firewatch: no open alert for you to answer.")
+        else:
+            decide(conn, eid, word.lower(), contact["name"], now)
+            reply = {"page": "Paged. Dispatch and crews notified.", "no": "Stood down. Logged.",
+                     "send": "Mutual aid requested."}[word.lower()]
+            out.update(action=word.lower(), event_id=eid, reply=f"Firewatch: {reply}")
+    elif word == "R" and (eid := latest_event(("page", "helper"))):
+        ev = _event(conn, eid)
+        state = _state(ev)
+        responders = state.setdefault("responders", [])
+        if all(r["contact_id"] != contact["id"] for r in responders):
+            responders.append({"contact_id": contact["id"], "name": contact["name"], "role": contact["role"], "at": iso(now)})
+        _save(conn, eid, state)
+        out.update(action="responding", event_id=eid, reply=f"Firewatch: copy, {len(responders)} responding.")
+    elif word == "FIRE":
+        if contact and contact["lat"] is not None:
+            eid = add_signal(conn, "report", contact["lat"], contact["lon"], iso(now), f"sms:{phone}", rest or None,
+                             contact["id"], is_sample)
+            evaluate_event(conn, eid, None, now)
+            out.update(action="report", event_id=eid, reply="Firewatch: report received. The duty officer is being told.")
+        else:
+            duty = _ladder(conn)[:1]
+            if duty:
+                send(conn, duty[0], f"FIREWATCH unlocated report from {phone}: {body.strip()}"[:SMS_MAX], "duty_fyi", None, now, is_sample)
+            out.update(action="report_unlocated", reply="Firewatch: report sent to the duty officer. Call 911 if anyone is in danger.")
+    elif word == "BURN" and contact and contact["lat"] is not None:
+        burn_date = now.astimezone(CENTRAL).date().isoformat()
+        radius = d.settings.get("burn_radius_km", 1.5)
+        conn.execute(
+            "INSERT INTO burn_notices(contact_id, lat, lon, radius_km, burn_date, is_sample, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (contact["id"], contact["lat"], contact["lon"], radius, burn_date, int(is_sample), iso(now)),
+        )
+        out.update(action="burn", reply="Firewatch: burn noted for today near your place. Text FIRE if it gets away.")
+    else:
+        out["reply"] = HELP.format(name=d.short_name)
+
+    if out["event_id"]:
+        conn.execute("UPDATE messages SET event_id = ? WHERE id = ?", (out["event_id"], msg_id))
+    if out["reply"]:
+        target = contact or {"id": None, "phone": phone, "name": phone, "opted_in": 1}
+        send(conn, target, out["reply"], "reply", out["event_id"], now, is_sample)
+    return out

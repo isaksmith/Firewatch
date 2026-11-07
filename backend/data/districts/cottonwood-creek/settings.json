@@ -1,0 +1,17 @@
+{
+  "name": "Cottonwood Creek Fire District",
+  "short_name": "Cottonwood Creek FD",
+  "neighbor_district": "neighboring district",
+  "capacity_ha_60min": 150,
+  "ask_neighbor_radius_mi": 3,
+  "ask_neighbor_max": 3,
+  "ladder_minutes": [3, 6],
+  "mutual_aid_after_min": 5,
+  "min_responding": 2,
+  "line_fault_min_gfdi": 12,
+  "burn_escape_gfdi": 25,
+  "burn_radius_km": 1.5,
+  "turnout_min": 13,
+  "drive_min": 18,
+  "false_page_budget_per_month": 2
+}

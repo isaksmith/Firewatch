@@ -16,7 +16,7 @@ In the challenge scenario (Cottonwood Creek Fire District: 450 sq mi, 18 volunte
 
 Humans decide every page. Every signal, text, and decision is logged on the event.
 
-**Status:** the satellite path (ingest, clustering, enrichment, ML scoring, map, 3D spread, logged actions) is built and evaluated on real Kansas data. The line-fault, SMS, and response pieces are designed in [docs/DESIGN.md](docs/DESIGN.md) (sections 4.5 and 5.6) and are this weekend's build. The plan, honest cost numbers, and failure modes are in [docs/PLAN.md](docs/PLAN.md).
+**Status:** the satellite path (ingest, clustering, enrichment, ML scoring, map, 3D spread, logged actions) is built and evaluated on real Kansas data. The whole chain also runs end to end in the **Cottonwood Creek replay**: line fault, neighbor texts, two-source confirmation, PAGE by text, downwind warnings with arrival estimates, mutual aid, and a registered burn that texts nobody. Texts go to a simulated outbox. Twilio sending is written but not yet tried on a real phone. The plan, honest cost numbers, and failure modes are in [docs/PLAN.md](docs/PLAN.md).
 
 ## Docs
 
@@ -65,6 +65,8 @@ The Vite dev server proxies `/api` to `http://127.0.0.1:8000` (override with `AP
 
 `MODE=sample` replays historical and synthetic Kansas events through the full pipeline offline, so it's the default for development and demos. On first start the backend loads all fixtures from `backend/data/samples/`; **Replay sample** in the top bar re-feeds them pass by pass over 60 seconds. Fixture weather was backfilled from the Open-Meteo archive with `.venv/bin/python -m scripts.backfill_sample_weather`.
 
+**Run scenario** in the top bar replays the Cottonwood Creek incident (1:50 pm line fault on a High fire-danger Saturday) at 2 seconds per scenario minute. A strip under the top bar compares today's timeline (on scene at T+62) with Firewatch's as it happens, and the drawer shows the evidence, the response, and every text. The district (a 450 sq mi stand-in boundary in Butler County, its settings, and a fictional roster) lives in `backend/data/districts/cottonwood-creek/`, and the script in `backend/data/scenarios/cottonwood-creek.json`.
+
 On macOS, XGBoost needs OpenMP: `brew install libomp`.
 
 ### Map layers and the scorer
@@ -78,9 +80,10 @@ cd backend
 .venv/bin/python -m ml.download                        # FIRMS Kansas archive 2016–2025 + WFIGS incidents (~5 min)
 .venv/bin/python -m ml.build_dataset --rebuild-history # replay history, derive heat sources, label, build features (~15 min)
 .venv/bin/python -m ml.train                           # evaluate, export data/model/, write ml/report.md
+.venv/bin/python -m ml.analyze                         # deeper analyses + figures for the research report (~2 min)
 ```
 
-Results are in [backend/ml/report.md](backend/ml/report.md). `SCORER=auto` (default) uses the model when it's present and weather is available, and falls back to the rules scorer otherwise.
+Results are in [backend/ml/report.md](backend/ml/report.md); the full analysis of the v1 training run is in [docs/research/scorer-v1-training-run.md](docs/research/scorer-v1-training-run.md). `SCORER=auto` (default) uses the model when it's present and weather is available, and falls back to the rules scorer otherwise.
 
 | Path | What it is |
 |---|---|
@@ -89,8 +92,11 @@ Results are in [backend/ml/report.md](backend/ml/report.md). `SCORER=auto` (defa
 | `backend/app/scoring/` | XGBoost scorer v1 with per-alert reasons, rules fallback, guardrails, suppression reasons |
 | `backend/ml/` | Training pipeline and evaluation report |
 | `backend/app/sim/` | Grass-fire spread estimate (arrival-time grid → isochrones, impacts) |
-| `backend/app/main.py` | FastAPI routes: alerts, actions, simulate, layers, health, sample replay |
-| `frontend/src/pages/Dashboard.tsx` | Alert list, map, detail drawer, actions |
+| `backend/app/signals.py`, `confirm.py` | Line faults and texted reports on events; the two-source level rules and burn registry |
+| `backend/app/notify.py` | SMS gateway (outbox / Twilio), templates, neighbor asks, no-answer ladder, PAGE / NO / SEND, downwind warnings, mutual aid, inbound keywords |
+| `backend/app/scenario.py` | Scenario replay on its own clock |
+| `backend/app/main.py` | FastAPI routes: alerts, actions, decisions, signals, SMS, simulate, layers, district, scenario, health, sample replay |
+| `frontend/src/pages/Dashboard.tsx` | Alert list, map, detail drawer, actions, scenario strip |
 | `frontend/src/pages/Spread3D.tsx` | 3D terrain spread preview with wind override |
 
 ## Data sources and APIs

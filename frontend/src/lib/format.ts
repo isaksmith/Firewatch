@@ -61,5 +61,22 @@ export function latLon(lat: number, lon: number): string {
 export const SUPPRESSION_LABEL = {
   static_source: 'static heat source',
   likely_prescribed: 'likely prescribed burn',
+  registered_burn: 'registered burn',
   low_signal: 'low signal',
 } as const
+
+const SIGNAL_SHORT: Record<string, string> = { line_fault: 'line', report: 'report', neighbor_reply: 'nbr', camera_smoke: 'cam' }
+
+/** Compact evidence count for list rows, e.g. "viirs×3 line×1 nbr×1". */
+export function sourcesLabel(sources: Record<string, number>, signals: Record<string, number>): string {
+  return [
+    ...Object.entries(sources).map(([k, v]) => `${k}×${v}`),
+    ...Object.entries(signals).map(([k, v]) => `${SIGNAL_SHORT[k] ?? k}×${v}`),
+  ].join(' ')
+}
+
+/** "T+08" relative to a scenario start. */
+export function tPlus(iso: string, t0: string): string {
+  const m = Math.round((new Date(iso).getTime() - new Date(t0).getTime()) / 60000)
+  return `T${m < 0 ? '−' : '+'}${String(Math.abs(m)).padStart(2, '0')}`
+}

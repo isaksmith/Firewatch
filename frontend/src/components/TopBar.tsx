@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Play, RefreshCw } from 'lucide-react'
+import { Flame, Play, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, type SourceHealth } from '../api'
 import { setOperator, useOperator } from '../lib/operator'
@@ -45,7 +45,7 @@ function Clock() {
 
 const Divider = () => <span className="h-4 w-px bg-line-2" />
 
-export function TopBar() {
+export function TopBar({ onRunScenario, scenarioRunning }: { onRunScenario?: () => void; scenarioRunning?: boolean }) {
   const qc = useQueryClient()
   const operator = useOperator()
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 15_000 })
@@ -87,6 +87,11 @@ export function TopBar() {
           <span className="label">OP</span>
           <input value={operator} onChange={(e) => setOperator(e.target.value)} className="field w-28 !h-6 uppercase" aria-label="Operator name" />
         </label>
+        {mode === 'sample' && onRunScenario && (
+          <button onClick={onRunScenario} disabled={scenarioRunning} className="btn btn-danger !h-6">
+            <Flame size={11} /> {scenarioRunning ? 'Scenario running' : 'Run scenario'}
+          </button>
+        )}
         {mode === 'sample' && (
           <button onClick={() => replay.mutate()} disabled={replay.isPending || health.data?.replay_running} className="btn !h-6">
             <Play size={11} /> {health.data?.replay_running ? 'Replaying' : 'Replay'}

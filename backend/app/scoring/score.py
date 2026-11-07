@@ -67,31 +67,13 @@ def score_features(f: dict, degraded: bool) -> ScoreResult:
     return ScoreResult(score, rec, reasons, scorer, guardrail, suppression)
 
 
-def persist_score(conn: sqlite3.Connection, event_id: int, f: dict, degraded: bool, weather: dict | None) -> ScoreResult:
+def persist_score(conn: sqlite3.Connection, event_id: int, f: dict, degraded: bool) -> ScoreResult:
+    """Score the satellite evidence and record it in the score history. The event's level is set by
+    confirm.evaluate_event, which combines this with the other signals."""
     result = score_features(f, degraded)
-    prev = conn.execute("SELECT status, recommendation FROM events WHERE id = ?", (event_id,)).fetchone()
-    now = iso(utcnow())
-
     conn.execute(
         "INSERT INTO scores(event_id, scored_at, score, recommendation, scorer, reasons_json, guardrail) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (event_id, now, result.score, result.recommendation, result.scorer, json.dumps(result.reasons), result.guardrail),
-    )
-
-    status, reraised = prev["status"], 0
-    if (
-        status == "dismissed"
-        and prev["recommendation"] in LEVELS
-        and LEVELS.index(result.recommendation) > LEVELS.index(prev["recommendation"])
-    ):
-        status, reraised = "new", 1
-
-    conn.execute(
-        "UPDATE events SET features_json = ?, weather_json = ?, score = ?, recommendation = ?, degraded = ?, "
-        "guardrail = ?, suppression = ?, status = ?, reraised = MAX(reraised, ?), updated_at = ? WHERE id = ?",
-        (
-            json.dumps(f), json.dumps(weather or {}), result.score, result.recommendation, int(degraded),
-            result.guardrail, result.suppression, status, reraised, now, event_id,
-        ),
+        (event_id, iso(utcnow()), result.score, result.recommendation, result.scorer, json.dumps(result.reasons), result.guardrail),
     )
     return result

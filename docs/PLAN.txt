@@ -28,13 +28,13 @@ the brief's "2–3 miles by 2:52" on its own, which is a useful check on both.
 +======+==========================+========================+=========================+
 | 1:50 | Line down, grass ignites | 0                      | —                       |
 +------+--------------------------+------------------------+-------------------------+
-| 2:17 | First person sees smoke  | 27                     | 1.1 mi long, ~110 acres |
+| 2:17 | First person sees smoke  | 27                     | 1.1 mi long, ~100 acres |
 +------+--------------------------+------------------------+-------------------------+
-| 2:21 | 911 call                 | 31                     | 1.4 mi, ~150 acres      |
+| 2:21 | 911 call                 | 31                     | 1.3 mi, ~130 acres      |
 +------+--------------------------+------------------------+-------------------------+
-| 2:34 | First truck rolls        | 44                     | 1.8 mi, ~300 acres      |
+| 2:34 | First truck rolls        | 44                     | 1.8 mi, ~260 acres      |
 +------+--------------------------+------------------------+-------------------------+
-| 2:52 | First truck on scene     | 62                     | 2.7 mi, ~600 acres      |
+| 2:52 | First truck on scene     | 62                     | 2.5 mi, ~520 acres      |
 +------+--------------------------+------------------------+-------------------------+
 
 Where the 62 minutes go: 31 min before anyone knows, 13 min turnout, 18 min drive. Turnout and drive
@@ -43,33 +43,39 @@ a system can win.
 
 The same afternoon with Firewatch (same turnout, same drive):
 
-+-------+-------------------------------------------------+----------------------------------------+
-| Time  | What happens                                    | Fire                                   |
-+=======+=================================================+========================================+
-| 1:50  | Co-op recloser locks out on the feeder;         | —                                      |
-|       | red-flag weather → Firewatch opens an event,    |                                        |
-|       | texts the duty officer (Investigate) and asks   |                                        |
-|       | the two nearest signed-up ranchers "see smoke?" |                                        |
-+-------+-------------------------------------------------+----------------------------------------+
-| ~1:58 | A rancher replies "1" (smoke) → second          | 0.3 mi, ~15 acres                      |
-|       | independent signal → Escalate; duty officer     |                                        |
-|       | replies PAGE                                    |                                        |
-+-------+-------------------------------------------------+----------------------------------------+
-| ~1:59 | Page goes out through county dispatch; the      |                                        |
-|       | downwind rancher, the lease water-truck driver, |                                        |
-|       | and two disc owners get a text with direction   |                                        |
-|       | and arrival estimate                            |                                        |
-+-------+-------------------------------------------------+----------------------------------------+
-| ~2:10 | Rancher starts a disc line ahead of the head    | 0.9 mi, ~65 acres                      |
-|       | (if safe)                                       |                                        |
-+-------+-------------------------------------------------+----------------------------------------+
-| ~2:11 | Brush 1 rolls                                   |                                        |
-+-------+-------------------------------------------------+----------------------------------------+
-| ~2:29 | Brush 1 on scene                                | 1.7 mi, ~240 acres (60% less than 600) |
-+-------+-------------------------------------------------+----------------------------------------+
++------+--------------------------------------------------+----------------------------------------+
+| Time | What happens                                     | Fire                                   |
++======+==================================================+========================================+
+| 1:50 | Co-op recloser locks out on the feeder; High     | —                                      |
+|      | fire danger → Firewatch opens an event, texts    |                                        |
+|      | the duty officer (Investigate) and asks the      |                                        |
+|      | three nearest signed-up neighbors "see smoke?"   |                                        |
++------+--------------------------------------------------+----------------------------------------+
+| 1:58 | A rancher replies "1" (smoke) → second           | 0.3 mi, ~10 acres                      |
+|      | independent signal → Escalate; the duty officer  |                                        |
+|      | gets "Reply PAGE"                                |                                        |
++------+--------------------------------------------------+----------------------------------------+
+| 1:59 | Duty officer replies PAGE. County dispatch and   | 0.35 mi, ~13 acres                     |
+|      | all 18 volunteers are paged; two downwind        |                                        |
+|      | ranchers get "could reach you in ~35 / ~60 min"; |                                        |
+|      | the lease water truck and two disc owners are    |                                        |
+|      | asked to bring equipment. The 1-hour projection  |                                        |
+|      | (~570 acres) is over what 2 trucks can hold, so  |                                        |
+|      | a mutual-aid draft goes to the chief             |                                        |
++------+--------------------------------------------------+----------------------------------------+
+| 2:02 | Chief replies SEND → mutual aid requested from   |                                        |
+|      | the neighboring district                         |                                        |
++------+--------------------------------------------------+----------------------------------------+
+| 2:10 | Disc line started ahead of the head (if safe)    | 0.8 mi, ~55 acres                      |
++------+--------------------------------------------------+----------------------------------------+
+| 2:12 | Brush 1 rolls                                    |                                        |
++------+--------------------------------------------------+----------------------------------------+
+| 2:30 | Brush 1 on scene                                 | 1.6 mi, ~220 acres (58% less than 520) |
++------+--------------------------------------------------+----------------------------------------+
 
-These numbers are from our model, not field data, and the 8-minute confirmation assumes a line-fault
-feed and a rancher who answers. Section 8 says how we'd test both.
+These times come from running the replay (POST /api/scenario/cottonwood-creek/run), and the fire
+sizes from our spread model, not field data. The 8-minute confirmation assumes a line-fault feed and
+a rancher who answers. Section 8 says how we'd test both.
 
 2. What the judges will probe, and where we answer it
 
@@ -446,8 +452,8 @@ To build and measure by Saturday 12:30 (section 9):
 
 9. Weekend scope
 
-Tonight (Fri), one slice we can demo: the Cottonwood Creek replay. It reuses everything built so far
-(events, scoring, spread, impacts, map) and adds:
+Friday night (built): the Cottonwood Creek replay. It reuses everything built so far (events,
+scoring, spread, impacts, map) and adds:
 
 1.  Non-satellite signals on events: line fault, texted report, neighbor reply, burn notice.
 2.  The confirmation rules in section 4.2, with reasons ("Line fault 1:50 on a High fire-danger
@@ -459,6 +465,10 @@ Tonight (Fri), one slice we can demo: the Cottonwood Creek replay. It reuses eve
 5.  A scenario clock in the console: minutes since ignition, the baseline timeline beside the
     Firewatch timeline, and fire size at each point.
 6.  Same afternoon, a registered burn 6 miles away that never pages anyone.
+
+Not yet built from this list: phone mockups, contacts drawn on the map and in 3D, and the text-only
+field page. Twilio sending and signature checks are written but have not been tried against a real
+number.
 
 Saturday review (12:30): the 62-minute problem, the whole-chain map with its constraints, the replay
 demo, the evidence numbers, cost and failure, and the plan to Sunday.
@@ -561,15 +571,15 @@ contacts roster, an SMS gateway adapter with an outbox, and the response planner
 
 15. Demo script (5 minutes)
 
-1.  The 62 minutes (40 s): the brief's timeline beside our model's fire size. 600 acres at arrival,
+1.  The 62 minutes (40 s): the brief's timeline beside our model's fire size. 520 acres at arrival,
     and the first 31 minutes are lost before anyone knows.
 2.  Why not just satellites (30 s): across 10 years of Kansas fires, satellites saw them a median 8
     minutes after the report. So we start with a line fault and a neighbor.
 3.  Replay Cottonwood Creek (2 min): 1:50 line fault on a red-flag day → Investigate text, neighbors
     asked. 1:58 rancher replies 1 → Escalate. Duty officer replies PAGE → dispatch paged; the
     downwind rancher, water truck, and disc owners get texts with ETAs (phone mockups beside the
-    map). The 3D view shows the fire reaching the contacts. Brush 1 arrives at 2:29: 240 acres, not
-    600.
+    map). The 3D view shows the fire reaching the contacts. Brush 1 arrives at 2:30: 220 acres, not
+    520.
 4.  The burn next door (30 s): a registered burn 6 miles away the same afternoon: satellite hotspot,
     Monitor, no text.
 5.  Honest numbers (60 s): $300–500 a year, who pays, a week to stand up, what happens when each
