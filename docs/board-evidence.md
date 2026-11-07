@@ -12,7 +12,7 @@ Run with `.venv/bin/python -m pytest -q tests/test_board_abuse.py`. The tests go
 
 | Attack | Result |
 |---|---|
-| 100 anonymous posts | 30 accepted, 70 refused by the rate limit. 0 events, 0 pages to firefighters. 3 neighbours were asked "did you see it?" once. |
+| 100 anonymous posts | 30 accepted, 70 refused by the rate limit. 0 events, 0 pages to firefighters. 3 neighbors were asked "did you see it?" once. |
 | Confirming your own post | Refused (`own_post`). 0 counted, 0 events. |
 | Confirming from 200 miles away | Not counted (`too_far`). 0 events, 0 signals. |
 | Two strangers confirm each other | Stays at Investigate. 0 pages. |
@@ -24,7 +24,7 @@ Note: the "two strangers" and "anonymous tap" rules were not mutation-checked, o
 
 Command: `.venv/bin/python -m scripts.replay_board_ab`
 
-The Cottonwood Creek replay was run twice: A as written, B with a member post at minute 27 and a neighbour confirm at minute 30. **Those two minutes are ASSUMED.** The replay clock and everything after them were measured.
+The Cottonwood Creek replay was run twice: A as written, B with a member post at minute 27 and a neighbor confirm at minute 30. **Those two minutes are ASSUMED.** The replay clock and everything after them were measured.
 
 | Scenario | First Escalate | First page | Dispatch |
 |---|---|---|---|
@@ -35,6 +35,7 @@ The Cottonwood Creek replay was run twice: A as written, B with a member post at
 
 - In the packet scenario the co-op line fault alarms at minute 0 on its own, so the board adds nothing. We say so plainly.
 - Without the line fault, the board moves Escalate and the page 8 minutes earlier, if members post and confirm at those assumed minutes.
+- What was measured: from the second member's "I see it too" to Escalate, 0 minutes; to the first page, 3 minutes; to dispatch, 9 minutes. The 8 minutes is only the gap between the assumed confirm (minute 30) and the moment the system escalates on its own (minute 38). If neighbors notice earlier, the gain is larger; if later than minute 38, the board adds nothing.
 
 ## Privacy and photos
 
