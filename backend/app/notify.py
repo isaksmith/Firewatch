@@ -112,8 +112,12 @@ def _with_link(body: str, event_id: int) -> str:
     return body + link if len(body) + len(link) <= SMS_MAX else body
 
 
-def t_duty_fyi(ev, why: str, n_asked: int) -> str:
-    body = f"FIREWATCH check: {why}, {_short_place(ev)}. Asked {n_asked} neighbors. Reply PAGE to page, NO to stand down."
+def _decide_words(ref: str) -> str:
+    return f"Reply PAGE{ref} or NO{ref}." if ref else "Reply PAGE to page, NO to stand down."
+
+
+def t_duty_fyi(ev, why: str, n_asked: int, ref: str = "") -> str:
+    body = f"FIREWATCH check: {why}, {_short_place(ev)}. Asked {n_asked} neighbors. {_decide_words(ref)}"
     return _with_link(body, ev["id"])
 
 
@@ -121,19 +125,19 @@ def t_ask_neighbor(ev, contact, short_name: str) -> str:
     return f"{short_name}: possible fire {_rel(ev, contact)} of you. See smoke? Reply 1 smoke, 2 no, 3 my burn. STOP to opt out"
 
 
-def t_duty_escalate(ev, why: str, prefix: str = "") -> str:
-    return _with_link(f"FIREWATCH FIRE {_short_place(ev)}: {why}. {prefix}Reply PAGE to page, NO to stand down.", ev["id"])
+def t_duty_escalate(ev, why: str, prefix: str = "", ref: str = "") -> str:
+    return _with_link(f"FIREWATCH FIRE {_short_place(ev)}: {why}. {prefix}{_decide_words(ref)}", ev["id"])
 
 
 def t_dispatch_ladder(ev, why: str) -> str:
     return f"FIREWATCH: no answer from duty or chief. Likely fire {_short_place(ev)}: {why}. Calling you now."
 
 
-def t_page(ev, plan: dict) -> str:
+def t_page(ev, plan: dict, ref: str = "") -> str:
     w = plan["wind"]
     return (
         f"FIRE {_short_place(ev)}. Grass, wind {w['from']} {w['mph']} mph, up to {plan['acres_60']} ac in 1 hr. "
-        f"{ev['lat']:.4f},{ev['lon']:.4f} Reply R if responding"
+        f"{ev['lat']:.4f},{ev['lon']:.4f} Reply R{ref} if responding"
     )
 
 
@@ -145,9 +149,9 @@ def t_downwind(ev, contact, eta: int, short_name: str) -> str:
     return f"{short_name}: grass fire {_rel(ev, contact)} of you, moving your way. Could reach you in as little as {eta} min. Move stock and vehicles. Crews paged."
 
 
-def t_helper(ev, contact, short_name: str) -> str:
+def t_helper(ev, contact, short_name: str, ref: str = "") -> str:
     kind = "water truck" if contact["role"] == "water_truck" else "disc"
-    return f"{short_name}: grass fire {_rel(ev, contact)} of you. Can you bring your {kind}? Reply R if heading there. Stay off the fire's head."
+    return f"{short_name}: grass fire {_rel(ev, contact)} of you. Can you bring your {kind}? Reply R{ref} if heading there. Stay off the fire's head."
 
 
 def t_heads_up(ev, contact, eta: int, wind: str) -> str:
@@ -155,8 +159,9 @@ def t_heads_up(ev, contact, eta: int, wind: str) -> str:
             f"Wind {wind}. Could reach your area in ~{eta} min. No action yet.")
 
 
-def t_mutual_aid_draft(reason: str, neighbor: str) -> str:
-    return f"FIREWATCH mutual aid: {reason}. Reply SEND to request {neighbor}."
+def t_mutual_aid_draft(reason: str, neighbor: str, ref: str = "", place: str = "") -> str:
+    at = f" {place[:30]}" if place else ""
+    return f"FIREWATCH mutual aid{at}: {reason}. Reply SEND{ref} to request {neighbor}."
 
 
 def t_mutual_aid(ev, short_name: str, plan: dict, n_resp: int) -> str:
@@ -166,12 +171,12 @@ def t_mutual_aid(ev, short_name: str, plan: dict, n_resp: int) -> str:
     )
 
 
-def t_hold_expired(ev) -> str:
-    return f"FIREWATCH: hold on {_short_place(ev)[:40]} ended. Still rated {ev['recommendation']}. Reply PAGE to alert, NO to dismiss."
+def t_hold_expired(ev, ref: str = "") -> str:
+    return f"FIREWATCH: hold on {_short_place(ev)[:40]} ended. Still rated {ev['recommendation']}. Reply PAGE{ref} to alert, NO{ref} to dismiss."
 
 
-def t_hold_broken(ev, why: str) -> str:
-    return f"FIREWATCH: NEW info {_short_place(ev)[:30]}: {why[:40]}. Hold lifted. PAGE to alert, NO to dismiss."
+def t_hold_broken(ev, why: str, ref: str = "") -> str:
+    return f"FIREWATCH: NEW info {_short_place(ev)[:30]}: {why[:40]}. Hold lifted. PAGE{ref} to alert, NO{ref} to dismiss."
 
 
 def t_ack_reply(place: str, minutes: int) -> str:
@@ -282,6 +287,27 @@ def _event(conn, event_id: int):
     return conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
 
 
+def _open_fires(conn, contact_id: int, purposes: tuple[str, ...], is_sample: bool) -> list[int]:
+    """Open events this contact got one of these texts about, newest text first."""
+    marks = ",".join("?" * len(purposes))
+    return [r["event_id"] for r in conn.execute(
+        "SELECT m.event_id, MAX(m.id) last FROM messages m JOIN events e ON e.id = m.event_id "
+        f"WHERE m.contact_id = ? AND m.direction = 'out' AND m.purpose IN ({marks}) "
+        "AND e.status NOT IN ('closed', 'dismissed') AND e.is_sample = ? GROUP BY m.event_id ORDER BY last DESC",
+        (contact_id, *purposes, int(is_sample)),
+    )]
+
+
+def _ref(conn, ev, contact, purposes: tuple[str, ...]) -> str:
+    """The fire number to put after PAGE, NO, SEND or R, when this person has another open fire to tell apart."""
+    others = [i for i in _open_fires(conn, contact["id"], purposes, bool(ev["is_sample"])) if i != ev["id"]]
+    return f" {ev['id']}" if others else ""
+
+
+PAGE_PURPOSES = ("page", "helper")
+SEND_PURPOSES = ("mutual_aid_draft",) + DECIDERS
+
+
 WHY_MAX = 45
 
 
@@ -333,7 +359,8 @@ def on_level(conn: sqlite3.Connection, event_id: int, level: str, now: datetime)
             state["asked"] = [a["contact_id"] for a in asked]
             duty = _ladder(conn)[:1]
             if duty:
-                send(conn, duty[0], t_duty_fyi(ev, _why(ev), len(asked)), "duty_fyi", event_id, now, sample)
+                send(conn, duty[0], t_duty_fyi(ev, _why(ev), len(asked), _ref(conn, ev, duty[0], DECIDERS)), "duty_fyi",
+                     event_id, now, sample)
     if level == "escalate" and "escalate_at" not in state:
         state["escalate_at"] = iso(now)
         state["ladder_step"] = 0
@@ -377,11 +404,12 @@ def _ladder_step(conn, ev, state: dict, now: datetime) -> None:
     why = _why(ev)
     if step < len(ladder):
         c = ladder[step]
+        ref = _ref(conn, ev, c, DECIDERS)
         if step == 0:
-            body = t_duty_escalate(ev, why)
+            body = t_duty_escalate(ev, why, ref=ref)
             purpose = "duty_escalate"
         else:
-            body = t_duty_escalate(ev, why, "No answer from duty officer. ")
+            body = t_duty_escalate(ev, why, "No answer from duty officer. ", ref)
             purpose = "ladder"
         send(conn, c, body, purpose, ev["id"], now, sample)
     else:
@@ -448,12 +476,13 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
         if dispatch:
             send(conn, dispatch, t_page_dispatch(ev, d.short_name, by), "page_dispatch", event_id, now, sample)
         for c in _contacts(conn, VOLUNTEER_ROLES):
-            send(conn, c, t_page(ev, plan), "page", event_id, now, sample)
+            send(conn, c, t_page(ev, plan, _ref(conn, ev, c, PAGE_PURPOSES)), "page", event_id, now, sample)
         contacts = {c["id"]: c for c in conn.execute("SELECT * FROM contacts")}
         for w in plan["downwind"]:
             send(conn, contacts[w["contact_id"]], t_downwind(ev, contacts[w["contact_id"]], w["eta_min"], d.short_name), "downwind", event_id, now, sample)
         for h in plan["helpers"]:
-            send(conn, contacts[h["contact_id"]], t_helper(ev, contacts[h["contact_id"]], d.short_name), "helper", event_id, now, sample)
+            c = contacts[h["contact_id"]]
+            send(conn, c, t_helper(ev, c, d.short_name, _ref(conn, ev, c, PAGE_PURPOSES)), "helper", event_id, now, sample)
         cap_ha = d.settings.get("capacity_ha_60min", 150)
         if plan["area_60_ha"] > cap_ha:
             _draft_mutual_aid(
@@ -599,9 +628,9 @@ def hold_tick(conn: sqlite3.Connection, now: datetime, is_sample: bool | None = 
         duty = _ladder(conn)
         clear_hold(conn, ev["id"])
         if why and duty:
-            send(conn, duty[0], t_hold_broken(ev, why), "hold_broken", ev["id"], now, sample)
+            send(conn, duty[0], t_hold_broken(ev, why, _ref(conn, ev, duty[0], DECIDERS)), "hold_broken", ev["id"], now, sample)
         elif ev["ack_level"] == "ladder" and duty:
-            send(conn, duty[0], t_hold_expired(ev), "hold_expired", ev["id"], now, sample)
+            send(conn, duty[0], t_hold_expired(ev, _ref(conn, ev, duty[0], DECIDERS)), "hold_expired", ev["id"], now, sample)
         conn.execute("INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, 'system', ?, ?)",
                      (ev["id"], "hold_broken" if why else "hold_expired", why or "clock", iso(now)))
         resume(conn, ev["id"], now, ev["ack_level"])
@@ -650,7 +679,9 @@ def _draft_mutual_aid(conn, ev, state: dict, reason: str, now: datetime) -> None
     fw1_feed.sync_event(conn, ev["id"], now)  # the mutual-aid flag goes in the code the chief's app link carries
     chief = next((c for c in _ladder(conn) if c["role"] == "chief"), None)
     if chief:
-        send(conn, chief, t_mutual_aid_draft(reason, d.neighbor_district), "mutual_aid_draft", ev["id"], now, bool(ev["is_sample"]))
+        ref = _ref(conn, ev, chief, SEND_PURPOSES)
+        body = t_mutual_aid_draft(reason, d.neighbor_district, ref, _short_place(ev) if ref else "")
+        send(conn, chief, body, "mutual_aid_draft", ev["id"], now, bool(ev["is_sample"]))
     _save(conn, ev["id"], state)
     fw1_feed.sync_event(conn, ev["id"], now)
 
@@ -806,6 +837,18 @@ def handle_inbound(
         ).fetchone()
         return r["event_id"] if r else None
 
+    def named_event() -> tuple[bool, int | None]:
+        """PAGE 12 or R FW-0012 name the fire: (a fire was named, its open event or None)."""
+        m = re.fullmatch(r"(?:FW-?|#)?0*(\d{1,7})", rest.strip().upper())
+        if not m:
+            return False, None
+        r = conn.execute("SELECT id FROM events WHERE id = ? AND is_sample = ? AND status != 'closed'",
+                         (int(m.group(1)), int(is_sample))).fetchone()
+        return True, r["id"] if r else None
+
+    def which(eid: int) -> str:
+        return f" for fire {eid} ({_short_place(_event(conn, eid))[:40]})"
+
     def fire_report(rest_text: str, category: str = "fire"):
         w = parse_where(rest_text)
         at_pt, join_km, reply = here, None, "Firewatch: report received. The duty officer is being told."
@@ -897,10 +940,14 @@ def handle_inbound(
                 else:
                     out.update(action="help", reply="Firewatch: that one is already closed.")
     elif word in ("PAGE", "NO", "SEND") and contact and contact["role"] in LADDER_ROLES:
-        purposes = ("mutual_aid_draft",) + DECIDERS if word == "SEND" else DECIDERS
-        post = None if word == "SEND" else _newest_post_text(conn, contact)
-        eid = None
-        if post is not None and post["event_id"] is None:
+        purposes = SEND_PURPOSES if word == "SEND" else DECIDERS
+        named, eid = named_event()
+        post = None if word == "SEND" or named else _newest_post_text(conn, contact)
+        if named and eid is None:
+            out.update(action="help", reply=f"Firewatch: no open fire {rest.strip()[:12]}. Check the number in the alert.")
+        elif named:
+            pass
+        elif post is not None and post["event_id"] is None:
             if post["status"] != "open":
                 out.update(action="help", reply="Firewatch: that report is already closed.")
             elif word == "NO":
@@ -921,18 +968,22 @@ def handle_inbound(
         if eid is None and not out["reply"]:
             out.update(action="help", reply="Firewatch: no open alert for you to answer.")
         elif eid is not None:
+            at = which(eid) if named or len(_open_fires(conn, contact["id"], SEND_PURPOSES, is_sample)) > 1 else ""
             decide(conn, eid, word.lower(), contact["name"], now)
-            reply = {"page": "Paged. Dispatch and crews notified.", "no": "Stood down. Logged.",
-                     "send": "Mutual aid requested."}[word.lower()]
+            reply = {"page": f"Paged{at}. Dispatch and crews notified.", "no": f"Stood down{at}. Logged.",
+                     "send": f"Mutual aid requested{at}."}[word.lower()]
             out.update(action=word.lower(), event_id=eid, reply=f"Firewatch: {reply}")
-    elif word == "R" and (eid := latest_event(("page", "helper"))):
+    elif word == "R" and contact and named_event() == (True, None):
+        out.update(action="help", reply=f"Firewatch: no open fire {rest.strip()[:12]}. Check the number in the page.")
+    elif word == "R" and (eid := (contact and named_event()[1]) or latest_event(PAGE_PURPOSES)):
         ev = _event(conn, eid)
         state = _state(ev)
         responders = state.setdefault("responders", [])
         if all(r["contact_id"] != contact["id"] for r in responders):
             responders.append({"contact_id": contact["id"], "name": contact["name"], "role": contact["role"], "at": iso(now)})
         _save(conn, eid, state)
-        out.update(action="responding", event_id=eid, reply=f"Firewatch: copy, {len(responders)} responding.")
+        at = which(eid) if named_event()[0] or len(_open_fires(conn, contact["id"], PAGE_PURPOSES, is_sample)) > 1 else ""
+        out.update(action="responding", event_id=eid, reply=f"Firewatch: copy, {len(responders)} responding{at}.")
     elif word == "FIRE":
         if here:
             eid, reply = fire_report(rest)

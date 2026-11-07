@@ -129,13 +129,14 @@ def from_open_meteo(lat: float, lon: float, when: datetime, hours: int = 4) -> S
     )
 
 
-def scenario_situation(slug: str, weather_variant: str | None = None) -> Situation:
-    """The forecast's view of a replay scenario (data/scenarios) and its district (data/districts).
+def scenario_situation(slug: str, weather_variant: str | None = None, fire: str | None = None) -> Situation:
+    """The forecast's view of a replay scenario (data/scenarios) and its district (data/districts). `fire` picks one
+    of a multi-fire scenario's fires; the default is its first.
 
-    Raises FileNotFoundError for an unknown scenario or weather variant.
+    Raises FileNotFoundError for an unknown scenario, weather variant or fire.
     """
     from .district import _dir
-    from .scenario import load_scenario
+    from .scenario import fires, load_scenario
 
     try:
         sc = load_scenario(slug)
@@ -190,9 +191,12 @@ def scenario_situation(slug: str, weather_variant: str | None = None) -> Situati
                 end=start.replace(hour=23, minute=59), status="active", provenance=src,
             ))
 
-    ig = sc["ignition"]
+    picked = fires(sc)[0] if fire is None else next((f for f in fires(sc) if f["key"] == fire), None)
+    if picked is None:
+        raise FileNotFoundError(fire)
+    ig = picked["ignition"]
     return Situation(
-        ignition=Ignition(lat=ig["lat"], lon=ig["lon"], time=t0, fire_age_min=0,
+        ignition=Ignition(lat=ig["lat"], lon=ig["lon"], time=t0 + timedelta(minutes=picked["t_start"]), fire_age_min=0,
                           provenance=Provenance(source=f"scenario {slug}: {ig.get('cause', 'ignition')}", kind="simulated")),
         weather=Weather(hours=[WeatherHour(**h) for h in hours], provenance=wsrc),
         curing=Curing(pct=sc["curing_pct"], provenance=src) if sc.get("curing_pct") is not None else None,

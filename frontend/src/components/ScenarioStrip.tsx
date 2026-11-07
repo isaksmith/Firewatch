@@ -23,9 +23,11 @@ function localClock(s: ScenarioStatus, t: number) {
   })
 }
 
-function Lane({ label, items, x, now, color, projectFrom }: {
+function Lane({ label, title, items, ghost, x, now, color, projectFrom }: {
   label: string
+  title?: string
   items: Milestone[]
+  ghost?: Milestone[]
   x: (t: number) => string
   now: number
   color: (m: Milestone) => string
@@ -33,8 +35,29 @@ function Lane({ label, items, x, now, color, projectFrom }: {
 }) {
   return (
     <div className="relative h-[26px]">
-      <span className="label absolute top-[7px] -left-[86px] w-[78px] text-right !text-[9px]">{label}</span>
+      <span className="label absolute top-[7px] -left-[86px] w-[78px] text-right !text-[9px]" title={title}>{label}</span>
       <div className="absolute inset-x-0 top-[12px] h-px bg-line-2" />
+      {ghost
+        ?.filter((m) => m.t != null)
+        .map((m) => (
+          <span
+            key={`g-${m.key}`}
+            className="absolute top-[9px] h-[7px] w-[7px] -translate-x-1/2 rotate-45"
+            style={{ left: x(m.t as number), boxShadow: 'inset 0 0 0 1px #565e68' }}
+            title={`Today: ${m.label} · T+${m.t}`}
+          />
+        ))}
+      {ghost
+        ?.filter((m) => m.t != null && m.key === 'on_scene')
+        .map((m) => (
+          <span
+            key={`gl-${m.key}`}
+            className="num absolute top-[19px] -translate-x-1/2 text-[9px] whitespace-nowrap text-dim/70"
+            style={{ left: x(m.t as number) }}
+          >
+            Today {m.t}
+          </span>
+        ))}
       {items
         .filter((m) => m.t != null)
         .map((m) => {
@@ -89,9 +112,20 @@ export function ScenarioStrip({ s, onClose, onReplay, replaying }: {
   const span = s.duration_min
   const now = Math.max(0, s.t_min ?? 0)
   const x = (t: number) => `${(Math.min(Math.max(t, 0), span) / span) * 100}%`
-  const size = s.growth[Math.min(Math.round(now), s.growth.length - 1)]
-  const maxAc = s.growth[s.growth.length - 1]?.acres || 1
-  const growthPath = s.growth
+  const multi = s.fires.length > 1
+  const growth = multi
+    ? Array.from({ length: span + 1 }, (_, minute) => ({
+        minute,
+        acres: s.fires.reduce((sum, f) => {
+          const i = minute - f.t_start
+          return i < 0 || !f.growth.length ? sum : sum + f.growth[Math.min(i, f.growth.length - 1)].acres
+        }, 0),
+        head_mi: 0,
+      }))
+    : s.growth
+  const size = growth[Math.min(Math.round(now), growth.length - 1)]
+  const maxAc = growth[growth.length - 1]?.acres || 1
+  const growthPath = growth
     .filter((g) => g.minute <= now)
     .map((g, i) => `${i ? 'L' : 'M'}${(g.minute / span) * 1000},${40 - (g.acres / maxAc) * 38}`)
     .join(' ')
@@ -101,7 +135,7 @@ export function ScenarioStrip({ s, onClose, onReplay, replaying }: {
   const w = s.weather
 
   return (
-    <div className="flex h-[104px] shrink-0 border-b border-line bg-void">
+    <div className={`flex ${multi ? 'h-[128px]' : 'h-[104px]'} shrink-0 border-b border-line bg-void`}>
       <div className="flex w-[230px] shrink-0 flex-col justify-between border-r border-line px-4 py-2.5">
         <div className="flex items-center justify-between">
           <span className="label !text-sample">Scenario{s.synthetic ? ' · synthetic' : ''}</span>
@@ -122,8 +156,26 @@ export function ScenarioStrip({ s, onClose, onReplay, replaying }: {
             {growthPath && <path d={`${growthPath} L${(now / span) * 1000},40 L0,40 Z`} fill="#ff4b2b" opacity={0.12} />}
             {growthPath && <path d={growthPath} fill="none" stroke="#ff4b2b" strokeOpacity={0.5} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
           </svg>
-          <Lane label="Today" items={s.baseline} x={x} now={now} color={() => '#8b939d'} />
-          <Lane label="Firewatch" items={s.firewatch} x={x} now={now} color={(m) => FW_COLOR[m.key] ?? '#e6e8eb'} projectFrom={pageT} />
+          {multi ? (
+            s.fires.map((f) => (
+              <Lane
+                key={f.key}
+                label={`Fire ${f.key}`}
+                title={`${f.label} · starts T+${f.t_start}. Hollow grey marks: today's chain for this fire.`}
+                items={f.firewatch}
+                ghost={f.baseline}
+                x={x}
+                now={now}
+                color={(m) => FW_COLOR[m.key] ?? '#e6e8eb'}
+                projectFrom={f.firewatch.find((m) => m.key === 'page')?.t ?? undefined}
+              />
+            ))
+          ) : (
+            <>
+              <Lane label="Today" items={s.baseline} x={x} now={now} color={() => '#8b939d'} />
+              <Lane label="Firewatch" items={s.firewatch} x={x} now={now} color={(m) => FW_COLOR[m.key] ?? '#e6e8eb'} projectFrom={pageT} />
+            </>
+          )}
           <div className="absolute top-0 bottom-0 w-px bg-text/70" style={{ left: x(now) }} />
           <span className="label absolute bottom-0 -left-[86px] w-[78px] text-right !text-[9px]">Fire size</span>
           {s.waiting && <WaitingBanner w={s.waiting} />}
@@ -133,13 +185,16 @@ export function ScenarioStrip({ s, onClose, onReplay, replaying }: {
       <div className="flex w-[260px] shrink-0 flex-col justify-between border-l border-line px-4 py-2.5">
         <div className="flex items-start justify-between">
           <div>
-            <div className="label !text-[9px]">Fire now, worst case</div>
-            <div className="num text-[15px] font-semibold text-text">
-              {size?.acres ?? 0} AC <span className="text-[11px] font-normal text-muted">· {size?.head_mi.toFixed(1) ?? '0.0'} MI RUN</span>
+            <div className="label !text-[9px]">{multi ? 'All fires now' : 'Fire now, worst case'}</div>
+            <div className="num text-[15px] font-semibold whitespace-nowrap text-text">
+              {size?.acres ?? 0} AC{' '}
+              <span className="text-[11px] font-normal text-muted">
+                · {multi ? `${s.fires.filter((f) => f.t_start <= now).length} OF ${s.fires.length}` : `${size?.head_mi.toFixed(1) ?? '0.0'} MI RUN`}
+              </span>
             </div>
           </div>
           <div className="flex gap-1">
-            <button onClick={onReplay} disabled={replaying} className="btn !h-6 !px-2 text-[10px]">
+            <button onClick={onReplay} disabled={replaying} className="btn !h-6 !px-2 text-[10px] whitespace-nowrap">
               {s.running ? 'Running' : 'Run again'}
             </button>
             <button onClick={onClose} className="flex h-6 w-6 items-center justify-center text-dim hover:bg-raised hover:text-text" aria-label="Hide scenario">
@@ -148,8 +203,16 @@ export function ScenarioStrip({ s, onClose, onReplay, replaying }: {
           </div>
         </div>
         <div className="num text-[10.5px] text-muted">
-          <div className="label mb-0.5 !text-[9px]">At first truck on scene, worst case</div>
-          {fwOn && baseOn ? (
+          <div className="label mb-0.5 !text-[9px]">{multi ? 'At first truck on scene' : 'At first truck on scene, worst case'}</div>
+          {multi ? (
+            s.fires.map((f) => (
+              <div key={f.key} className="grid grid-cols-[14px_64px_1fr] leading-[14px]" title={f.label}>
+                <span className="text-text">{f.key}</span>
+                <span className="text-escalate">{f.size_on_scene.firewatch?.acres ?? '—'} AC</span>
+                <span>{f.size_on_scene.baseline?.acres ?? '—'} today</span>
+              </div>
+            ))
+          ) : fwOn && baseOn ? (
             <span>
               <span className="text-escalate">{fwOn.acres} AC</span> with Firewatch · <span className="text-text">{baseOn.acres} AC</span> today
             </span>

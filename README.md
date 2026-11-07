@@ -267,17 +267,17 @@ The public board is the only thing a tunnel may point at. The tunnel points at p
 
 | Button | What it does |
 |---|---|
-| **Run scenario** | Replays the scenario picked beside it at 2 seconds per scenario minute: the Cottonwood Creek incident (1:50 pm line fault, south wind 30–40 mph, gusts past 55, RH 11%) or one of the three packet replays. While it plays, the button becomes **Stop scenario**. |
+| **Run scenario** | Replays the scenario picked beside it at 2 seconds per scenario minute: the Cottonwood Creek incident (1:50 pm line fault, south wind 30–40 mph, gusts past 55, RH 11%), one of the packet replays, or **three line-down fires at once** (12 minutes apart, each paged by number). While it plays, the button becomes **Stop scenario**. |
 | **Satellite replay** | Re-feeds the historical and synthetic Kansas fixtures pass by pass over 60 seconds (sample mode). |
 | **3D view** | Opens the 3D spread preview for the selected alert. |
 | **Planner** | Opens the region planner. |
 | **Low data** | No map pictures, slower updates. Switches on by itself after slow fetches; turn it off from the top bar. |
 
-During a scenario, a strip under the top bar compares today's timeline (on scene at T+62) with Firewatch's as it happens, and the drawer shows the evidence, the response, and every text.
+During a scenario, a strip under the top bar compares today's timeline (on scene at T+62) with Firewatch's as it happens, and the drawer shows the evidence, the response, and every text. With several fires it shows one lane per fire. Once someone has two fires open, their texts carry the fire's number and they can reply `PAGE 14` or `R 14`.
 
 `MODE=sample` replays historical and synthetic Kansas events through the full pipeline offline, so it's the default for development and demos. On first start the backend loads all fixtures from `backend/data/samples/`. Fixture weather was backfilled from the Open-Meteo archive with `.venv/bin/python -m scripts.backfill_sample_weather`.
 
-The district (a 450 sq mi stand-in boundary centered on Coldwater in Comanche County, per the packet's Clark/Comanche/Barber model, its settings, and a fictional roster) lives in `backend/data/districts/cottonwood-creek/`. The scripts are in `backend/data/scenarios/` (`cottonwood-creek.json` and the `cottonwood-creek-packet*.json` replays).
+The district (a 450 sq mi stand-in boundary centered on Coldwater in Comanche County, per the packet's Clark/Comanche/Barber model, its settings, and a fictional roster) lives in `backend/data/districts/cottonwood-creek/`. The scripts are in `backend/data/scenarios/` (`cottonwood-creek.json`, the `cottonwood-creek-packet*.json` replays, and `cottonwood-creek-three-fires.json`).
 
 > [!NOTE]
 > Replays record SMS in the outbox and never send a real text, in any mode. A radio linked in the roster still gets its mesh message, so a demo can show one. The packet replays use the packet's facts: nobody answers, the driver has no signal until minute 31, and nobody is within 4 miles.

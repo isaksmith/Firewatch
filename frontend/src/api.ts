@@ -176,6 +176,23 @@ export interface Milestone {
   label: string
 }
 
+export interface FireSize {
+  acres: number
+  head_mi: number
+}
+
+export interface ScenarioFire {
+  key: string
+  label: string
+  ignition: { lat: number; lon: number; cause: string }
+  t_start: number
+  event_id: number | null
+  baseline: Milestone[]
+  firewatch: Milestone[]
+  size_on_scene: { baseline: FireSize | null; firewatch: FireSize | null }
+  growth: { minute: number; acres: number; head_mi: number }[]
+}
+
 export interface ScenarioStatus {
   slug: string
   title: string
@@ -191,9 +208,10 @@ export interface ScenarioStatus {
   waiting: { name: string; reply: string; mesh_id: string; until: string; seconds_left: number } | null
   baseline: Milestone[]
   firewatch: Milestone[]
-  size_on_scene: { baseline: { acres: number; head_mi: number } | null; firewatch: { acres: number; head_mi: number } | null }
+  size_on_scene: { baseline: FireSize | null; firewatch: FireSize | null }
   growth: { minute: number; acres: number; head_mi: number }[]
-  events: { id: number; place_label: string; recommendation: Recommendation; level_reason: string; suppression: string | null; texts_sent: number }[]
+  fires: ScenarioFire[]
+  events: { id: number; place_label: string; recommendation: Recommendation; level_reason: string; suppression: string | null; texts_sent: number; fire: string }[]
   texts_sent: number
 }
 

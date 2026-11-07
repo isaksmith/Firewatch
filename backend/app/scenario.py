@@ -4,6 +4,7 @@ clock (docs/DESIGN.md section 10). Everything it writes is sample data."""
 import asyncio
 import json
 import logging
+import re
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -14,6 +15,7 @@ from .db import connect, iso, loads, parse_iso, utcnow
 from .redflag import replay_forecast_red_flag, replay_red_flag
 from .district import load_district, overrides, sync_roster
 from .fire_weather import default_curing, gfdi, gfdi_band
+from .geo import haversine_km
 from .ngfs_signal import add_ngfs_signals
 from .notify import handle_inbound, hold_tick, tick
 from .pipeline import process_detections
@@ -50,6 +52,41 @@ def load_scenario(slug: str) -> dict:
     if not path.is_file() or path.parent != SCENARIOS_DIR:
         raise KeyError(slug)
     return json.loads(path.read_text())
+
+
+def fires(sc: dict) -> list[dict]:
+    """The scenario's fires; a one-fire scenario has just its ignition. A fire without its own baseline gets the
+    scenario's, shifted to its start."""
+    raw = sc.get("fires") or [{"key": "A", "ignition": sc["ignition"], "t_start": 0}]
+    return [{
+        "key": f["key"], "label": f.get("label", ""), "ignition": f["ignition"], "t_start": f.get("t_start", 0),
+        "baseline": f.get("baseline") or [{**m, "t": m["t"] + f.get("t_start", 0)} for m in sc["baseline"]["milestones"]],
+    } for f in raw]
+
+
+def fire_near(sc: dict, lat: float, lon: float) -> dict:
+    """The scenario fire whose ignition is nearest a point: which fire an event belongs to."""
+    return min(fires(sc), key=lambda f: haversine_km(lat, lon, f["ignition"]["lat"], f["ignition"]["lon"]))
+
+
+FIRE_TOKEN = re.compile(r"\{([A-Za-z0-9_]+)\}")
+
+
+def _fire_event(conn, sc: dict, key: str) -> int | None:
+    """The replay's event for one fire: the nearest of the events that belong to it."""
+    f = next((f for f in fires(sc) if f["key"] == key), None)
+    if f is None:
+        raise ValueError(f"scenario {sc['slug']} has no fire {key!r}")
+    rows = [r for r in conn.execute(
+        "SELECT id, lat, lon FROM events WHERE is_sample = 1 AND (sample_slug = ? OR sample_slug IS NULL)", (sc["slug"],),
+    ) if fire_near(sc, r["lat"], r["lon"])["key"] == key]
+    ig = f["ignition"]
+    return min(rows, key=lambda r: haversine_km(r["lat"], r["lon"], ig["lat"], ig["lon"]))["id"] if rows else None
+
+
+def _fill(conn, sc: dict, body: str) -> str:
+    """A scripted text names a fire as {B}; event ids are only known once the replay runs."""
+    return FIRE_TOKEN.sub(lambda m: str(_fire_event(conn, sc, m.group(1)) or ""), body).strip()
 
 
 def list_scenarios() -> list[dict]:
@@ -93,7 +130,7 @@ def _apply(conn, sc: dict, step: dict, now: datetime) -> None:
         eid = add_signal(conn, step["kind"], step["lat"], step["lon"], iso(now), step["source"], step.get("value"), is_sample=True)
         evaluate_event(conn, eid, sc["weather"], now)
     elif kind == "sms":
-        handle_inbound(conn, step["from"], step["body"], now, is_sample=True)
+        handle_inbound(conn, step["from"], _fill(conn, sc, step["body"]), now, is_sample=True)
     elif kind == "detections":
         dets = [{**d, "acq_time": iso(now)} for d in step["detections"]]
         process_detections(conn, dets, is_sample=True, weather=sc["weather"], now=now)
@@ -175,7 +212,7 @@ def _live_radio_steps(conn, sc: dict, t: int) -> list[tuple[dict, dict]]:
                 "SELECT id, name, mesh_id FROM contacts WHERE phone = ? AND mesh_id IS NOT NULL", (step["from"],)
             ).fetchone()
             if c:
-                out.append((step, dict(c)))
+                out.append((step, {**dict(c), "reply": _fill(conn, sc, step["body"]).upper()}))
     return out
 
 
@@ -198,7 +235,7 @@ async def _await_live_reply(sc: dict, t: int, step: dict, contact: dict, after_i
     word = step["body"].strip().upper().split()[0]
     words = LIVE_ANSWERS.get(word, (word,))
     _clock["waiting"] = {
-        "name": contact["name"], "reply": word, "mesh_id": contact["mesh_id"],
+        "name": contact["name"], "reply": contact.get("reply") or word, "mesh_id": contact["mesh_id"],
         "until": iso(utcnow() + timedelta(seconds=LIVE_REPLY_TIMEOUT_S)),
     }
     try:
@@ -330,16 +367,18 @@ def running_now() -> datetime | None:
     return clock_now(row["slug"], row["t_min"])
 
 
-@lru_cache(maxsize=4)
-def _growth(slug: str) -> list[dict]:
-    """Median arrival across the ensemble forecast (hourly weather, fuel map, new-ignition acceleration)."""
+@lru_cache(maxsize=8)
+def _growth(slug: str, fire: str | None = None) -> list[dict]:
+    """Median arrival across the ensemble forecast (hourly weather, fuel map, new-ignition acceleration), by minute
+    since the fire started."""
     from .sim.ensemble import forecast
     from .situation import scenario_situation
 
     sc = load_scenario(slug)
-    sit = scenario_situation(slug)
-    fc = forecast(sit, sc["duration_min"])["_arrival"]
-    curve = growth(fc["t50"], fc["domain"], sit.ignition.lat, sit.ignition.lon, sc["duration_min"])
+    sit = scenario_situation(slug, fire=fire)
+    span = sc["duration_min"] - next((f["t_start"] for f in fires(sc) if f["key"] == fire), 0)
+    fc = forecast(sit, span)["_arrival"]
+    curve = growth(fc["t50"], fc["domain"], sit.ignition.lat, sit.ignition.lon, span)
     return [{"minute": g["minute"], "acres": round(g["area_ha"] / HA_PER_ACRE), "head_mi": round(g["head_km"] / 1.609344, 2)} for g in curve]
 
 
@@ -355,7 +394,8 @@ def status(slug: str) -> dict:
 
     cfg = {**load_district(sc["district"]).settings, **sc.get("settings", {})}
     turnout, drive = cfg.get("turnout_min", 13), cfg.get("drive_min", 18)
-    events, firewatch, fw_at, escalated_seen = [], [], None, False
+    per_fire = {f["key"]: {**f, "firewatch": [], "fw_at": None, "escalated": False} for f in fires(sc)}
+    events = []
     with connect() as conn:
         rows = conn.execute("SELECT * FROM events WHERE sample_slug = ? ORDER BY first_seen", (slug,)).fetchall()
         n_out = conn.execute(
@@ -364,22 +404,24 @@ def status(slug: str) -> dict:
         ).fetchone()["n"]
         for ev in rows:
             state = loads(ev["response_json"], {}) or {}
+            fire = per_fire[fire_near(sc, ev["lat"], ev["lon"])["key"]]
             events.append({
                 "id": ev["id"], "place_label": ev["place_label"], "recommendation": ev["recommendation"],
                 "level_reason": ev["level_reason"], "suppression": ev["suppression"],
-                "first_seen_t": minutes(ev["first_seen"]),
+                "first_seen_t": minutes(ev["first_seen"]), "fire": fire["key"],
                 "texts_sent": conn.execute(
                     "SELECT COUNT(*) n FROM messages WHERE event_id = ? AND direction = 'out'", (ev["id"],)
                 ).fetchone()["n"],
             })
-            # One timeline: the earliest event that got a text, unless a later one escalated. A registered burn
-            # is suppressed and never counts.
+            # One timeline per fire: the earliest event that got a text, unless a later one escalated. A registered
+            # burn is suppressed and never counts.
             went, esc = state.get("investigate_at"), bool(state.get("escalate_at"))
-            better = fw_at is None or (esc and not escalated_seen) or (esc == escalated_seen and went is not None and went < fw_at)
+            fw_at = fire["fw_at"]
+            better = fw_at is None or (esc and not fire["escalated"]) or (esc == fire["escalated"] and went is not None and went < fw_at)
             if went and ev["suppression"] != "registered_burn" and better:
-                fw_at, escalated_seen = went, esc
+                fire.update(fw_at=went, escalated=esc, event_id=ev["id"])
                 page_t = minutes(state.get("page_at"))
-                firewatch = [
+                fire["firewatch"] = [
                     {"key": "signal", "t": minutes(ev["first_seen"]), "label": "First signal"},
                     {"key": "investigate", "t": minutes(state.get("investigate_at")), "label": "Duty officer FYI, neighbors asked"},
                     {"key": "escalate", "t": minutes(state.get("escalate_at")), "label": "Confirmed by a second source"},
@@ -388,18 +430,27 @@ def status(slug: str) -> dict:
                     {"key": "on_scene", "t": None if page_t is None else page_t + turnout + drive, "label": f"On scene (+{drive} drive)"},
                 ]
                 if state.get("mutual_aid", {}).get("sent_at"):
-                    firewatch.append({"key": "mutual_aid", "t": minutes(state["mutual_aid"]["sent_at"]), "label": "Mutual aid requested"})
+                    fire["firewatch"].append({"key": "mutual_aid", "t": minutes(state["mutual_aid"]["sent_at"]), "label": "Mutual aid requested"})
 
-    growth = _growth(slug)
+    out_fires = []
+    for f in per_fire.values():
+        curve = _growth(slug, f["key"] if sc.get("fires") else None)
 
-    def size_at(t: float | None) -> dict | None:
-        if t is None:
-            return None
-        g_ = growth[min(round(t), len(growth) - 1)]
-        return {"acres": g_["acres"], "head_mi": g_["head_mi"]}
+        def size_at(t: float | None, f=f, curve=curve) -> dict | None:
+            if t is None:
+                return None
+            g_ = curve[min(max(round(t - f["t_start"]), 0), len(curve) - 1)]
+            return {"acres": g_["acres"], "head_mi": g_["head_mi"]}
 
-    base_on_scene = next(m["t"] for m in sc["baseline"]["milestones"] if m["key"] == "on_scene")
-    fw_on_scene = next((m["t"] for m in firewatch if m["key"] == "on_scene"), None)
+        base_on_scene = next((m["t"] for m in f["baseline"] if m["key"] == "on_scene"), None)
+        fw_on_scene = next((m["t"] for m in f["firewatch"] if m["key"] == "on_scene"), None)
+        out_fires.append({
+            "key": f["key"], "label": f["label"], "ignition": f["ignition"], "t_start": f["t_start"],
+            "event_id": f.get("event_id"), "baseline": f["baseline"], "firewatch": f["firewatch"],
+            "size_on_scene": {"baseline": size_at(base_on_scene), "firewatch": size_at(fw_on_scene)},
+            "growth": curve,
+        })
+    first = out_fires[0]
     running = _clock.get("slug") == slug and _clock.get("running", False)
     return {
         "slug": slug,
@@ -418,9 +469,10 @@ def status(slug: str) -> dict:
             if running and (w_ := _clock.get("waiting")) else None
         ),
         "baseline": sc["baseline"]["milestones"],
-        "firewatch": firewatch,
-        "size_on_scene": {"baseline": size_at(base_on_scene), "firewatch": size_at(fw_on_scene)},
-        "growth": growth,
+        "firewatch": first["firewatch"],
+        "size_on_scene": first["size_on_scene"],
+        "growth": first["growth"],
+        "fires": out_fires,
         "events": events,
         "texts_sent": n_out,
     }

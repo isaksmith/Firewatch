@@ -427,6 +427,8 @@ health         FIREWATCH 7AM: satellites OK, co-op feed {coop_status}, SMS OK. {
 
 **Inbound parsing** (case-insensitive, first word): `FIRE` → report; `BURN` → burn notice; `1` / `2` / `3` → neighbor reply; `PAGE` / `NO` / `SEND` → duty decisions, accepted only from the ladder; `R` → responding; `STOP` / `START` → opt-out and opt-in (carrier requirement). Anything else gets a one-line help reply.
 
+**More than one fire.** A bare `PAGE`, `NO`, `SEND` or `R` answers the newest text that person got. When they also have another open fire, the decision and page texts carry the fire's number (`Reply PAGE 14 or NO 14.`, `Reply R 14 if responding`, and the mutual-aid draft names the place), and the reply can name it: `PAGE 14`, `PAGE FW-0014` or `R 14`. A number that isn't an open fire gets "no open fire 14" and changes nothing. With more than one fire open, the confirmation says which fire it acted on.
+
 **Gateway.** One `SmsGateway` interface with two implementations: `OutboxGateway` (sample mode: writes `messages` rows and shows them in the console's outbox) and `TwilioGateway` (live: sends, and receives on `POST /api/sms/inbound`, with the webhook signature verified). Outbound is rate-limited per contact (at most 1 message a minute; batched FYIs at most once every 15 minutes).
 
 ### 5.7 Mesh radios (Meshtastic)
@@ -1039,6 +1041,8 @@ Each pass is one satellite overpass; during replay a pass is fed in at `replay_o
 
 Texts name a roster phone number (the reserved 555-01xx range). The packet's two pasture burns were over the weekend, so they are extinguished permits, not same-day BURN notices. A same-day burn on this red-flag day would count as escaped anyway (GFDI ≥ `burn_escape_gfdi`). The "registered burn texts nobody" rule is covered by unit tests on a milder day. The replay runs each scenario minute through the real code (`add_signal`, `handle_inbound`, `process_detections`, then `notify.tick`) on the scenario's clock: `POST /api/scenario/{slug}/run` animates it at 2 s per minute, and `POST /api/scenario/{slug}/load` runs it instantly.
 
+**Several fires at once.** A scenario can list `fires`, each with a `key`, `label`, `ignition` and `t_start` (minutes after `t0`); see `cottonwood-creek-three-fires.json`, the packet fire three times over 12 minutes apart. An event belongs to the fire whose ignition is nearest, and its forecast (playbook, page plan, downwind warnings, 3D view) starts from that fire's ignition at its own start time. A scripted text writes `{B}` where the fire's number goes (`"body": "PAGE {B}"`), filled in when the replay runs. `GET /api/scenario/{slug}` adds `fires`: each fire's Firewatch timeline, its "today" chain (the scenario baseline shifted to the fire's start unless the fire gives its own), growth curve and size at first truck on scene; the top-level fields stay those of the first fire. The console strip shows one lane per fire.
+
 ## 11. Testing
 
 Kept small and aimed at the things that would embarrass us in a demo:
@@ -1052,7 +1056,8 @@ Kept small and aimed at the things that would embarrass us in a demo:
 - **Response planner:** downwind contacts are chosen by spread arrival and ordered by ETA; an upwind contact gets nothing; no contact gets two asks for one event; STOP is honored.
 - **Ladder:** no PAGE reply in 3 min → the chief is texted; PAGE from a number outside the ladder is ignored.
 - **Messages:** every rendered template is ≤ 160 characters for the longest town name in the district.
-- **Scenario:** the Cottonwood Creek replay reaches Escalate at T+8 and PAGE at T+9, and the first truck is on scene at T+38 (packet: T+62).
+- **Scenario:** the Cottonwood Creek replay reaches Escalate at T+8 and PAGE at T+9, and the first truck is on scene at T+38 (packet: T+62). The three-fire replay pages each fire 9 minutes after it starts, by number, and each fire's forecast starts from its own ignition.
+- **Two open fires:** texts about the second fire carry its number; `PAGE <n>` pages the named fire, not the newest; a bare `PAGE` still answers the newest; an unknown number changes nothing.
 
 ## 12. Data attribution (shown in the app footer and slides)
 

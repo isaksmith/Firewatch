@@ -39,8 +39,9 @@ def situation_for_event(ev) -> Situation:
     past fires, forecast for live ones), or the event's one reading held constant if that can't be fetched."""
     if ev["sample_slug"]:
         try:
-            return scenario_situation(ev["sample_slug"])
-        except FileNotFoundError:
+            sc = scenario.load_scenario(ev["sample_slug"])
+            return scenario_situation(ev["sample_slug"], fire=scenario.fire_near(sc, ev["lat"], ev["lon"])["key"])
+        except (FileNotFoundError, KeyError):
             pass
     f = loads(ev["features_json"], {})
     w = loads(ev["weather_json"], {})

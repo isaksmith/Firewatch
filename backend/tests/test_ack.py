@@ -151,7 +151,8 @@ def test_crowd_hold_stops_post_timer_and_ring_asks(monkeypatch):
 def test_new_texts_fit_one_sms():
     ev_row = {"id": 1, "kind": "line_fault", "lat": 37.38, "lon": -99.47, "recommendation": "escalate", "score": 80,
               "level_reason": "x" * 300, "place_label": "y" * 90, "created_at": iso(T0)}
-    for body in (notify.t_hold_expired(ev_row), notify.t_hold_broken(ev_row, "x" * 300), notify.t_ack_reply("x" * 80, 30)):
+    for body in (notify.t_hold_expired(ev_row), notify.t_hold_broken(ev_row, "x" * 300), notify.t_ack_reply("x" * 80, 30),
+                 notify.t_hold_expired(ev_row, " 12345"), notify.t_hold_broken(ev_row, "x" * 300, " 12345")):
         assert len(body) <= SMS_MAX
 
 

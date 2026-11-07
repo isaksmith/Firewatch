@@ -11,6 +11,7 @@ from app.db import connect, iso, loads, parse_iso
 from app.district import load_district, sync_roster
 from app.geo import haversine_km
 from app.main import app
+from app.playbook import situation_for_event
 from app.signals import add_signal
 
 T0 = parse_iso("2026-03-17T18:50:00Z")
@@ -305,9 +306,73 @@ def test_templates_fit_one_sms():
         notify.t_helper(ev, far, d.short_name),
         notify.t_mutual_aid_draft("~12340 ac in 1 hr, over the 371 ac 2 trucks can hold", d.neighbor_district),
         notify.t_mutual_aid(ev, d.short_name, plan, 12),
+        notify.t_duty_fyi(ev, why, 3, " 12345"),
+        notify.t_duty_escalate(ev, why, "No answer from duty officer. ", " 12345"),
+        notify.t_page(ev, plan, " 12345"),
+        notify.t_helper(ev, far, d.short_name, " 12345"),
+        notify.t_mutual_aid_draft("~12340 ac in 1 hr, over the 371 ac 2 trucks can hold", d.neighbor_district, " 12345",
+                                  notify._short_place(ev)),
     ]
     too_long = [(len(b), b) for b in bodies if len(b) > notify.SMS_MAX]
     assert not too_long
+
+
+SECOND_FIRE = (37.3050, -99.2350)  # 14 mi from FIRE, past every join radius
+SAM = "+13165550111"
+
+
+def test_a_second_open_fire_is_named_in_texts_and_replies_can_pick_one():
+    with connect() as conn:
+        sync_roster(conn)
+        a = _line_fault(conn)
+        b = _line_fault(conn, at=5, where=SECOND_FIRE)
+        assert a != b
+        assert "Reply PAGE to page" in _out(conn, "duty_fyi", a)[0]["body"], "one open fire: no number"
+        assert f"Reply PAGE {b} or NO {b}." in _out(conn, "duty_fyi", b)[0]["body"]
+
+        r = notify.handle_inbound(conn, DUTY, "PAGE 999", _at(6), is_sample=True)
+        assert r["action"] == "help" and "no open fire 999" in r["reply"] and not _out(conn, "page")
+
+        r = notify.handle_inbound(conn, DUTY, f"page fw-{a:04d}", _at(6), is_sample=True)
+        assert r["action"] == "page" and r["event_id"] == a, "the named fire, not the newest text"
+        assert f"for fire {a} (" in r["reply"] and len(r["reply"]) <= notify.SMS_MAX
+        assert _out(conn, "page", a) and not _out(conn, "page", b)
+
+        r = notify.handle_inbound(conn, DUTY, "PAGE", _at(7), is_sample=True)
+        assert r["event_id"] == b, "a bare PAGE still answers the newest text"
+        (to_sam,) = [m["body"] for m in _out(conn, "page", b) if m["phone"] == SAM]
+        assert f"Reply R {b} if responding" in to_sam, "Sam was paged for both fires"
+
+        r = notify.handle_inbound(conn, SAM, f"R {a}", _at(8), is_sample=True)
+        assert r["event_id"] == a and f"responding for fire {a} (" in r["reply"]
+        r = notify.handle_inbound(conn, SAM, "R 999", _at(8), is_sample=True)
+        assert r["action"] == "help" and "no open fire 999" in r["reply"]
+
+
+def test_three_fire_scenario_pages_each_fire_by_number():
+    slug = "cottonwood-creek-three-fires"
+    scenario.run_now(slug)
+    st = scenario.status(slug)
+    assert [f["key"] for f in st["fires"]] == ["A", "B", "C"]
+    assert {e["fire"] for e in st["events"]} == {"A", "B", "C"} and len(st["events"]) == 3
+    for f in st["fires"]:
+        fw = {m["key"]: m["t"] for m in f["firewatch"]}
+        assert fw["signal"] == f["t_start"] and fw["page"] == f["t_start"] + 9, f["key"]
+        assert fw["mutual_aid"] is not None, f["key"]
+        size = f["size_on_scene"]
+        assert size["firewatch"]["acres"] < size["baseline"]["acres"] / 2, f["key"]
+    assert st["firewatch"] == st["fires"][0]["firewatch"], "the top-level timeline is the first fire's"
+
+    by_key = {f["key"]: f for f in st["fires"]}
+    with connect() as conn:
+        for key in ("B", "C"):
+            eid = by_key[key]["event_id"]
+            assert any(f"Reply PAGE {eid} or NO {eid}." in m["body"] for m in _out(conn, "duty_escalate", eid)), key
+            assert _out(conn, "mutual_aid", eid), key
+            ig = situation_for_event(_event(conn, eid)).ignition
+            assert (ig.lat, ig.lon) == (by_key[key]["ignition"]["lat"], by_key[key]["ignition"]["lon"]), \
+                "each fire's forecast starts from its own ignition"
+            assert ig.time == T0 + timedelta(minutes=by_key[key]["t_start"])
 
 
 def test_twilio_signature():

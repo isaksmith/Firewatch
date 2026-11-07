@@ -1,0 +1,380 @@
+{
+  "slug": "cottonwood-creek-three-fires",
+  "title": "Cottonwood Creek: three line-down fires at once",
+  "story": "The packet's red-flag Tuesday, three times over. The same gusts that drop the feeder 4 line NW of Coldwater at 1:50 pm drop feeder 7 ENE of Coldwater at 2:02 and feeder 2 SE of Protection at 2:14. Each fire runs the packet's chain: a line fault, a neighbor who sees smoke, a page by text, and a mutual-aid request. With more than one fire open, every text names its fire (Reply PAGE 14) and replies can too, so the duty officer never pages the wrong one. Each fire's 'today' chain is the packet's, shifted to its start; a real district would be slower on the second and third.",
+  "district": "cottonwood-creek",
+  "synthetic": true,
+  "red_flag": true,
+  "confirm_red_flag": false,
+  "t0": "2026-03-17T18:50:00Z",
+  "t0_local": "1:50 pm CDT, Tue Mar 17 2026",
+  "duration_min": 90,
+  "ignition": {
+    "lat": 37.3821,
+    "lon": -99.4681,
+    "cause": "downed distribution line (lease service)"
+  },
+  "fires": [
+    {
+      "key": "A",
+      "label": "Feeder 4, NW of Coldwater",
+      "t_start": 0,
+      "ignition": {
+        "lat": 37.3821,
+        "lon": -99.4681,
+        "cause": "downed distribution line (lease service)"
+      }
+    },
+    {
+      "key": "B",
+      "label": "Feeder 7, ENE of Coldwater",
+      "t_start": 12,
+      "ignition": {
+        "lat": 37.305,
+        "lon": -99.235,
+        "cause": "downed distribution line (feeder 7)"
+      }
+    },
+    {
+      "key": "C",
+      "label": "Feeder 2, SE of Protection",
+      "t_start": 24,
+      "ignition": {
+        "lat": 37.165,
+        "lon": -99.43,
+        "cause": "downed distribution line (feeder 2)"
+      }
+    }
+  ],
+  "weather": {
+    "wind_kmh": 56,
+    "gust_kmh": 90,
+    "wind_dir_deg": 185,
+    "rh_pct": 11,
+    "temp_c": 25.6,
+    "precip_72h_mm": 0,
+    "thunder_24h": 0
+  },
+  "curing_pct": 98,
+  "baseline": {
+    "source": "Competitor packet (today's chain, no Firewatch)",
+    "milestones": [
+      {
+        "key": "visual",
+        "t": 27,
+        "label": "First visual (rancher)"
+      },
+      {
+        "key": "call",
+        "t": 31,
+        "label": "911 call"
+      },
+      {
+        "key": "roll",
+        "t": 44,
+        "label": "Trucks roll"
+      },
+      {
+        "key": "on_scene",
+        "t": 62,
+        "label": "On scene"
+      }
+    ]
+  },
+  "placement_note": "Fictional district placed at Coldwater, KS (Comanche County), per the packet's Clark/Comanche/Barber model, so real terrain and land cover are used.",
+  "weather_hourly": [
+    {
+      "time": "2026-03-17T17:00:00Z",
+      "wind_from_deg": 175,
+      "wind_kmh": 50,
+      "gust_kmh": 80,
+      "temp_c": 24.0,
+      "rh_pct": 14
+    },
+    {
+      "time": "2026-03-17T18:00:00Z",
+      "wind_from_deg": 180,
+      "wind_kmh": 56,
+      "gust_kmh": 88,
+      "temp_c": 25.5,
+      "rh_pct": 12
+    },
+    {
+      "time": "2026-03-17T19:00:00Z",
+      "wind_from_deg": 185,
+      "wind_kmh": 60,
+      "gust_kmh": 90,
+      "temp_c": 25.6,
+      "rh_pct": 11
+    },
+    {
+      "time": "2026-03-17T20:00:00Z",
+      "wind_from_deg": 185,
+      "wind_kmh": 61,
+      "gust_kmh": 92,
+      "temp_c": 25.6,
+      "rh_pct": 11
+    },
+    {
+      "time": "2026-03-17T21:00:00Z",
+      "wind_from_deg": 190,
+      "wind_kmh": 56,
+      "gust_kmh": 86,
+      "temp_c": 25.0,
+      "rh_pct": 12
+    },
+    {
+      "time": "2026-03-17T22:00:00Z",
+      "wind_from_deg": 195,
+      "wind_kmh": 50,
+      "gust_kmh": 77,
+      "temp_c": 23.9,
+      "rh_pct": 13
+    },
+    {
+      "time": "2026-03-17T23:00:00Z",
+      "wind_from_deg": 200,
+      "wind_kmh": 42,
+      "gust_kmh": 64,
+      "temp_c": 22.0,
+      "rh_pct": 16
+    }
+  ],
+  "burn_permits": [
+    {
+      "id": "permit-sat",
+      "lat": 37.384,
+      "lon": -99.585,
+      "acres": 160,
+      "start": "2026-03-14T15:00:00Z",
+      "end": "2026-03-14T23:00:00Z",
+      "status": "extinguished",
+      "provenance": {
+        "source": "competitor packet: weekend pasture burns under county permits",
+        "kind": "simulated"
+      }
+    },
+    {
+      "id": "permit-sun",
+      "lat": 37.3,
+      "lon": -99.56,
+      "acres": 240,
+      "start": "2026-03-15T15:00:00Z",
+      "end": "2026-03-15T23:00:00Z",
+      "status": "extinguished",
+      "provenance": {
+        "source": "competitor packet: weekend pasture burns under county permits",
+        "kind": "simulated"
+      }
+    }
+  ],
+  "timeline": [
+    {
+      "t": 0,
+      "type": "signal",
+      "kind": "line_fault",
+      "lat": 37.3821,
+      "lon": -99.4681,
+      "source": "coop:feeder-4",
+      "value": "lockout",
+      "note": "Fire A: co-op SCADA, feeder 4 recloser locks out"
+    },
+    {
+      "t": 8,
+      "type": "sms",
+      "from": "+13165550131",
+      "body": "1",
+      "note": "Fire A: Wes Kittle, 1 mi E, sees smoke"
+    },
+    {
+      "t": 9,
+      "type": "sms",
+      "from": "+13165550101",
+      "body": "PAGE",
+      "note": "Fire A: duty officer pages from her phone (only one fire open, so plain PAGE)"
+    },
+    {
+      "t": 10,
+      "type": "sms",
+      "from": "+13165550111",
+      "body": "R",
+      "note": "Fire A: volunteer responding"
+    },
+    {
+      "t": 11,
+      "type": "sms",
+      "from": "+13165550151",
+      "body": "R",
+      "note": "Fire A: lease water truck heading there"
+    },
+    {
+      "t": 12,
+      "type": "sms",
+      "from": "+13165550102",
+      "body": "SEND",
+      "note": "Fire A: chief sends the mutual-aid request"
+    },
+    {
+      "t": 12,
+      "type": "signal",
+      "kind": "line_fault",
+      "lat": 37.305,
+      "lon": -99.235,
+      "source": "coop:feeder-7",
+      "value": "lockout",
+      "note": "Fire B: feeder 7 recloser locks out ENE of Coldwater"
+    },
+    {
+      "t": 13,
+      "type": "sms",
+      "from": "+13165550113",
+      "body": "R",
+      "note": "Fire A: second volunteer responding"
+    },
+    {
+      "t": 20,
+      "type": "sms",
+      "from": "+13165550136",
+      "body": "1",
+      "note": "Fire B: Lyle Becker sees smoke"
+    },
+    {
+      "t": 21,
+      "type": "sms",
+      "from": "+13165550101",
+      "body": "PAGE {B}",
+      "note": "Fire B: two fires open, so the duty officer names this one"
+    },
+    {
+      "t": 22,
+      "type": "sms",
+      "from": "+13165550112",
+      "body": "R {B}",
+      "note": "Fire B: one volunteer left to respond"
+    },
+    {
+      "t": 23,
+      "type": "sms",
+      "from": "+13165550102",
+      "body": "SEND {B}",
+      "note": "Fire B: chief requests mutual aid for this fire"
+    },
+    {
+      "t": 24,
+      "type": "signal",
+      "kind": "line_fault",
+      "lat": 37.165,
+      "lon": -99.43,
+      "source": "coop:feeder-2",
+      "value": "lockout",
+      "note": "Fire C: feeder 2 recloser locks out SE of Protection"
+    },
+    {
+      "t": 32,
+      "type": "sms",
+      "from": "+13165550138",
+      "body": "1",
+      "note": "Fire C: Vern Ratzlaff sees smoke"
+    },
+    {
+      "t": 33,
+      "type": "sms",
+      "from": "+13165550101",
+      "body": "PAGE {C}",
+      "note": "Fire C: duty officer pages the third fire by number"
+    },
+    {
+      "t": 34,
+      "type": "sms",
+      "from": "+13165550114",
+      "body": "R {C}",
+      "note": "Fire C: one volunteer responding"
+    },
+    {
+      "t": 35,
+      "type": "sms",
+      "from": "+13165550102",
+      "body": "SEND {C}",
+      "note": "Fire C: chief requests mutual aid again"
+    },
+    {
+      "t": 38,
+      "type": "detections",
+      "note": "VIIRS NOAA-20 afternoon pass sees all three fires",
+      "detections": [
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.3897,
+          "lon": -99.4646,
+          "brightness_k": 352.1,
+          "frp_mw": 28.4,
+          "confidence": "nominal",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        },
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.3965,
+          "lon": -99.4615,
+          "brightness_k": 367.0,
+          "frp_mw": 61.7,
+          "confidence": "high",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        },
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.4033,
+          "lon": -99.4585,
+          "brightness_k": 359.8,
+          "frp_mw": 44.2,
+          "confidence": "high",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        },
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.3092,
+          "lon": -99.2338,
+          "brightness_k": 349.6,
+          "frp_mw": 21.3,
+          "confidence": "nominal",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        },
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.3141,
+          "lon": -99.2321,
+          "brightness_k": 358.2,
+          "frp_mw": 39.8,
+          "confidence": "high",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        },
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.1676,
+          "lon": -99.4291,
+          "brightness_k": 341.7,
+          "frp_mw": 12.6,
+          "confidence": "nominal",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        }
+      ]
+    }
+  ]
+}
