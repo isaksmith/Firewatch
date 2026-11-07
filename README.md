@@ -8,9 +8,12 @@
 
 ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white) ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white) ![XGBoost](https://img.shields.io/badge/XGBoost-scorer-EB5B2B) ![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white) ![MapLibre](https://img.shields.io/badge/MapLibre-GL-396CB2?logo=maplibre&logoColor=white) ![Meshtastic](https://img.shields.io/badge/Meshtastic-LoRa-67EA94) ![Data](https://img.shields.io/badge/data-free%20%26%20public-ff4b2b)
 
-[How it works](#how-it-works) · [Screens](#screens) · [Quick start](#quick-start) · [Run the demo](#run-the-demo) · [Pitch deck](docs/pitch/Firewatch-Pitch.pdf) · [Sensor video](https://youtu.be/OYTUxd2nSDk) · [Docs](#docs) · [Data sources](#data-sources-and-apis)
+[Demo video](https://youtu.be/55S3FNEd-2s) · [How it works](#how-it-works) · [Screens](#screens) · [Quick start](#quick-start) · [Run the demo](#run-the-demo) · [Pitch deck](docs/pitch/Firewatch-Pitch.pdf) · [Sensor video](https://youtu.be/OYTUxd2nSDk) · [Docs](#docs) · [Data sources](#data-sources-and-apis)
 
 Built for [Firewatch 2026](https://wsuinnovationworks.com/) · WSU Innovation Works × Lockheed Martin Skunk Works · Nov 6–8, 2026
+
+<a href="https://youtu.be/55S3FNEd-2s"><img src="https://img.youtube.com/vi/55S3FNEd-2s/maxresdefault.jpg" width="560" alt="Watch the Firewatch team solution demo on YouTube" /></a><br/>
+<b><a href="https://youtu.be/55S3FNEd-2s">Watch the team solution demo on YouTube</a></b>
 
 <br/>
 
@@ -425,7 +428,10 @@ Results are in [backend/ml/report.md](backend/ml/report.md); the full analysis o
 
 | Doc | What's in it |
 |---|---|
-| [5-minute pitch deck](docs/pitch/Firewatch-Pitch.pptx) ([PDF](docs/pitch/Firewatch-Pitch.pdf)) | Ten slides with timed speaker notes: the 31-minute problem, how it works, the console, results, false alarms, one bar of cell, the planner, status and next steps |
+| [5-minute pitch deck](docs/pitch/Firewatch-Pitch.pptx) ([PDF](docs/pitch/Firewatch-Pitch.pdf)) | Eleven slides with timed speaker notes: the 31-minute problem, how it works, the console, results, false alarms, one bar of cell, the sensor node (CAD renders), the planner, status and next steps |
+| [Team solution demo](https://youtu.be/55S3FNEd-2s) | On YouTube: the WSU Innovation Works 2026 Firewatch Watchdogs team's solution demo |
+| [Story video](docs/video/firewatch-story.mp4) | 2:21, no narration, for an executive audience: the packet fire, the console replay (Detect, Confirm, Respond), results, false alarms, one bar of cell and the 3D sensor node. Rebuild with `docs/video/build_video.py` after `npm install` in `docs/video` |
+| [Tour video](docs/video/firewatch-tour.mp4) | 4:53, no narration: the same opening, then every feature in use: the console's queue, layers, satellite replay and alert drawer, a scenario run, the 2D forecast and 3D spread with a wind override, the burn log, low data mode, the public board, the region planner and the sensor node. Record with `node docs/video/record_tour.mjs all`, build with `docs/video/build_tour.py` |
 | [Build plan](docs/PLAN.md) | The scenario in minutes, whole-chain design, constraints, failure modes, cost and who pays, evidence, weekend scope, next step, plus Shane's research additions and open questions |
 | [Design](docs/DESIGN.md) | Data model, pipeline, signals and confirmation rules, scoring, response planner and messaging, spread model, API, UI |
 | [How Firewatch recommends actions](docs/RECOMMENDATIONS.md) | The decision model end to end: probability of fire, acres at stake, false-alarm costs, expected loss, every weight and why, a worked example, limits |

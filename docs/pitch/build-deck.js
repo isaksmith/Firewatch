@@ -16,7 +16,11 @@ const IMG = {
   phoneHome: `${REPO}/mobile/shots/08-home-radio-alert.png`,
   phoneAlert: `${REPO}/mobile/shots/09-alert-by-radio.png`,
   phoneBoard: `${REPO}/mobile/shots/10-board.png`,
+  nodeExploded: `${REPO}/sensors/cad/renders/v2_rich_exploded.png`,
+  nodeStake: `${REPO}/sensors/cad/renders/v2_bare_stake.png`,
+  nodeBand: `${REPO}/sensors/cad/renders/v2_rich_band.png`,
 };
+const SLIDES = 11;
 
 const C = {
   void: "050607", bg: "08090B", panel: "0C0E11", panel2: "121519", raised: "181C21",
@@ -30,6 +34,12 @@ async function icon(Comp, color, size = 256) {
   const svg = ReactDOMServer.renderToStaticMarkup(React.createElement(Comp, { color: `#${color}`, size: String(size) }));
   const png = await sharp(Buffer.from(svg)).png().toBuffer();
   return "image/png;base64," + png.toString("base64");
+}
+
+// The CAD renders are 2-3 MB PNGs; a slide only needs a ~1000 px JPEG.
+async function photo(path, width = 1000) {
+  const jpg = await sharp(path).resize({ width }).jpeg({ quality: 86 }).toBuffer();
+  return "image/jpeg;base64," + jpg.toString("base64");
 }
 
 async function logo() {
@@ -56,7 +66,7 @@ function title(slide, text, y = 0.72, size = 30) {
 }
 
 function footer(slide, n) {
-  slide.addText(`${n} / 10`, { x: W - 1.3, y: H - 0.42, w: 0.8, h: 0.22, fontFace: F.mono, bold: true, fontSize: 8, color: C.dim, align: "right", margin: 0 });
+  slide.addText(`${n} / ${SLIDES}`, { x: W - 1.3, y: H - 0.42, w: 0.8, h: 0.22, fontFace: F.mono, bold: true, fontSize: 8, color: C.dim, align: "right", margin: 0 });
   slide.addText("FIREWATCH", { x: 0.6, y: H - 0.42, w: 2, h: 0.22, fontFace: F.mono, bold: true, fontSize: 8, color: C.dim, charSpacing: 3, margin: 0 });
 }
 
@@ -338,7 +348,66 @@ function footer(slide, n) {
     s.addNotes("(30 s) Rural Kansas often has one bar of cell, so everything is plain text: reply PAGE, or 1, 2, 3. Where there's no cell at all, the same texts go over Meshtastic LoRa mesh radios to trucks and ranches; we've run it on real radios this weekend. And the phone app gets alerts by text or by radio, shows where the fire is heading on an offline map, and lets neighbors report and confirm smoke.");
   }
 
-  // 8. Planner
+  // 8. Sensor node (CAD revision 2 renders from sensors/cad)
+  {
+    const s = pres.addSlide();
+    s.background = { color: C.bg };
+    brackets(s, pres);
+    kicker(s, "THE SENSOR NODE  ·  CAD REVISION 2", C.ok);
+    title(s, "One box, two tiers, on a stake or a pole", 0.72, 26);
+
+    const tile = (data, x, y, w, h) => {
+      s.addShape(pres.shapes.RECTANGLE, { x: x - 0.03, y: y - 0.03, w: w + 0.06, h: h + 0.06, fill: { color: C.line2 }, line: { type: "none" } });
+      s.addImage({ data, x, y, w, h });
+    };
+    const top = 1.45;
+    const eh = 3.3, ew = eh * 1600 / 1800;
+    tile(await photo(IMG.nodeExploded), 0.6, top, ew, eh);
+    s.addText("RICH NODE, EXPLODED", { x: 0.75, y: top + 0.12, w: ew - 0.3, h: 0.22, fontFace: F.mono, bold: true, fontSize: 8, color: C.text, charSpacing: 2, margin: 0 });
+
+    const mx = 0.6 + ew + 0.35, mh = 1.75, mw = mh * 1400 / 1600, mgap = 0.2;
+    const mounts = [[IMG.nodeStake, "Bare · ground stake"], [IMG.nodeBand, "Rich · pole band"]];
+    for (const [i, [p, cap]] of mounts.entries()) {
+      const x = mx + i * (mw + mgap);
+      tile(await photo(p, 700), x, top, mw, mh);
+      s.addText(cap, { x, y: top + mh + 0.08, w: mw, h: 0.22, fontFace: F.mono, bold: true, fontSize: 8.5, color: C.muted, margin: 0 });
+    }
+
+    const chipX = mx + 2 * mw + mgap + 0.3, chipW = 9.4 - chipX;
+    const chips = [
+      { big: "$136", text: "bare node at ~100 units" },
+      { big: "$204", text: "rich node, adds smoke sensing" },
+      { big: "Solar", text: "no wiring, relays the mesh" },
+    ];
+    chips.forEach((c, i) => {
+      const y = top + i * 0.62;
+      s.addShape(pres.shapes.RECTANGLE, { x: chipX, y, w: chipW, h: 0.52, fill: { color: C.panel }, line: { color: C.line, width: 0.75 } });
+      s.addShape(pres.shapes.RECTANGLE, { x: chipX, y, w: 0.06, h: 0.52, fill: { color: C.ok }, line: { type: "none" } });
+      s.addText(c.big, { x: chipX + 0.18, y: y + 0.03, w: chipW - 0.25, h: 0.24, fontFace: F.head, bold: true, fontSize: 12.5, color: C.ok, margin: 0 });
+      s.addText(c.text, { x: chipX + 0.18, y: y + 0.26, w: chipW - 0.25, h: 0.22, fontFace: F.body, fontSize: 8.5, color: C.muted, margin: 0, fit: "shrink" });
+    });
+
+    const cardY = top + mh + 0.45, cardH = 4.75 - cardY, cardGap = 0.25, cardW = (9.4 - mx - cardGap) / 2;
+    const tiers = [
+      { name: "BARE", color: C.sky, text: "Gas, temperature, humidity, pressure (Bosch BME688). 2\u00A0W panel, 4,400\u00A0mAh." },
+      { name: "RICH", color: C.amber, text: "Adds a particle sensor that sees smoke (Plantower PMSA003I). 5\u00A0W panel, 6,600\u00A0mAh." },
+    ];
+    tiers.forEach((t, i) => {
+      const x = mx + i * (cardW + cardGap);
+      s.addShape(pres.shapes.RECTANGLE, { x, y: cardY, w: cardW, h: cardH, fill: { color: C.panel }, line: { color: C.line, width: 0.75 } });
+      s.addShape(pres.shapes.RECTANGLE, { x, y: cardY, w: cardW, h: 0.05, fill: { color: t.color }, line: { type: "none" } });
+      s.addText(t.name, { x: x + 0.2, y: cardY + 0.15, w: cardW - 0.4, h: 0.25, fontFace: F.mono, bold: true, fontSize: 10, color: t.color, charSpacing: 3, margin: 0 });
+      s.addText(t.text, { x: x + 0.2, y: cardY + 0.45, w: cardW - 0.4, h: cardH - 0.55, fontFace: F.body, fontSize: 10, color: C.text, margin: 0, valign: "top" });
+    });
+
+    s.addText("Blender design model, not a routed board. Detection distance, power budget and radio range are what the field burn trial measures.", {
+      x: 0.6, y: 4.9, w: 8.8, h: 0.22, fontFace: F.body, fontSize: 8.5, italic: true, color: C.dim, margin: 0,
+    });
+    footer(s, 8);
+    s.addNotes("(20 s) This is our sensor node. One weatherproof box in two tiers: the bare node measures gas, temperature, humidity and pressure; the rich node adds a particle sensor that sees smoke. Both run on solar, talk over the same Meshtastic mesh and relay each other's messages, and mount on a ground stake or band onto a pole. At about a hundred units it's 136 dollars bare and 204 rich. It's a design model today; the field burn trial measures how far away it can smell a fire.");
+  }
+
+  // 9. Planner
   {
     const s = pres.addSlide();
     s.background = { color: C.bg };
@@ -363,11 +432,11 @@ function footer(slide, n) {
       s.addText(c.big, { x: 0.8, y, w: 1.35, h: 0.56, fontFace: F.head, bold: true, fontSize: 12.5, color: C.ok, valign: "middle", margin: 0, fit: "shrink" });
       s.addText(c.text, { x: 2.15, y, w: 1.95, h: 0.56, fontFace: F.body, fontSize: 9, color: C.muted, valign: "middle", margin: 0 });
     });
-    footer(s, 8);
+    footer(s, 9);
     s.addNotes("(25 s) For districts that want their own sensors, the planner lays out a network for any Kansas county. It puts sensor plots where fires start and where the wind carries smoke, routes relays with terrain line of sight, and prices it. For Cottonwood Creek, ten plots and five relays come to about fifteen and a half thousand dollars with spares, and every data source is free.");
   }
 
-  // 9. Proof + next
+  // 10. Proof + next
   {
     const s = pres.addSlide();
     s.background = { color: C.bg };
@@ -403,11 +472,11 @@ function footer(slide, n) {
       { text: "To run a district", options: { bold: true, color: C.text, breakLine: true } },
       { text: "Free public data, about 1 cent a text, optional sensors from $136 a node", options: { color: C.muted } },
     ], { x: 6.1, y: 3.95, w: 2.95, h: 0.78, fontFace: F.body, fontSize: 10, valign: "middle", margin: 0 });
-    footer(s, 9);
+    footer(s, 10);
     s.addNotes("(25 s) It's real code: 598 automated tests, a scorer trained on ten years of Kansas fires, a spread forecast back-tested on real fires, and thirteen live public data feeds we checked working today. Next: a field burn to measure sensor range, live texting on real phones, and a pilot with one Kansas district before spring burn season.");
   }
 
-  // 10. Close
+  // 11. Close
   {
     const s = pres.addSlide();
     s.background = { color: C.void };
