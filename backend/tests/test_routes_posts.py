@@ -208,3 +208,42 @@ def test_contacts_hides_web_rows():
         rows = c.get("/api/contacts").json()
         assert rows and not any(r["phone"].startswith("web:") for r in rows)
         assert any(r["name"] == "Wes" for r in rows)
+
+
+DUTY = "+13165550101"
+
+
+def _fire_with_event(c):
+    from app.district import sync_roster
+    with connect() as conn:
+        sync_roster(conn)
+    pid = post(c, member("Reporter"), "fire", "Smoke column north of the grain elevator")
+    with connect() as conn:
+        row = conn.execute("SELECT event_id, status FROM posts WHERE id = ?", (pid,)).fetchone()
+    assert row["event_id"], "fixture needs a post with an event"
+    return pid, row["event_id"]
+
+
+def _status(pid):
+    with connect() as conn:
+        return conn.execute("SELECT status FROM posts WHERE id = ?", (pid,)).fetchone()["status"]
+
+
+def test_no_text_dismisses_the_post():
+    from app import notify
+    with TestClient(app) as c:
+        pid, eid = _fire_with_event(c)
+        assert pid in ids(pub(c))
+        with connect() as conn:
+            notify.decide(conn, eid, "no", "Duty", utcnow())
+        assert _status(pid) == "dismissed"
+        assert pid not in ids(pub(c))
+
+
+def test_dashboard_dismiss_dismisses_the_post():
+    with TestClient(app) as c:
+        pid, eid = _fire_with_event(c)
+        r = c.post(f"/api/alerts/{eid}/actions", json={"action": "dismiss", "operator": "Ops"})
+        assert r.status_code == 200, r.text
+        assert _status(pid) == "dismissed"
+        assert pid not in ids(pub(c))
