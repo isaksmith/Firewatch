@@ -21,10 +21,47 @@ def dedupe_key(d: dict) -> str:
     return f"{d['source']}|{d['lat']:.4f}|{d['lon']:.4f}|{d['acq_time']}"
 
 
+_SUFFIXES = ("_URT", "_RT", "_NRT", "_SP")
+_RT_SUFFIXES = ("_URT", "_RT")
+MATCH_DEG = 0.003  # about 300 m: a processed row re-locates the same pixel by less than this
+
+
+def base_source(source: str) -> str:
+    for suf in _SUFFIXES:
+        if source.endswith(suf):
+            return source[: -len(suf)]
+    return source
+
+
+def _same_pixel_other_product(conn: sqlite3.Connection, d: dict):
+    """Existing row for the same sensor and overpass time under a different product suffix
+    (real-time vs near-real-time vs standard) at nearly the same location."""
+    base = base_source(d["source"])
+    rows = conn.execute(
+        "SELECT id, source FROM detections WHERE acq_time = ? AND source != ? "
+        "AND abs(lat - ?) <= ? AND abs(lon - ?) <= ?",
+        (d["acq_time"], d["source"], d["lat"], MATCH_DEG, d["lon"], MATCH_DEG),
+    ).fetchall()
+    return [r for r in rows if base_source(r["source"]) == base]
+
+
 def insert_detections(conn: sqlite3.Connection, dets: list[dict], is_sample: bool = False) -> list[int]:
     now = iso(utcnow())
     new_ids = []
     for d in dets:
+        twins = _same_pixel_other_product(conn, d)
+        if twins:
+            # Same detection seen under another product. A processed row replaces a real-time one
+            # in place (keeps its event); anything else is a duplicate and is dropped.
+            rt = [r for r in twins if r["source"].endswith(_RT_SUFFIXES)]
+            if rt and not d["source"].endswith(_RT_SUFFIXES):
+                conn.execute(
+                    "UPDATE detections SET dedupe_key = ?, source = ?, lat = ?, lon = ?, brightness_k = ?, "
+                    "frp_mw = ?, confidence = ?, scan_km = ?, track_km = ?, daynight = ? WHERE id = ?",
+                    (dedupe_key(d), d["source"], d["lat"], d["lon"], d.get("brightness_k"), d.get("frp_mw"),
+                     d.get("confidence"), d.get("scan_km"), d.get("track_km"), d.get("daynight"), rt[0]["id"]),
+                )
+            continue
         cur = conn.execute(
             "INSERT OR IGNORE INTO detections(dedupe_key, source, satellite, lat, lon, acq_time, brightness_k, "
             "frp_mw, confidence, scan_km, track_km, daynight, is_sample, ingested_at) "

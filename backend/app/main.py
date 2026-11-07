@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from . import sample
 from .config import get_settings
-from .db import connect, init_db, iso, loads, parse_iso, utcnow
+from .db import connect, init_db, iso, loads, mark_source, parse_iso, utcnow
 from .fire_weather import default_curing, gfdi_band
 from .layers import LAYER_NAMES, load_layer, nearest_assets
 from .pipeline import poll_firms_once
@@ -19,33 +19,45 @@ from .sim.spread import SpreadInput, simulate
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("firewatch")
 
-_poll_task: asyncio.Task | None = None
+_poll_tasks: list[asyncio.Task] = []
 
 
-async def _poll_loop() -> None:
-    minutes = get_settings().poll_minutes
+async def _source_loop(name: str, interval_s: int, job) -> None:
+    """Poll one source forever. A failure is logged and recorded, never raised."""
     while True:
         try:
-            summary = await asyncio.to_thread(poll_firms_once)
-            log.info("FIRMS poll: %s", summary)
-        except Exception:
-            log.exception("FIRMS poll failed")
-        await asyncio.sleep(minutes * 60)
+            result = await asyncio.to_thread(job)
+            log.info("%s poll: %s", name, result)
+        except Exception as e:
+            log.exception("%s poll failed", name)
+            try:
+                with connect() as conn:
+                    mark_source(conn, name, ok=False, error=str(e))
+            except Exception:
+                log.exception("could not record failure for %s", name)
+        await asyncio.sleep(interval_s)
+
+
+def poll_jobs() -> dict:
+    """Source name -> callable. Sources without a job here are not polled."""
+    return {"firms": poll_firms_once}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _poll_task
+    global _poll_tasks
     init_db()
     s = get_settings()
     if s.mode == "sample" and not sample.has_sample_events():
         n = await asyncio.to_thread(sample.load_all_now)
         log.info("loaded %d sample fixtures", n)
     if s.mode == "live":
-        _poll_task = asyncio.create_task(_poll_loop())
+        intervals = s.source_intervals
+        _poll_tasks = [asyncio.create_task(_source_loop(n, intervals[n], job)) for n, job in poll_jobs().items()]
     yield
-    if _poll_task:
-        _poll_task.cancel()
+    for task in _poll_tasks:
+        task.cancel()
+    _poll_tasks = []
 
 
 app = FastAPI(title="Firewatch Confirmation Layer", lifespan=lifespan)
@@ -247,18 +259,23 @@ def health():
     sources = {}
     with connect() as conn:
         rows = {r["source"]: r for r in conn.execute("SELECT * FROM source_health")}
-    for name in ("firms", "open_meteo"):
+    for name, interval_s in s.source_intervals.items():
         r = rows.get(name)
         if s.mode == "sample":
-            sources[name] = {"status": "sample", "age_min": None, "last_ok": None, "last_error": None}
+            sources[name] = {"status": "sample", "age_min": None, "last_ok": None, "last_error": None,
+                             "interval_s": interval_s}
             continue
+        last_error = r["last_error"] if r else None
         if r is None or r["last_ok"] is None:
-            sources[name] = {"status": "down", "age_min": None, "last_ok": None,
-                             "last_error": r["last_error"] if r else None}
+            status = "skipped" if name == "firms" and not s.firms_map_key else "down"
+            sources[name] = {"status": status, "age_min": None, "last_ok": None, "last_error": last_error,
+                             "interval_s": interval_s}
             continue
-        age = (now - parse_iso(r["last_ok"])).total_seconds() / 60
-        status = "ok" if age < 15 else "stale" if age < 60 else "down"
-        sources[name] = {"status": status, "age_min": round(age), "last_ok": r["last_ok"], "last_error": r["last_error"]}
+        age_s = (now - parse_iso(r["last_ok"])).total_seconds()
+        # stale at 3 intervals, down at 12
+        status = "ok" if age_s < 3 * interval_s else "stale" if age_s < 12 * interval_s else "down"
+        sources[name] = {"status": status, "age_min": round(age_s / 60), "last_ok": r["last_ok"],
+                         "last_error": last_error, "interval_s": interval_s}
     return {
         "mode": s.mode,
         "firms_key_configured": bool(s.firms_map_key),

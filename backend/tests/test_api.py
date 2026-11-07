@@ -32,3 +32,12 @@ def test_health_in_sample_mode():
         h = client.get("/api/health").json()
         assert h["mode"] == "sample"
         assert h["sources"]["firms"]["status"] == "sample"
+
+
+def test_health_lists_every_source_with_interval():
+    with TestClient(app) as client:
+        h = client.get("/api/health").json()
+        for name in ("firms", "nws_alerts", "lsr", "wfigs_incidents", "wfigs_perimeters",
+                     "metar", "open_meteo", "spc", "hms"):
+            assert name in h["sources"], name
+            assert h["sources"][name]["interval_s"] > 0
