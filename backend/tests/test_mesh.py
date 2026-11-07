@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -33,13 +34,16 @@ class FakeRadio:
 
 
 @pytest.fixture
-def radio():
+def radio(monkeypatch):
     r = FakeRadio()
     with connect() as conn:
         sync_roster(conn)
         conn.execute("UPDATE contacts SET mesh_id = ? WHERE phone = ?", (mesh.node_id(DUTY_RADIO), DUTY))
         conn.execute("UPDATE contacts SET mesh_id = ? WHERE phone = ?", (mesh.node_id(SAM_RADIO), SAM))
-    mesh.set_bridge(mesh.MeshBridge(r))
+    monkeypatch.setattr(mesh, "TX_GAP_S", 0)
+    bridge = mesh.MeshBridge(r)
+    bridge.spawn = lambda fn, *args: fn(*args)
+    mesh.set_bridge(bridge)
     yield r
     mesh.set_bridge(None)
 
@@ -94,10 +98,31 @@ def test_page_by_radio_reply(radio):
         assert any(s["to"] == mesh.node_id(SAM_RADIO) and s["text"].startswith("FIRE ") for s in radio.sent), "volunteer page over mesh"
 
 
-def test_broadcast_chatter_is_not_parsed(radio):
+def test_channel_chatter_is_not_parsed(radio):
     with connect() as conn:
-        assert mesh.handle_packet(conn, _packet(DUTY_RADIO, "TEXT_MESSAGE_APP", to=0xFFFFFFFF, text="PAGE"), GATEWAY) is None
+        for chatter in ("no idea, heading in", "fire looks bigger from here", "page me later"):
+            assert mesh.handle_packet(conn, _packet(DUTY_RADIO, "TEXT_MESSAGE_APP", to=0xFFFFFFFF, text=chatter), GATEWAY) is None
+        other_channel = {**_packet(DUTY_RADIO, "TEXT_MESSAGE_APP", to=0xFFFFFFFF, text="PAGE"), "channel": 1}
+        assert mesh.handle_packet(conn, other_channel, GATEWAY) is None
         assert not conn.execute("SELECT 1 FROM messages WHERE direction = 'in'").fetchone()
+    assert radio.sent == []
+
+
+def test_page_from_the_channel_and_texts_copied_to_it(radio):
+    with connect() as conn:
+        eid = _escalated_event(conn)
+        posts = [s["text"] for s in radio.sent if s["to"] == mesh.BROADCAST_ID]
+        assert any(p.startswith("FIREWATCH FIRE") for p in posts), "the duty officer's alert is on the channel too"
+        radio.sent.clear()
+        pkt = {**_packet(DUTY_RADIO, "TEXT_MESSAGE_APP", text="Page"), "to": mesh.BROADCAST}
+        assert mesh.handle_packet(conn, pkt, GATEWAY) == "channel_text"
+        state = notify._state(conn.execute("SELECT * FROM events WHERE id = ?", (eid,)).fetchone())
+        assert state["decision"] == "page" and state["decision_by"] == "Lt. Ana Reyes (duty officer)"
+    dms = [s for s in radio.sent if s["to"] != mesh.BROADCAST_ID]
+    posts = [s["text"] for s in radio.sent if s["to"] == mesh.BROADCAST_ID]
+    assert any("Paged." in s["text"] and s["to"] == mesh.node_id(DUTY_RADIO) for s in dms)
+    assert "Firewatch: Paged. Dispatch and crews notified." in posts
+    assert len(posts) == len(set(posts)), "the same text to several radios is posted once"
 
 
 def test_fire_report_from_a_radio_uses_its_gps(radio):
@@ -114,7 +139,8 @@ def test_fire_report_from_a_radio_uses_its_gps(radio):
         assert ev["recommendation"] == "investigate", "an unregistered radio can't escalate alone"
         node = next(n for n in mesh.list_nodes(conn) if n["node_id"] == mesh.node_id(STRANGER))
         assert node["long_name"] == "Lease truck 3" and node["contact_id"] is None
-    assert radio.sent[-1]["to"] == mesh.node_id(STRANGER) and "report received" in radio.sent[-1]["text"]
+    dm = [s for s in radio.sent if s["to"] != mesh.BROADCAST_ID][-1]
+    assert dm["to"] == mesh.node_id(STRANGER) and "report received" in dm["text"]
 
 
 def test_stale_position_does_not_locate_a_report(radio):
@@ -135,10 +161,65 @@ def test_alert_lists_crew_positions(radio):
     assert crew[0]["mi"] > 0 and crew[0]["from_fire"]
 
 
+def _replay_with_radio(monkeypatch, reply: str | None, timeout_s: float) -> dict:
+    from app import scenario
+
+    real_sync = scenario.sync_roster
+
+    def sync(conn, district=None):
+        real_sync(conn, district)
+        conn.execute("UPDATE contacts SET mesh_id = ? WHERE phone = ?", (mesh.node_id(DUTY_RADIO), DUTY))
+
+    monkeypatch.setattr(scenario, "sync_roster", sync)
+    monkeypatch.setattr(scenario, "LIVE_REPLY_TIMEOUT_S", timeout_s)
+    monkeypatch.setattr(scenario, "LIVE_REPLY_POLL_S", 0.02)
+    seen: dict = {}
+
+    async def run():
+        task = asyncio.create_task(scenario._replay("cottonwood-creek", 0))
+        while "waiting" not in scenario._clock:
+            assert not task.done(), "the replay never held for the radio"
+            await asyncio.sleep(0.01)
+        seen["waiting"] = dict(scenario._clock["waiting"])
+        seen["t_min"] = scenario._clock["t_min"]
+        if reply:
+            def answer():
+                with connect() as conn:
+                    mesh.handle_packet(conn, _packet(DUTY_RADIO, "TEXT_MESSAGE_APP", text=reply), GATEWAY)
+
+            await asyncio.to_thread(answer)
+        await task
+
+    asyncio.run(run())
+    seen["status"] = scenario.status("cottonwood-creek")
+    with connect() as conn:
+        seen["pages_in"] = [dict(r) for r in conn.execute(
+            "SELECT phone, channel FROM messages WHERE direction = 'in' AND upper(body) = 'PAGE'"
+        )]
+    return seen
+
+
+def test_replay_holds_for_the_duty_officer_radio(radio, monkeypatch):
+    seen = _replay_with_radio(monkeypatch, reply="PAGE", timeout_s=30)
+    assert seen["t_min"] == 9 and seen["waiting"]["name"].startswith("Lt. Ana Reyes")
+    assert seen["waiting"]["mesh_id"] == mesh.node_id(DUTY_RADIO)
+    assert seen["pages_in"] == [{"phone": mesh.node_id(DUTY_RADIO), "channel": "mesh"}], "the script's PAGE was skipped"
+    page = next(m for m in seen["status"]["firewatch"] if m["key"] == "page")
+    assert page["t"] == 9, "the clock held, so the page lands on the scenario's timeline"
+    assert seen["status"]["waiting"] is None
+
+
+def test_replay_plays_the_script_if_nobody_answers(radio, monkeypatch):
+    seen = _replay_with_radio(monkeypatch, reply=None, timeout_s=0.1)
+    assert seen["pages_in"] == [{"phone": DUTY, "channel": "sms"}]
+    assert next(m for m in seen["status"]["firewatch"] if m["key"] == "page")["t"] == 9
+
+
 def test_no_radio_plugged_in_is_mesh_down_not_exit(monkeypatch):
     import meshtastic.util
 
     monkeypatch.setenv("MESH_GATEWAY", "serial")
+    monkeypatch.setenv("MESH_DEVICE", "")
     from app.config import get_settings
 
     get_settings.cache_clear()

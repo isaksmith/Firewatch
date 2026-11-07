@@ -115,7 +115,7 @@ export function TopBar({ onRunScenario, scenarioRunning }: { onRunScenario?: () 
         )}
         {mode === 'sample' && (
           <button onClick={() => replay.mutate()} disabled={replay.isPending || health.data?.replay_running} className="btn !h-6">
-            <Play size={11} /> {health.data?.replay_running ? 'Replaying' : 'Replay'}
+            <Play size={11} /> {health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}
           </button>
         )}
         {mode === 'live' && (

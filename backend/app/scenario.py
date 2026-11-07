@@ -9,7 +9,7 @@ from functools import lru_cache
 
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
-from .db import connect, iso, loads, parse_iso
+from .db import connect, iso, loads, parse_iso, utcnow
 from .district import load_district, sync_roster
 from .fire_weather import default_curing, gfdi, gfdi_band
 from .notify import handle_inbound, tick
@@ -21,8 +21,12 @@ log = logging.getLogger(__name__)
 SCENARIOS_DIR = DATA_DIR / "scenarios"
 HA_PER_ACRE = 0.404686
 
+LIVE_REPLY_TIMEOUT_S = 90
+LIVE_REPLY_POLL_S = 0.5
+LIVE_ANSWERS = {"PAGE": ("PAGE", "NO")}  # the person may decide differently from the script
+
 _task: asyncio.Task | None = None
-_clock: dict = {}  # slug, t_min, running
+_clock: dict = {}  # slug, t_min, running, waiting
 
 
 def load_scenario(slug: str) -> dict:
@@ -66,13 +70,70 @@ def _apply(conn, sc: dict, step: dict, now: datetime) -> None:
     conn.execute("UPDATE events SET sample_slug = ? WHERE is_sample = 1 AND sample_slug IS NULL", (sc["slug"],))
 
 
-def _minute(conn, sc: dict, t: int) -> None:
+def _minute(conn, sc: dict, t: int, skip: tuple[dict, ...] = ()) -> None:
     t0 = parse_iso(sc["t0"])
     now = t0 + timedelta(minutes=t)
     for step in sc["timeline"]:
-        if step["t"] == t:
+        if step["t"] == t and not any(step is s for s in skip):
             _apply(conn, sc, step, now)
     tick(conn, now, is_sample=True)
+
+
+def _live_radio_steps(conn, sc: dict, t: int) -> list[tuple[dict, dict]]:
+    """Scripted texts at minute t from contacts carrying a radio the station can reach: a person answers those."""
+    from . import mesh
+
+    bridge = mesh.get_bridge()
+    if bridge is None or not bridge.connected:
+        return []
+    out = []
+    for step in sc["timeline"]:
+        if step["t"] == t and step["type"] == "sms":
+            c = conn.execute(
+                "SELECT id, name, mesh_id FROM contacts WHERE phone = ? AND mesh_id IS NOT NULL", (step["from"],)
+            ).fetchone()
+            if c:
+                out.append((step, dict(c)))
+    return out
+
+
+def _last_alert_id(conn, contact_id: int) -> int:
+    r = conn.execute(
+        "SELECT MAX(id) m FROM messages WHERE contact_id = ? AND direction = 'out' AND purpose != 'reply'", (contact_id,)
+    ).fetchone()
+    return r["m"] or 0
+
+
+def _answered(contact_id: int, words: tuple[str, ...], after_id: int) -> bool:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT body FROM messages WHERE id > ? AND direction = 'in' AND contact_id = ?", (after_id, contact_id)
+        ).fetchall()
+    return any((r["body"].strip().upper().split() or [""])[0] in words for r in rows)
+
+
+async def _await_live_reply(sc: dict, t: int, step: dict, contact: dict, after_id: int) -> None:
+    word = step["body"].strip().upper().split()[0]
+    words = LIVE_ANSWERS.get(word, (word,))
+    _clock["waiting"] = {
+        "name": contact["name"], "reply": word, "mesh_id": contact["mesh_id"],
+        "until": iso(utcnow() + timedelta(seconds=LIVE_REPLY_TIMEOUT_S)),
+    }
+    try:
+        for _ in range(int(LIVE_REPLY_TIMEOUT_S / LIVE_REPLY_POLL_S)):
+            if await asyncio.to_thread(_answered, contact["id"], words, after_id):
+                log.info("scenario: %s answered on the radio", contact["name"])
+                return
+            await asyncio.sleep(LIVE_REPLY_POLL_S)
+        log.info("scenario: no radio reply from %s; playing the scripted %s", contact["name"], word)
+
+        def fallback():
+            with connect() as conn:
+                _apply(conn, sc, step, parse_iso(sc["t0"]) + timedelta(minutes=t))
+
+        await asyncio.to_thread(fallback)
+    finally:
+        _clock.pop("waiting", None)
 
 
 def _pre_steps(sc: dict) -> list[int]:
@@ -103,17 +164,24 @@ async def _replay(slug: str, seconds_per_minute: float) -> None:
 
     await asyncio.to_thread(setup)
     _clock.update(slug=slug, t_min=-1, running=True)
+    _clock.pop("waiting", None)
     try:
         for t in range(sc["duration_min"] + 1):
             def step(t=t):
                 with connect() as conn:
-                    _minute(conn, sc, t)
+                    live = _live_radio_steps(conn, sc, t)
+                    _minute(conn, sc, t, skip=tuple(s for s, _ in live))
+                    # a reply counts from the last alert sent to that person, which may be minutes before
+                    return [(s, c, _last_alert_id(conn, c["id"])) for s, c in live]
 
-            await asyncio.to_thread(step)
+            live = await asyncio.to_thread(step)
             _clock["t_min"] = t
+            for s, contact, after_id in live:
+                await _await_live_reply(sc, t, s, contact, after_id)
             await asyncio.sleep(seconds_per_minute)
     finally:
         _clock["running"] = False
+        _clock.pop("waiting", None)
     log.info("scenario %s finished", slug)
 
 
@@ -218,6 +286,10 @@ def status(slug: str) -> dict:
         "weather": {**w, "curing_pct": curing, "gfdi": round(g, 1), "gfdi_band": gfdi_band(g)},
         "running": running,
         "t_min": _clock.get("t_min") if _clock.get("slug") == slug else None,
+        "waiting": (
+            {**w_, "seconds_left": max(0, round((parse_iso(w_["until"]) - utcnow()).total_seconds()))}
+            if running and (w_ := _clock.get("waiting")) else None
+        ),
         "baseline": sc["baseline"]["milestones"],
         "firewatch": firewatch,
         "size_on_scene": {"baseline": size_at(base_on_scene), "firewatch": size_at(fw_on_scene)},

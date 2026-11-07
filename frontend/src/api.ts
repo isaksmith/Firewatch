@@ -185,6 +185,7 @@ export interface ScenarioStatus {
   weather: { wind_kmh: number; wind_dir_deg: number; rh_pct: number; temp_c: number; gfdi: number; gfdi_band: string }
   running: boolean
   t_min: number | null
+  waiting: { name: string; reply: string; mesh_id: string; until: string; seconds_left: number } | null
   baseline: Milestone[]
   firewatch: Milestone[]
   size_on_scene: { baseline: { acres: number; head_mi: number } | null; firewatch: { acres: number; head_mi: number } | null }
