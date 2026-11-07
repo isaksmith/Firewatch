@@ -194,6 +194,38 @@ def test_failed_send_does_not_count_so_a_repeat_retries(monkeypatch):
     assert len(sent) == 1 and "being told" in b["reply"]
 
 
+def test_a_tag_quoted_in_another_senders_body_does_not_suppress_their_fyi():
+    # The dedupe key used to match anywhere in the body, so this text silenced the victim for an hour.
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, "+13165559993", "FIRE from +13165559992 at", NOW, at=FAR, is_sample=True)
+        b = notify.handle_inbound(conn, "+13165559992", "FIRE", NOW + timedelta(minutes=1), at=FAR, is_sample=True)
+        assert len(_outside(conn)) == 2
+    assert "being told" in b["reply"]
+
+
+def test_an_acked_mesh_fyi_still_counts_for_the_dedupe():
+    # mesh._ack rewrites status, so a status = 'sent' match let acked FYIs drop out of the cap.
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, "+13165559992", "FIRE", NOW, at=FAR, is_sample=True)
+        for status in ("relayed", "delivered"):
+            conn.execute("UPDATE messages SET channel = 'mesh', status = ? WHERE purpose = 'duty_fyi_outside'", (status,))
+            b = notify.handle_inbound(conn, "+13165559992", "FIRE", NOW + timedelta(minutes=1), at=FAR, is_sample=True)
+            assert len(_outside(conn)) == 1
+            assert b["reply"] == EARLIER
+
+
+def test_an_unacked_mesh_fyi_does_not_suppress_a_retry():
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, "+13165559992", "FIRE", NOW, at=FAR, is_sample=True)
+        conn.execute("UPDATE messages SET channel = 'mesh' WHERE purpose = 'duty_fyi_outside'")
+        b = notify.handle_inbound(conn, "+13165559992", "FIRE", NOW + timedelta(minutes=1), at=FAR, is_sample=True)
+        assert len(_outside(conn)) == 2
+    assert "being told" in b["reply"]
+
+
 def test_fyi_follows_the_event_position_not_the_report_point():
     # A report just outside the boundary that joins an in-district event: no FYI.
     with connect() as conn:

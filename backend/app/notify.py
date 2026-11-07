@@ -542,16 +542,19 @@ def handle_inbound(
                 # The ladder only alerts for in-district events, so tell the duty officer directly.
                 # event_id=None and a purpose outside DECIDERS keep the text from being a PAGE/NO target,
                 # and nothing is written to the event. Dedupe is per sender over a window, not per event.
-                tag = f" from {phone} at "
+                # The prefix is matched from the start of the body, so text a sender writes can never match it.
+                # A mesh row counts only once a radio acked it; an unacked one must not block a retry.
+                prefix = f"FIREWATCH report outside district from {phone} at "
                 recent = conn.execute(
-                    "SELECT 1 FROM messages WHERE direction = 'out' AND purpose = 'duty_fyi_outside' AND status = 'sent' "
-                    "AND is_sample = ? AND created_at > ? AND created_at <= ? AND instr(body, ?) > 0 LIMIT 1",
-                    (int(is_sample), iso(now - timedelta(minutes=OUTSIDE_FYI_WINDOW_MIN)), iso(now), tag),
+                    "SELECT 1 FROM messages WHERE direction = 'out' AND purpose = 'duty_fyi_outside' "
+                    "AND ((channel = 'sms' AND status = 'sent') OR status IN ('relayed', 'delivered')) "
+                    "AND is_sample = ? AND created_at > ? AND created_at <= ? AND substr(body, 1, ?) = ? LIMIT 1",
+                    (int(is_sample), iso(now - timedelta(minutes=OUTSIDE_FYI_WINDOW_MIN)), iso(now), len(prefix), prefix),
                 ).fetchone()
                 if recent:
                     reply = "Firewatch: your earlier report already went to the duty officer. Call 911 if anyone is in danger."
                 else:
-                    fyi = f"FIREWATCH report outside district{tag}{here[0]:.4f},{here[1]:.4f}: {body.strip()}"
+                    fyi = f"{prefix}{here[0]:.4f},{here[1]:.4f}: {body.strip()}"
                     for c in _ladder(conn):
                         sent = send(conn, c, fyi[:SMS_MAX], "duty_fyi_outside", None, now, is_sample)
                         if sent and sent["status"] == "sent":
