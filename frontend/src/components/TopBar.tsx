@@ -90,6 +90,7 @@ export function TopBar({
           [
             ['/', 'Console'],
             ['/planner', 'Planner'],
+            ['/board', 'Board'],
           ] as const
         ).map(([to, label]) => (
           <NavLink

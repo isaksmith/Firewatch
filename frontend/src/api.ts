@@ -425,3 +425,110 @@ export const api = {
     return request<RegionPlan>(`/planner/plan?${q}`)
   },
 }
+
+// ---- Community board ----
+
+const DEVICE_KEY = 'firewatch.device'
+
+export function getDeviceToken(): string | null {
+  try {
+    return localStorage.getItem(DEVICE_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setDeviceToken(token: string) {
+  try {
+    localStorage.setItem(DEVICE_KEY, token)
+  } catch {
+    /* storage blocked: the page still works without it */
+  }
+}
+
+export type BoardCategory = 'fire' | 'smoke' | 'hazard' | 'burn' | 'other'
+export type ConfirmKind = 'see' | 'not_seeing' | 'burn'
+export type StationAction = 'ack' | 'send' | 'page' | 'dismiss' | 'resolve'
+
+export interface BoardMe {
+  name: string | null
+  role: string | null
+  member: boolean
+  station: boolean
+}
+
+export interface BoardPost {
+  id: number
+  category: string
+  body: string
+  lat: number | null
+  lon: number | null
+  estimated: boolean
+  hearsay: boolean
+  flagged: boolean
+  status: string
+  parent_id: number | null
+  event_id: number | null
+  created_at: string
+  author: string | null
+  confirms: number
+  notes: string[] | null
+  badge: string | null
+  held?: boolean
+  event_status?: string | null
+}
+
+export interface PostResult {
+  post_id: number
+  event_id: number | null
+  flagged: boolean
+  asked: number
+  known: boolean
+}
+
+export interface ConfirmResult {
+  ok: boolean
+  reason: string
+  counted: boolean
+  count: number
+  event_id: number | null
+  level: string | null
+}
+
+export class BoardError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
+async function boardRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = getDeviceToken()
+  if (token) headers['X-Firewatch-Device'] = token
+  const res = await fetch(`${BASE}/board${path}`, { ...init, headers })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new BoardError(typeof body.detail === 'string' ? body.detail : `${res.status} ${res.statusText}`, res.status)
+  }
+  return res.json() as Promise<T>
+}
+
+/** Create a device token the first time someone posts or confirms. */
+export async function ensureDevice(): Promise<void> {
+  if (getDeviceToken()) return
+  const r = await boardRequest<{ token: string }>('/device', { method: 'POST' })
+  setDeviceToken(r.token)
+}
+
+export const boardApi = {
+  me: () => boardRequest<BoardMe>('/me'),
+  posts: () => boardRequest<BoardPost[] | { items: BoardPost[] }>('/posts'),
+  post: (b: { category: BoardCategory; body: string; lat: number | null; lon: number | null }) =>
+    boardRequest<PostResult>('/posts', { method: 'POST', body: JSON.stringify(b) }),
+  confirm: (id: number, b: { kind: ConfirmKind; lat: number | null; lon: number | null }) =>
+    boardRequest<ConfirmResult>(`/posts/${id}/confirm`, { method: 'POST', body: JSON.stringify(b) }),
+  station: (id: number, action: StationAction) =>
+    boardRequest<unknown>(`/posts/${id}/station`, { method: 'POST', body: JSON.stringify({ action }) }),
+}
