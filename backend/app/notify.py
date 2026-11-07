@@ -34,6 +34,7 @@ HA_PER_ACRE = 0.404686
 HELPER_ROLES = ("water_truck", "disc")
 HELPER_RADIUS_KM = 10.0
 PLAN_MINUTES = 60
+OUTSIDE_FYI_WINDOW_MIN = 60
 DECIDERS = ("duty_fyi", "duty_escalate", "ladder", "mutual_aid_draft")
 
 
@@ -539,15 +540,21 @@ def handle_inbound(
             ev = _event(conn, eid)
             if not d.contains(ev["lat"], ev["lon"]):
                 # The ladder only alerts for in-district events, so tell the duty officer directly.
-                # event_id=None keeps the text from ever being a PAGE/NO decision target; one text per event.
-                state = _state(ev)
-                if not state.get("outside_fyi"):
-                    fyi = f"FIREWATCH report outside district from {phone} at {here[0]:.4f},{here[1]:.4f}: {body.strip()}"
+                # event_id=None and a purpose outside DECIDERS keep the text from being a PAGE/NO target,
+                # and nothing is written to the event. Dedupe is per sender over a window, not per event.
+                tag = f" from {phone} at "
+                recent = conn.execute(
+                    "SELECT 1 FROM messages WHERE direction = 'out' AND purpose = 'duty_fyi_outside' AND status = 'sent' "
+                    "AND is_sample = ? AND created_at > ? AND created_at <= ? AND instr(body, ?) > 0 LIMIT 1",
+                    (int(is_sample), iso(now - timedelta(minutes=OUTSIDE_FYI_WINDOW_MIN)), iso(now), tag),
+                ).fetchone()
+                if recent:
+                    reply = "Firewatch: your earlier report already went to the duty officer. Call 911 if anyone is in danger."
+                else:
+                    fyi = f"FIREWATCH report outside district{tag}{here[0]:.4f},{here[1]:.4f}: {body.strip()}"
                     for c in _ladder(conn):
-                        sent = send(conn, c, fyi[:SMS_MAX], "duty_fyi", None, now, is_sample)
+                        sent = send(conn, c, fyi[:SMS_MAX], "duty_fyi_outside", None, now, is_sample)
                         if sent and sent["status"] == "sent":
-                            state["outside_fyi"] = True
-                            _save(conn, eid, state)
                             break
                     else:
                         reply = "Firewatch: report received but no duty officer could be reached. Call 911 if anyone is in danger."

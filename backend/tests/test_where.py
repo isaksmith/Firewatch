@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 
 from app import notify
@@ -82,7 +84,7 @@ def test_report_without_bearing_behaves_as_before():
 
 
 def _fyi(conn):
-    return conn.execute("SELECT * FROM messages WHERE direction = 'out' AND purpose = 'duty_fyi'").fetchall()
+    return conn.execute("SELECT * FROM messages WHERE direction = 'out' AND purpose = 'duty_fyi_outside'").fetchall()
 
 
 def test_report_outside_the_district_goes_to_the_duty_officer_directly():
@@ -111,7 +113,7 @@ FAR = (45.0, -90.0)
 
 
 def _outside(conn):
-    return [m for m in _fyi(conn) if "outside district" in m["body"]]
+    return _fyi(conn)
 
 
 def _duty(conn):
@@ -130,14 +132,66 @@ def test_outside_fyi_is_never_a_decision_target():
         assert _outside(conn) and all(m["event_id"] is None for m in _outside(conn))
 
 
-def test_outside_fyi_sent_once_per_event():
+class _FailingGateway:
+    name = "fail"
+
+    def send(self, to, body):
+        raise notify.httpx.ConnectError("down")
+
+
+EARLIER = "Firewatch: your earlier report already went to the duty officer. Call 911 if anyone is in danger."
+
+
+def test_outside_report_never_makes_the_event_a_page_target():
+    with connect() as conn:
+        sync_roster(conn)
+        r = notify.handle_inbound(conn, "+13165559992", "FIRE", NOW, at=FAR, is_sample=True)
+        eid = r["event_id"]
+        ladder = notify._ladder(conn)
+        member = ladder[1]
+        assert not conn.execute("SELECT 1 FROM messages WHERE contact_id = ? AND purpose IN ('duty_fyi','duty_escalate','ladder','mutual_aid_draft')", (member["id"],)).fetchone()
+        out = notify.handle_inbound(conn, member["phone"], "PAGE", NOW, is_sample=True)
+        assert out["event_id"] != eid and out["action"] == "help"
+        assert conn.execute("SELECT response_json FROM events WHERE id = ?", (eid,)).fetchone()["response_json"] is None
+
+
+def test_same_sender_inside_an_hour_gets_one_fyi_and_an_honest_reply():
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, "+13165559992", "FIRE", NOW, at=FAR, is_sample=True)
+        b = notify.handle_inbound(conn, "+13165559992", "FIRE", NOW + timedelta(minutes=59), at=FAR, is_sample=True)
+        assert len(_outside(conn)) == 1
+    assert b["reply"] == EARLIER and len(b["reply"]) <= notify.SMS_MAX
+
+
+def test_same_sender_after_an_hour_gets_a_second_fyi():
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, "+13165559992", "FIRE", NOW, at=FAR, is_sample=True)
+        b = notify.handle_inbound(conn, "+13165559992", "FIRE", NOW + timedelta(minutes=61), at=FAR, is_sample=True)
+        assert len(_outside(conn)) == 2
+    assert "being told" in b["reply"]
+
+
+def test_different_senders_on_one_event_each_get_through():
     with connect() as conn:
         sync_roster(conn)
         a = notify.handle_inbound(conn, "+13165559992", "FIRE", NOW, at=FAR, is_sample=True)
         b = notify.handle_inbound(conn, "+13165559993", "FIRE", NOW, at=FAR, is_sample=True)
         assert a["event_id"] == b["event_id"]
-        assert len(_outside(conn)) == 1
-        assert "being told" in b["reply"]
+        assert len(_outside(conn)) == 2
+    assert "being told" in b["reply"]
+
+
+def test_failed_send_does_not_count_so_a_repeat_retries(monkeypatch):
+    with connect() as conn:
+        sync_roster(conn)
+        monkeypatch.setattr(notify, "gateway_for", lambda s: _FailingGateway())
+        notify.handle_inbound(conn, "+13165559992", "FIRE", NOW, at=FAR, is_sample=True)
+        monkeypatch.undo()
+        b = notify.handle_inbound(conn, "+13165559992", "FIRE", NOW + timedelta(minutes=1), at=FAR, is_sample=True)
+        sent = [m for m in _outside(conn) if m["status"] == "sent"]
+    assert len(sent) == 1 and "being told" in b["reply"]
 
 
 def test_fyi_follows_the_event_position_not_the_report_point():
@@ -165,13 +219,6 @@ def test_fyi_skips_events_whose_averaged_position_is_inside(monkeypatch):
         monkeypatch.setattr("app.signals.add_signal", lambda *a_, **k: a["event_id"])
         notify.handle_inbound(conn, "+13165559992", "FIRE", NOW, at=FAR, is_sample=True)
         assert _outside(conn) == []
-
-
-class _FailingGateway:
-    name = "fail"
-
-    def send(self, to, body):
-        raise notify.httpx.ConnectError("down")
 
 
 def test_outside_reply_is_honest_when_every_send_fails(monkeypatch):
