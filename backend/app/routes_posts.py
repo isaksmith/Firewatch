@@ -13,6 +13,7 @@ from .db import connect, iso, utcnow
 from .confirm import evaluate_event
 from .district import LADDER_ROLES, load_district
 from .keywords import classify
+from .ratelimit import LIMITS, client_ip
 
 public_router = APIRouter()
 admin_router = APIRouter()
@@ -24,6 +25,24 @@ BADGE = "Fire department is aware. Call 911 if you are in danger."
 def _clock():
     replay = scenario.running_now()
     return replay or utcnow(), replay is not None or get_settings().mode == "sample"
+
+
+def _limit(request: Request, name: str, contact=None):
+    """Rate limit for the public app only (it sets app.state.limiter). Keys on the contact only once the token is verified."""
+    lim = getattr(request.app.state, "limiter", None)
+    if lim is None:
+        return
+    ip = client_ip(request)
+    keys = {"ip": f"{name}:ip:{ip}", "global": f"{name}:global"}
+    if contact is not None:
+        keys["device"] = f"{name}:dev:{contact['id']}"
+    hits = [(keys[sc], n, w) for sc, n, w in LIMITS[name] if sc in keys]
+    wait = lim.check(hits)
+    if wait is not None:
+        msg = "Too many requests. Try again shortly."
+        if name.startswith(("post", "confirm")):
+            msg = "Too many reports from this device. If there is a fire, call 911."
+        raise HTTPException(429, msg, headers={"Retry-After": str(wait)})
 
 
 def _hash(token: str) -> str:
@@ -93,7 +112,8 @@ class Confirm(_Where):
 
 
 @public_router.post("/board/device")
-def new_device():
+def new_device(request: Request):
+    _limit(request, "device")
     token = secrets.token_urlsafe(32)
     h = _hash(token)
     now = iso(utcnow())
@@ -104,7 +124,8 @@ def new_device():
 
 
 @public_router.get("/board/me")
-def me(x_firewatch_device: str = Header(default="")):
+def me(request: Request, x_firewatch_device: str = Header(default="")):
+    _limit(request, "read")
     with connect() as conn:
         c = _need(conn, x_firewatch_device)
         return {"name": c["name"], "role": c["role"], "member": bool(c["registered"]), "station": c["role"] in STATION_ROLES}
@@ -145,7 +166,8 @@ def _list(conn, now, is_sample: bool, station: bool) -> list[dict]:
 
 
 @public_router.get("/board/posts")
-def list_posts(x_firewatch_device: str = Header(default="")):
+def list_posts(request: Request, x_firewatch_device: str = Header(default="")):
+    _limit(request, "read")
     now, is_sample = _clock()
     with connect() as conn:
         c = _device(conn, x_firewatch_device)
@@ -161,17 +183,18 @@ def admin_posts():
 
 
 @public_router.post("/board/posts")
-def create_post(body: NewPost, x_firewatch_device: str = Header(default="")):
+def create_post(body: NewPost, request: Request, x_firewatch_device: str = Header(default="")):
     now, is_sample = _clock()
     with connect() as conn:
         c = _need(conn, x_firewatch_device)
+        _limit(request, "post_member" if c["registered"] or c["role"] in STATION_ROLES else "post_anon", c)
         # With no GPS fix a member's report still sounds the alarm from their home, marked as an estimate: an alarm
         # placed roughly beats no alarm. The page tells them, so they are never told it has no location.
         used_home = body.attach_location and body.lat is None and c["lat"] is not None
         r = posts.create(conn, c, c["phone"], body.body, body.category, classify(body.body).hearsay, now, is_sample,
                          channel="web", at=(body.lat, body.lon) if body.lat is not None and body.attach_location else None,
                          estimated=body.estimated or used_home, use_home=body.attach_location)
-    return {"post_id": r["post_id"], "event_id": r["event_id"], "flagged": r["flagged"], "asked": r["asked"], "known": r.get("known", False),
+    return {"post_id": r["post_id"], "flagged": r["flagged"], "asked": r["asked"], "known": r.get("known", False),
             "used_home": used_home}
 
 
@@ -180,8 +203,10 @@ def confirm_post(post_id: int, body: Confirm, request: Request, x_firewatch_devi
     now, is_sample = _clock()
     with connect() as conn:
         c = _need(conn, x_firewatch_device)
-        ip = None if c["registered"] else _hash(request.client.host if request.client else "")
-        return posts.confirm(conn, post_id, c, body.kind, now, is_sample, "web", body.lat, body.lon, ip_hash=ip)
+        _limit(request, "confirm", c)
+        ip = None if c["registered"] else _hash(client_ip(request))
+        r = posts.confirm(conn, post_id, c, body.kind, now, is_sample, "web", body.lat, body.lon, ip_hash=ip)
+    return {k: v for k, v in r.items() if k not in ("event_id", "level")}
 
 
 class StationIn(BaseModel):
@@ -265,10 +290,11 @@ def _station(conn, post_id: int):
 
 
 @public_router.post("/board/posts/{post_id}/station")
-def station(post_id: int, body: StationIn, x_firewatch_device: str = Header(default="")):
+def station(post_id: int, body: StationIn, request: Request, x_firewatch_device: str = Header(default="")):
     now, is_sample = _clock()
     with connect() as conn:
         c = _need(conn, x_firewatch_device)
+        _limit(request, "station", c)
         if c["role"] not in STATION_ROLES:
             raise HTTPException(403, "Station only")
         return station_action(conn, _station(conn, post_id), body.action, c["name"], c["role"], now, is_sample)

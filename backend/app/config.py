@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     mesh_device: str = ""  # serial port (first Meshtastic port when blank) or the radio's host for tcp
     mesh_channel_index: int = 0
     scenario_seconds_per_minute: float = 2.0
+    forwarded_ip_header: str = ""  # e.g. cf-connecting-ip; trusted only from a loopback peer
     api_token: str = ""  # when set, required (X-Firewatch-Token) on endpoints that can text people
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 

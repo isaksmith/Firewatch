@@ -103,6 +103,15 @@ cp .env.example .env            # add FIRMS_MAP_KEY for MODE=live; MODE=sample w
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/uvicorn app.main:app --reload --port 8000
+```
+
+Public board (the only thing a tunnel may point at). The tunnel points at port 8012 and never at the main API or Vite. The main server must also run for timers and alerts. Set `FORWARDED_IP_HEADER` (for example `cf-connecting-ip`) so rate limits see the visitor, not the tunnel. Run `npm run build` in frontend first.
+
+```
+.venv/bin/uvicorn app.public_app:app --host 127.0.0.1 --port 8012
+```
+
+```
 .venv/bin/pytest                 # tests
 
 # frontend (http://localhost:5173)
