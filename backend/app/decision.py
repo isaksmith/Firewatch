@@ -145,20 +145,17 @@ def probability(evidence: list[dict], danger: str, w: dict, sat_score: int | Non
         for _, f in discount:
             mult *= f
         p0 = min(0.9, w["line_fault_base_rate"] * mult)
-        if "danger_multiplier" in _fitted():
-            rr = w["danger_multiplier"].get(danger, 1.0)
-            how = f"fire-day model: {rr:g}x the fire starts of a High day, ^{w['danger_exponent']:g} per line fault"
-        else:
-            how = "assumed"
+        m = fire_day_model() if "danger_multiplier" in _fitted() else None
+        how = f"fitted from {m['data']['fires_used']} Kansas wildfires" if m else "assumed"
         how += "".join(f"; x{f:g} for a {why}" for why, f in discount)
-        steps.append({"text": f"{first['label']}: base rate {w['line_fault_base_rate']:.0%} x{mult:.2g} for {danger} danger ({how})",
-                      "p": p0})
+        steps.append({"text": f"{first['label']}: about {w['line_fault_base_rate']:.0%} of line lockouts start a fire, "
+                              f"x{mult:.2g} for {danger} fire danger ({how})", "p": p0})
     elif first is not None:
         p0 = w["satellite_prior"]
-        steps.append({"text": f"Satellite detections in Kansas: base rate {p0:.0%}", "p": p0})
+        steps.append({"text": f"Satellite hotspot: starting chance {p0:.0%} (most Kansas hotspots are planned burns)", "p": p0})
     else:
         p0 = w["other_prior"]
-        steps.append({"text": f"No line or satellite signal: base rate {p0:.0%}", "p": p0})
+        steps.append({"text": f"First report, no line or satellite signal: starting chance {p0:.0%}", "p": p0})
     odds = _odds(p0)
 
     for e in items:
@@ -180,7 +177,7 @@ def _likelihood_ratio(e: dict, w: dict) -> tuple[float, str]:
         if not m:
             return 1.0, ""
         s = min(max(int(m.group(1)), 1), 99)
-        return s / (100 - s), f" (score {s} = x{s / (100 - s):.2g} on the scorer's even prior)"
+        return s / (100 - s), ""
     if kind == "line_fault":
         return (w["lr_line_fault"], "") if counts == "yes" else (1.0, "")
     if kind == "neighbor_reply":

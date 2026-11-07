@@ -105,7 +105,8 @@ In acres the district would accept burning to avoid it. These are **the chief's 
   Once two independent sources agree, the "wait to confirm" options drop out and "heads-up only" replaces them.
 - **"Do we need mutual aid?"** (after the page) considers request now, wait for Brush 1's size-up, or don't request.
 - The three lowest expected losses are shown, and the lowest is recommended.
-- **Break-even.** The card says at what P(fire) the runner-up would win: "That flips if P(fire) falls below 33%." This is the most useful sentence on the card. It tells the dispatcher how much the recommendation depends on the evidence being right.
+- **Past the 911 call.** "Watch" assumes today's 911 call pages the district at minute 31. Once a fire is older than that (a satellite often first sees a fire hours in), waiting and paging reach the same outcome only because the model assumes the call was made. So the option becomes **"Confirm 911 has paged; don't page twice"**: call county dispatch, and page if nobody did. "Warn downwind stations; don't page yet" changes the same way. Nothing checks that the call happened.
+- **Break-even.** The card says at what P(fire) the runner-up would win: "That flips if the chance of fire falls below 33%." When the top two options are within 5% of each other, the card says "Close call" instead, so a near-tie never reads as a clear winner. This is the most useful sentence on the card. It tells the dispatcher how much the recommendation depends on the evidence being right.
 - A person chooses. Every choice runs through the real paths (paging, texts, mutual aid), is logged with who chose it and whether it followed the recommendation, and can't be repeated by accident.
 
 ## Worked example: Cottonwood Creek (the packet scenario)
@@ -116,9 +117,9 @@ Red-flag Tuesday, south wind 35 mph gusting 55+, RH 11%, Extreme fire danger. A 
 
 | Option | If it's a fire | If it's not | Expected loss |
 |---|---|---|---|
-| **Heads-up downwind + wait for neighbors ✓** | ~358 ac when mutual aid arrives (2:28; heads-up given) | 1 text (3 ac-eq) | **~48** |
+| **Warn downwind stations + wait for neighbors ✓** | ~358 ac when mutual aid arrives (2:28; heads-up given) | 1 text (3 ac-eq) | **~48** |
 | Wait for the neighbors' answers | ~602 ac (2:38) | nothing | ~76 |
-| Heads-up downwind + recheck on the next pass | ~960 ac (2:50) | 1 text | ~124 |
+| Warn downwind stations + recheck on the next satellite pass | ~960 ac (2:50) | 1 text | ~124 |
 
 *Why:* paging on one signal costs 100+ ac-equivalent 87% of the time. A heads-up to Mullinville FD, which the fire could reach in ~42 min, costs almost nothing and saves ~10 min on mutual aid if it is real.
 
@@ -127,10 +128,10 @@ Red-flag Tuesday, south wind 35 mph gusting 55+, RH 11%, Extreme fire danger. A 
 | Option | If it's a fire | If it's not | Expected loss |
 |---|---|---|---|
 | **Page the district now ✓** | ~358 ac (2:28) | 18 volunteers + a neighbor's crew (~353 ac-eq) | **~357** |
-| Heads-up downwind only; don't page yet | ~1,073 ac (2:53) | 1 text | ~798 |
+| Warn downwind stations; don't page yet | ~1,073 ac (2:53) | 1 text | ~798 |
 | Watch; don't page yet | ~1,459 ac (3:03) | nothing | ~1,084 |
 
-*That flips if P(fire) falls below 33%.* In the replay, the duty officer pages at minute 9.
+*That flips if the chance of fire falls below 33%.* In the replay, the duty officer pages at minute 9.
 
 **Minute 9: paged. "Do we need mutual aid?"**
 
@@ -159,7 +160,7 @@ Michael's confirmation rules set the level from independent sources: none → Mo
 
 - If **"Page" has the lowest expected loss**, the alert becomes **Escalate**.
 - If an alert at Monitor has **asking or a heads-up** as its lowest-loss option, it becomes **Investigate**.
-- The reason line says so, e.g. "Investigate: high stakes. 'Heads-up downwind + recheck on the next pass' has the lowest expected loss (P(fire) 3%, ~25 ac-eq)".
+- The reason line says so, e.g. "Investigate: high stakes. 'Warn downwind stations + recheck on the next satellite pass' has the lowest expected loss (P(fire) 3%, ~25 ac-eq)".
 
 **Only when P(fire) is at least 2%** (`promote_min_p`). Raising a level sends texts automatically, and line faults are common on windy days; below 2% that would be alarm fatigue.
 

@@ -63,7 +63,7 @@ def test_minute_0_line_fault_recommends_a_heads_up_and_waiting_for_neighbors():
         assert any("Mullinville" in e for e in opts[0]["effects"]), "the station north of a south-wind fire is in its path"
 
         p = client.post(f"/api/alerts/{eid}/options/heads_up_ask", json={"operator": "Dispatch 1"}).json()
-        assert p["receipts"][0]["title"].startswith("Heads-up downwind")
+        assert p["receipts"][0]["title"].startswith("Warn downwind stations")
         assert p["receipts"][0]["followed_recommendation"] is True
         with connect() as conn:
             to = [r["name"] for r in conn.execute(
@@ -79,7 +79,7 @@ def test_minute_8_neighbor_confirms_and_paging_wins():
         p = client.get(f"/api/alerts/{eid}/options").json()
         assert p["probability"]["p"] > 0.5
         best = p["decision"]["options"][0]
-        assert best["id"] == "page" and "flips if P(fire) falls below" in best["why"]
+        assert best["id"] == "page" and "flips if the chance of fire falls below" in best["why"]
         assert not any(o["id"] in ("ask", "heads_up_ask") for o in p["decision"]["options"]), "no waiting to confirm a confirmed fire"
 
 
@@ -199,3 +199,16 @@ def test_building_sites_in_the_path_count_in_the_loss():
         fire = next(m["value"] for m in recheck["metrics"] if m["label"] == "If it's a fire")
         assert "building site" in fire
         assert {m["key"] for m in client_options["model"]} >= {"cost_site_acres"}
+
+
+def test_past_the_911_call_waiting_is_labeled_as_relying_on_911():
+    with TestClient(app) as client:
+        scenario.run_now("cottonwood-creek-packet-no-fault", until=36)  # no line fault: nothing pages before minute 41
+        eid = scenario.status("cottonwood-creek-packet-no-fault")["events"][0]["id"]
+        d = client.get(f"/api/alerts/{eid}/options").json()["decision"]
+        titles = [o["title"] for o in d["options"]]
+        assert "Watch; don't page yet" not in titles, "past the 911 call, 'watch' only ties paging by assuming a call was made"
+        assert any(o["id"] in ("watch", "heads_up_only") for o in d["options"]), titles
+        for o in d["options"]:
+            if o["id"] in ("watch", "heads_up_only"):
+                assert "911" in o["title"] and any("county dispatch" in e for e in o["effects"])

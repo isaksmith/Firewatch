@@ -187,16 +187,16 @@ class Fire:
 
 def risk_context(f: Fire) -> list[str]:
     """What makes this fire dangerous, for the panel header (not used to choose)."""
-    out = [f"{f.danger} fire danger (GFDI {f.gfdi:.0f})"]
+    out = [f"{f.danger} fire danger (index {f.gfdi:.0f})"]
     if f.sit.red_flag:
         out.append("Red flag warning")
     out.append({"grass": "Cured grass at the fire", "shrub": "Shrub and grass at the fire"}.get(
         f.fuel, f"Fuel at the fire: {f.fuel.replace('_', ' ')}"))
     likely = f.acres_at(f.now_min + 60)
-    out.append(f"Likely ~{likely:,} ac in an hour; 2 trucks hold ~{round(f.cap_ha / HA_PER_ACRE)}")
+    out.append(f"Likely ~{likely:,} ac in 1 hr; 2 trucks can hold ~{round(f.cap_ha / HA_PER_ACRE)}")
     n_sites = sites_reached(f, f.now_min + 60)
     if n_sites:
-        out.append(f"{n_sites} building site{'s' if n_sites != 1 else ''} (homes, farmsteads, leases) in the likely 60-min path")
+        out.append(f"{n_sites} home{'s' if n_sites != 1 else ''}, farmstead{'s' if n_sites != 1 else ''} or lease{'s' if n_sites != 1 else ''} in the likely 1-hr path")
     hist = decision.large_fire_share(f.danger)
     if hist:
         out.append(f"On {f.danger} days, {hist['p']:.0%} of reported Kansas wildfires grew past 1,000 ac ({hist['k']} of {hist['n']}, 2016-2025)")
@@ -247,10 +247,14 @@ def outcome(f: Fire, page_min: float, ma_request_min: float | None, heads_up: bo
         t, help_ = f.horizon, "no mutual aid: grows past what 2 trucks hold"
     else:
         travel = w["mutual_aid_travel_min"] - (w["heads_up_saves_min"] if heads_up else 0)
-        t, help_ = max(first, ma_request_min + travel), "mutual aid" + (" (heads-up given)" if heads_up else "")
+        t, help_ = max(first, ma_request_min + travel), "mutual aid" + (", sped up by the heads-up" if heads_up else "")
     acres, sites = f.acres_at(t), sites_reached(f, t)
     return {"help_min": None if ma_request_min is None and not holdable(f, first) else t, "acres": acres, "sites": sites,
             "loss": acres + sites * w["cost_site_acres"], "help": help_}
+
+
+CONFIRM_911 = ("Call county dispatch: was this fire reported and the district toned out? If not, page now. "
+               "(Assumes a 911 call by now; nothing checks that it happened.)")
 
 
 def _candidates(conn, f: Fire, decision_id: str) -> list[dict]:
@@ -264,10 +268,12 @@ def _candidates(conn, f: Fire, decision_id: str) -> list[dict]:
     neighbors = [] if asked else notify.nearest_neighbors(conn, f.ev)
     ma_name = f.d.settings.get("neighbor_district", "the neighboring district")
     out = []
+    reported = False  # past the assumed 911 call; set in the respond branch, read by add()
 
     def add(oid, title, page_min, ma_min, heads_up, if_not, if_not_text, effects):
         o = outcome(f, page_min, ma_min, heads_up)
-        out.append({"id": oid, "title": title, "page_min": page_min, "if_fire_acres": o["acres"], "if_fire_sites": o["sites"],
+        out.append({"id": oid, "title": title, "page_min": page_min, "by_911": oid in ("watch", "heads_up_only") and reported,
+                    "if_fire_acres": o["acres"], "if_fire_sites": o["sites"],
                     "if_fire_loss": o["loss"], "help_min": o["help_min"],
                     "help": o["help"], "if_not_cost": if_not, "if_not_text": if_not_text, "effects": effects,
                     "stations": len(stations) if heads_up and not hu_sent else 0})
@@ -290,29 +296,38 @@ def _candidates(conn, f: Fire, decision_id: str) -> list[dict]:
             + ([hu_effect] if stations else [])
             + ([f"Draft a mutual-aid request to {ma_name} (fire likely outgrows 2 trucks)"] if big else []))
         confirmed = f.ev["recommendation"] == "escalate"  # two independent sources (or a strong satellite hit) already agree
+        call = max(now, w["call_911_min"] + 2)
+        # Past the packet's 911 call, "don't page" only matches paging because we assume someone already called.
+        # Say that assumption out loud instead of offering it as watching.
+        reported = now >= w["call_911_min"] + 2
         asked_at = (parse_iso(f.state["investigate_at"]) - f.t0).total_seconds() / 60 if asked and f.state.get("investigate_at") else now
         conf = max(now + 2, asked_at + w["second_source_min"])
         if confirmed:
-            stations_only = [hu_effect, "Keep watching; page on the next signal or the 911 call"]
             if stations:
-                call = max(now, w["call_911_min"] + 2)
-                add("heads_up_only", "Heads-up downwind only; don't page yet", call, ma_after(call), True, hu_cost,
-                    _texts(len(stations)), stations_only)
+                if reported:
+                    add("heads_up_only", "Warn downwind stations; confirm 911 has paged", call, ma_after(call), True, hu_cost,
+                        _texts(len(stations)), [hu_effect, CONFIRM_911])
+                else:
+                    add("heads_up_only", "Warn downwind stations; don't page yet", call, ma_after(call), True, hu_cost,
+                        _texts(len(stations)), [hu_effect, "Keep watching; page on the next signal or the 911 call"])
         else:
             add("ask", "Wait for the neighbors' answers" if asked else "Ask the nearest neighbors first", conf, ma_after(conf),
                 hu_sent, texts, f"{len(neighbors)} 'see smoke?' text{'' if len(neighbors) == 1 else 's'}" if neighbors else "nothing",
                 [ask_effect])
             if stations:
-                add("heads_up_ask", "Heads-up downwind + " + ("wait for neighbors" if asked else "ask neighbors"), conf,
+                add("heads_up_ask", "Warn downwind stations + " + ("wait for neighbors" if asked else "ask neighbors"), conf,
                     ma_after(conf), True, texts + hu_cost, _texts(len(stations) + len(neighbors)),
                     [hu_effect, ask_effect])
                 nxt = now + w["next_pass_min"]
-                add("heads_up_recheck", "Heads-up downwind + recheck on the next pass", nxt, ma_after(nxt), True, hu_cost,
+                add("heads_up_recheck", "Warn downwind stations + recheck on the next satellite pass", nxt, ma_after(nxt), True, hu_cost,
                     _texts(len(stations)),
                     [hu_effect, f"Re-score on the next satellite look (~{w['next_pass_min']} min)"])
-        call = max(now, w["call_911_min"] + 2)
-        add("watch", "Watch; don't page yet", call, ma_after(call), hu_sent, 0.0, "nothing",
-            ["Nothing is sent; the alert is re-scored as signals arrive. If it is a fire, today's 911 call pages the district"])
+        if reported:
+            add("watch", "Confirm 911 has paged; don't page twice", call, ma_after(call), hu_sent, 0.0, "nothing",
+                [CONFIRM_911])
+        else:
+            add("watch", "Watch; don't page yet", call, ma_after(call), hu_sent, 0.0, "nothing",
+                ["Nothing is sent; the alert is re-scored as signals arrive. If it is a fire, today's 911 call pages the district"])
     else:  # mutual aid, after the page
         page = _page_min(f) or now
         add("mutual_aid_now", "Request mutual aid now", page, now, hu_sent, w["cost_false_mutual_aid_acres"],
@@ -368,29 +383,36 @@ def options(conn: sqlite3.Connection, ev, now: datetime | None = None) -> dict:
     }
 
 
+CLOSE_CALL = 0.05  # top two within 5% of each other: say so rather than imply a clear winner
+
+
 def _why(best: dict, cands: list[dict], p: float) -> str:
     others = [c for c in cands if c is not best]
-    lead = f"Lowest expected loss: ~{best['expected_loss']:,.0f} ac-equivalent"
+    lead = f"Lowest expected loss: ~{best['expected_loss']:,.0f} acre-equivalents"
     if others:
         runner = others[0]
         lead += f", vs ~{runner['expected_loss']:,.0f} for “{runner['title']}”"
+        if runner["expected_loss"] - best["expected_loss"] <= CLOSE_CALL * max(best["expected_loss"], 1):
+            return lead + ". Close call: the two are within 5%, so either is reasonable."
         x = decision.break_even(best, runner)
         if x is not None:
-            lead += (f". That flips if P(fire) {'rises above' if x > p else 'falls below'} {x:.0%}")
+            lead += (f". That flips if the chance of fire {'rises above' if x > p else 'falls below'} {x:.0%}")
     return lead + "."
 
 
 def _metrics(f: Fire, c: dict, decision_id: str) -> list[dict]:
     out = []
     if decision_id == "respond":
-        out.append({"label": "District paged", "value": "now" if c["page_min"] <= f.now_min + 0.5 else f"~{f.clock(c['page_min'])} if confirmed"})
-    help_at = f"~{f.clock(c['help_min'])}" if c["help_min"] is not None else "never"
+        out.append({"label": "District paged", "value": "by the 911 call (assumed made)" if c["by_911"] else
+                    "now" if c["page_min"] <= f.now_min + 0.5 else f"~{f.clock(c['page_min'])} if confirmed"})
+    help_at = f"enough help there ~{f.clock(c['help_min'])}: " if c["help_min"] is not None else ""
     out += [
         {"label": "If it's a fire", "value": f"~{c['if_fire_acres']:,} ac" + (
             f" and {c['if_fire_sites']} building site{'s' if c['if_fire_sites'] != 1 else ''}" if c["if_fire_sites"] else "")
-            + f" by the time enough help is there ({help_at}, {c['help']})"},
-        {"label": "If it's not", "value": f"{c['if_not_text']} (~{c['if_not_cost']:,.0f} ac-eq)"},
-        {"label": "Expected loss", "value": f"~{c['expected_loss']:,.0f} ac-equivalent"},
+            + f" burn before help arrives ({help_at}{c['help']})"},
+        {"label": "If it's not", "value": c["if_not_text"] + (
+            f" (costs ~{c['if_not_cost']:,.0f} acre-equivalents)" if c["if_not_cost"] >= 0.5 else "; no cost")},
+        {"label": "Expected loss", "value": f"~{c['expected_loss']:,.0f} acre-equivalents"},
     ]
     if c["stations"]:
         out.append({"label": "Stations warned ahead", "value": str(c["stations"])})

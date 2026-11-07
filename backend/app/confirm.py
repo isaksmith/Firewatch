@@ -76,7 +76,7 @@ def _stakes_promotion(conn: sqlite3.Connection, event_id: int, level: str, reaso
     if target is None or LEVELS.index(target) <= LEVELS.index(level):
         return level, reason
     why = (f"{REC_LABEL[target]}: high stakes. \u201c{best['title']}\u201d has the lowest expected loss "
-           f"(P(fire) {p['probability']['p']:.0%}, ~{best['expected_loss']:,.0f} ac-eq)")
+           f"({p['probability']['p']:.0%} chance of fire, ~{best['expected_loss']:,.0f} acre-equivalents)")
     conn.execute("UPDATE events SET recommendation = ?, level_reason = ?, suppression = NULL WHERE id = ?",
                  (target, why, event_id))
     return target, why
