@@ -1,18 +1,21 @@
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Literal
 
+import numpy as np
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from . import sample
-from .config import get_settings
-from .db import connect, init_db, iso, loads, mark_source, parse_iso, utcnow
+from .config import DATA_DIR, get_settings
+from .db import load_snapshot, connect, init_db, iso, loads, mark_source, parse_iso, utcnow
 from .fire_weather import default_curing, gfdi_band
-from .layers import LAYER_NAMES, load_layer, nearest_assets
+from .ingest import hms, landsat_nrt, lsr, metar, nws, risk_grid, spc, wfigs
+from .layers import LAYER_NAMES, load_layer, nearest_assets, segment_index
 from .pipeline import poll_firms_once
 from .sim.spread import SpreadInput, simulate
 
@@ -40,7 +43,20 @@ async def _source_loop(name: str, interval_s: int, job) -> None:
 
 def poll_jobs() -> dict:
     """Source name -> callable. Sources without a job here are not polled."""
-    return {"firms": poll_firms_once}
+    jobs = {
+        "firms": poll_firms_once,
+        "nws_alerts": nws.poll,
+        "lsr": lsr.poll,
+        "wfigs_incidents": wfigs.poll_incidents,
+        "wfigs_perimeters": wfigs.poll_perimeters,
+        "metar": metar.poll,
+        "open_meteo": risk_grid.poll,
+        "spc": spc.poll,
+        "hms": hms.poll,
+    }
+    if get_settings().firms_map_key:
+        jobs["landsat_nrt"] = landsat_nrt.poll
+    return jobs
 
 
 @asynccontextmanager
@@ -252,6 +268,63 @@ def get_layer(name: str):
     return load_layer(name)
 
 
+FEEDS_DIR = DATA_DIR / "samples" / "feeds"
+FEED_NAMES = tuple(n for n in get_settings().source_intervals if n != "firms")
+
+
+@api.get("/feeds/{name}")
+def get_feed(name: str):
+    """Latest snapshot of a context feed. In sample mode or before the first poll, a labeled fixture."""
+    if name not in FEED_NAMES:
+        raise HTTPException(404, f"unknown feed; choose from {', '.join(FEED_NAMES)}")
+    if get_settings().mode != "sample":
+        with connect() as conn:
+            snap = load_snapshot(conn, name)
+        if snap:
+            return {"feed": name, "fixture": False, **snap}
+    path = FEEDS_DIR / f"{name}.json"
+    if not path.exists():
+        raise HTTPException(404, f"no data yet for {name}")
+    return {"feed": name, "fixture": True, "fetched_at": None, "data": json.loads(path.read_text())}
+
+
+def _grid_cells() -> list[dict]:
+    return get_feed("open_meteo")["data"]["cells"]
+
+
+@api.get("/risk/grid")
+def risk_grid_route():
+    feed = get_feed("open_meteo")
+    feats = [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [c["lon"], c["lat"]]},
+              "properties": {k: v for k, v in c.items() if k not in ("lat", "lon")}} for c in feed["data"]["cells"]]
+    return {"type": "FeatureCollection", "features": feats, "fixture": feed["fixture"], "fetched_at": feed["fetched_at"]}
+
+
+@api.get("/risk/lines-under-wind")
+def lines_under_wind():
+    """Transmission lines whose nearest grid cell forecasts gusts at or above the flag threshold in the next 12 h."""
+    feed = get_feed("open_meteo")
+    cells = feed["data"]["cells"]
+    thr = get_settings().wind_gust_flag_kmh
+    seg = segment_index()
+    out: dict[int, float] = {}
+    if cells and len(seg.owner):
+        cy = np.array([c["lat"] for c in cells])
+        cx = np.array([c["lon"] for c in cells])
+        cg = np.array([c["gust_max_12h_kmh"] if c["gust_max_12h_kmh"] is not None else -1.0 for c in cells])
+        mx, my = (seg.ax + seg.bx) / 2, (seg.ay + seg.by) / 2
+        for k in range(0, len(mx), 2000):
+            d = (mx[k:k + 2000, None] - cx[None]) ** 2 + (my[k:k + 2000, None] - cy[None]) ** 2
+            g = cg[d.argmin(axis=1)]
+            for o, gv in zip(seg.owner[k:k + 2000], g):
+                if gv >= thr:
+                    out[int(o)] = max(out.get(int(o), 0.0), float(gv))
+    feats = [{"type": "Feature", "geometry": load_layer("power_lines")["features"][o]["geometry"],
+              "properties": {**seg.props[o], "max_gust_kmh": round(g, 1)}} for o, g in out.items()]
+    return {"type": "FeatureCollection", "features": feats, "threshold_kmh": thr,
+            "fixture": feed["fixture"], "fetched_at": feed["fetched_at"]}
+
+
 @api.get("/health")
 def health():
     s = get_settings()
@@ -267,7 +340,7 @@ def health():
             continue
         last_error = r["last_error"] if r else None
         if r is None or r["last_ok"] is None:
-            status = "skipped" if name == "firms" and not s.firms_map_key else "down"
+            status = "skipped" if name in ("firms", "landsat_nrt") and not s.firms_map_key else "down"
             sources[name] = {"status": status, "age_min": None, "last_ok": None, "last_error": last_error,
                              "interval_s": interval_s}
             continue

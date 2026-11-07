@@ -59,6 +59,9 @@ export interface AlertDetail extends AlertSummary {
     gust_kmh?: number
     wind_dir_deg?: number
     rh_pct?: number
+    dew_point_c?: number
+    pressure_hpa?: number
+    vpd_kpa?: number
     temp_c?: number
     precip_72h_mm?: number
     source?: string
@@ -125,6 +128,8 @@ export const api = {
     return request<SimulationResult>(`/alerts/${id}/simulate${q}`)
   },
   layer: (name: string) => request<GeoJSON.FeatureCollection>(`/layers/${name}`),
+  riskGrid: () => request<GeoJSON.FeatureCollection>('/risk/grid'),
+  linesUnderWind: () => request<GeoJSON.FeatureCollection>('/risk/lines-under-wind'),
   health: () => request<Health>('/health'),
   replay: () => request<{ status: string }>('/sample/replay?duration_s=60', { method: 'POST' }),
   ingest: () => request<unknown>('/ingest/run', { method: 'POST' }),

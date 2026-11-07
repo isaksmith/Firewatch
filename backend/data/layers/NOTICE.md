@@ -1,6 +1,6 @@
 # Layer data notice
 
-The transmission lines, substations and towns in this folder (`power_lines.geojson`, `substations.geojson`, `towns.geojson`, and `distribution_lines.geojson` when present) are derived from OpenStreetMap and are made available under the Open Database License (ODbL) 1.0.
+The transmission lines, substations and towns in this folder (`power_lines.geojson`, `substations.geojson`, `towns.geojson`, and `distribution_lines.geojson`) are derived from OpenStreetMap and are made available under the Open Database License (ODbL) 1.0.
 
 © OpenStreetMap contributors. https://www.openstreetmap.org/copyright
 

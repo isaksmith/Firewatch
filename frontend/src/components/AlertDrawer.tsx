@@ -142,6 +142,9 @@ function DrawerBody({ a }: { a: AlertDetail }) {
                 <KV k="Gust" v={`${Math.round(kmhToMph(w.gust_kmh ?? 0))} MPH`} />
                 <KV k="RH" v={`${Math.round(w.rh_pct ?? 0)}%`} accent={(w.rh_pct ?? 100) < 25 ? '#ffb21a' : undefined} />
                 <KV k="Temp" v={`${Math.round(w.temp_c ?? 0)}°C`} />
+                {w.dew_point_c != null && <KV k="Dew pt" v={`${Math.round(w.dew_point_c)}°C`} />}
+                {w.pressure_hpa != null && <KV k="Pressure" v={`${Math.round(w.pressure_hpa)} HPA`} />}
+                {w.vpd_kpa != null && <KV k="VPD" v={`${w.vpd_kpa.toFixed(1)} KPA`} />}
                 <KV k="Rain 72H" v={`${w.precip_72h_mm ?? 0} MM`} />
               </div>
             </>

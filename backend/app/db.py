@@ -81,6 +81,12 @@ CREATE TABLE IF NOT EXISTS source_health (
   last_error    TEXT,
   last_error_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS feed_snapshots (
+  source     TEXT PRIMARY KEY,
+  fetched_at TEXT NOT NULL,
+  payload    TEXT NOT NULL
+);
 """
 
 
@@ -142,3 +148,25 @@ def mark_source(conn: sqlite3.Connection, source: str, ok: bool, error: str | No
             "ON CONFLICT(source) DO UPDATE SET last_error = excluded.last_error, last_error_at = excluded.last_error_at",
             (source, error, now),
         )
+
+
+def save_snapshot(conn, source: str, data) -> str:
+    """Store the latest payload for a context feed (one row per source)."""
+    import json
+
+    now = iso(utcnow())
+    conn.execute(
+        "INSERT INTO feed_snapshots(source, fetched_at, payload) VALUES (?, ?, ?) "
+        "ON CONFLICT(source) DO UPDATE SET fetched_at = excluded.fetched_at, payload = excluded.payload",
+        (source, now, json.dumps(data)),
+    )
+    return now
+
+
+def load_snapshot(conn, source: str) -> dict | None:
+    import json
+
+    r = conn.execute("SELECT fetched_at, payload FROM feed_snapshots WHERE source = ?", (source,)).fetchone()
+    if r is None:
+        return None
+    return {"fetched_at": r["fetched_at"], "data": json.loads(r["payload"])}

@@ -28,11 +28,14 @@ class Settings(BaseSettings):
     poll_open_meteo_s: int = 3600
     poll_spc_s: int = 1800
     poll_hms_s: int = 1800
+    poll_landsat_nrt_s: int = 300  # only polled when a FIRMS key is set
     firms_sources: str = "VIIRS_SNPP_NRT,VIIRS_NOAA20_NRT,VIIRS_NOAA21_NRT,MODIS_NRT"
     scorer: str = "auto"  # auto (model if present, else rules) | model | rules
     threshold_escalate: int = 70
     threshold_investigate: int = 40
     curing_pct_override: float | None = None
+    # Gust threshold for the lines-under-wind flag. An assumed value, not a utility standard.
+    wind_gust_flag_kmh: float = 80.0
     nws_user_agent: str = "firewatch-hackathon"
     db_path: str = str(DATA_DIR / "firewatch.sqlite")
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
@@ -56,6 +59,7 @@ class Settings(BaseSettings):
             "open_meteo": self.poll_open_meteo_s,
             "spc": self.poll_spc_s,
             "hms": self.poll_hms_s,
+            "landsat_nrt": self.poll_landsat_nrt_s,
         }
 
     @property

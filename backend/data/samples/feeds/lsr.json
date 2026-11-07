@@ -1,0 +1,31 @@
+{
+ "count": 2,
+ "total_reports": 2,
+ "window_h": 72,
+ "reports": [
+  {
+   "type": "WILDFIRE",
+   "city": "Sample fixture",
+   "county": "Russell",
+   "magnitude": null,
+   "remark": "Sample fixture: grass fire",
+   "lat": 38.9,
+   "lon": -98.9,
+   "time": "2021-12-15T22:10:00Z",
+   "fire": true,
+   "downed_line": false
+  },
+  {
+   "type": "TSTM WND DMG",
+   "city": "Sample fixture",
+   "county": "Ellis",
+   "magnitude": null,
+   "remark": "Sample fixture: power lines down",
+   "lat": 38.88,
+   "lon": -99.3,
+   "time": "2021-12-15T22:40:00Z",
+   "fire": false,
+   "downed_line": true
+  }
+ ]
+}
