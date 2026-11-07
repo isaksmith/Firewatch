@@ -142,13 +142,24 @@ def _result(row) -> dict:
     return {"ok": True, "reason": row["reason"] or "duplicate", "counted": bool(row["counted"]), "duplicate": True}
 
 
+def open_event(conn: sqlite3.Connection, post, now: datetime, is_sample: bool, channel: str = "web") -> int:
+    """Open the event for a located post, carry any hold on the post (or its parent) onto it, and return its id."""
+    from .notify import ESTIMATE_JOIN_KM, carry_hold
+    from .signals import add_signal
+
+    eid = add_signal(conn, "report", post["lat"], post["lon"], iso(now), f"{channel}:post:{post['id']}", post["body"],
+                     None, is_sample, join_radius_km=ESTIMATE_JOIN_KM if post["estimated"] else None)
+    conn.execute("UPDATE posts SET event_id = ?, updated_at = ? WHERE id = ?", (eid, iso(now), post["id"]))
+    carry_hold(conn, post, eid, now)
+    return eid
+
+
 def confirm(
     conn: sqlite3.Connection, post_id: int, contact, kind: str, now: datetime, is_sample: bool = False,
     channel: str = "sms", lat: float | None = None, lon: float | None = None, ip_hash: str | None = None,
 ) -> dict:
     """One person's answer on a post. Refusals, in order: not_found, closed, expired, own_post, duplicate."""
     from .confirm import evaluate_event
-    from .notify import ESTIMATE_JOIN_KM
     from .signals import add_signal
 
     post = _post(conn, post_id)
@@ -200,9 +211,7 @@ def confirm(
     eid = post["event_id"]
     if counted and post["category"] in FIRE_LIKE:
         if eid is None:
-            eid = add_signal(conn, "report", post["lat"], post["lon"], iso(now), f"{channel}:post:{post_id}", post["body"],
-                             None, is_sample, join_radius_km=ESTIMATE_JOIN_KM if post["estimated"] else None)
-            conn.execute("UPDATE posts SET event_id = ?, updated_at = ? WHERE id = ?", (eid, iso(now), post_id))
+            eid = open_event(conn, post, now, is_sample, channel)
         # The confirmer's signal sits at the post's point, never at the confirmer's.
         add_signal(conn, "report", post["lat"], post["lon"], iso(now), f"{channel}:confirm:{post_id}", None,
                    contact["id"], is_sample, event_id=eid)

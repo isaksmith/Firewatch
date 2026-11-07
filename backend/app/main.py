@@ -684,7 +684,7 @@ def alert_decision(event_id: int, body: DecisionIn):
     """PAGE / NO / SEND from the console; the same path as the duty officer texting it."""
     with connect() as conn:
         ev = _get_event(conn, event_id)
-        if not ev["response_json"]:
+        if not ev["response_json"] and not ev["ack_until"]:
             raise HTTPException(409, "this alert has no response in progress")
         now = scenario.clock_now(ev["sample_slug"]) if ev["is_sample"] else None
         notify.decide(conn, event_id, body.action, body.operator, now or utcnow())

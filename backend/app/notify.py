@@ -181,7 +181,8 @@ def t_ask_post(post, contact, short_name: str) -> str:
 
 
 def t_post_duty(post, why: str) -> str:
-    head = f"FIREWATCH board: {why}, {post['lat']:.4f},{post['lon']:.4f}. "
+    where = f"{post['lat']:.4f},{post['lon']:.4f}" if post["lat"] is not None else "no location"
+    head = f"FIREWATCH board: {why}, {where}. "
     return head + _excerpt(post["body"], SMS_MAX - len(head) - 1 - 20) + " Check the board."
 
 
@@ -459,6 +460,35 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
 HOLD_COLS = "ack_level = NULL, ack_by = NULL, ack_at = NULL, ack_until = NULL, ack_mark_det = NULL, ack_mark_sig = NULL"
 
 
+POST_HOLD_COLS = "ack_level = NULL, ack_by = NULL, ack_at = NULL, ack_until = NULL"
+
+
+def carry_hold(conn: sqlite3.Connection, post, event_id: int, now: datetime) -> None:
+    """A post (or its parent) held before it had an event: move that hold onto the event it just opened."""
+    rows = [post]
+    if post["parent_id"]:
+        rows.append(conn.execute("SELECT * FROM posts WHERE id = ?", (post["parent_id"],)).fetchone())
+    live = [r for r in rows if r is not None and held(r, now)]
+    if not live:
+        return
+    src = next((r for r in live if r["ack_level"] == "ladder"), live[0])
+    cur = held(_event(conn, event_id), now)
+    if cur != "ladder" and cur != src["ack_level"]:
+        det = conn.execute("SELECT COALESCE(MAX(id), 0) m FROM detections").fetchone()["m"]
+        sig = conn.execute("SELECT COALESCE(MAX(id), 0) m FROM signals").fetchone()["m"]
+        conn.execute(
+            "UPDATE events SET ack_level = ?, ack_by = ?, ack_at = ?, ack_until = ?, ack_mark_det = COALESCE(ack_mark_det, ?), "
+            "ack_mark_sig = COALESCE(ack_mark_sig, ?), status = CASE WHEN status = 'new' THEN 'acknowledged' ELSE status END, "
+            "updated_at = ? WHERE id = ?",
+            (src["ack_level"], src["ack_by"], src["ack_at"], src["ack_until"], det, sig, iso(now), event_id),
+        )
+        conn.execute("INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, 'acknowledge', ?, ?, ?)",
+                     (event_id, src["ack_by"], f"{src['ack_level']} hold carried from post {src['id']}", iso(now)))
+    for r in live:
+        conn.execute(f"UPDATE posts SET {POST_HOLD_COLS}, event_id = COALESCE(event_id, ?), updated_at = ? WHERE id = ?",
+                     (event_id, iso(now), r["id"]))
+
+
 def clear_hold(conn, event_id: int) -> None:
     conn.execute(f"UPDATE events SET {HOLD_COLS} WHERE id = ?", (event_id,))
 
@@ -544,6 +574,18 @@ def hold_tick(conn: sqlite3.Connection, now: datetime, is_sample: bool | None = 
         conn.execute("INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, 'system', ?, ?)",
                      (ev["id"], "hold_broken" if why else "hold_expired", why or "clock", iso(now)))
         resume(conn, ev["id"], now, ev["ack_level"])
+    pq, pa = "SELECT * FROM posts WHERE ack_until IS NOT NULL AND status = 'open'", ()
+    if is_sample is not None:
+        pq, pa = pq + " AND is_sample = ?", (int(is_sample),)
+    for p in conn.execute(pq, pa).fetchall():
+        if now < parse_iso(p["ack_until"]) or now - parse_iso(p["created_at"]) > timedelta(hours=24):
+            continue  # a replay's post is months old on the real clock
+        told = p["ack_level"] == "ladder"
+        conn.execute(
+            f"UPDATE posts SET {POST_HOLD_COLS}, duty_told_at = CASE WHEN ? THEN COALESCE(duty_told_at, ?) ELSE duty_told_at END, "
+            "updated_at = ? WHERE id = ?", (int(told), iso(now), iso(now), p["id"]))
+        if told and (duty := _ladder(conn)):
+            send(conn, duty[0], t_post_duty(p, "hold ended"), "hold_expired", None, now, bool(p["is_sample"]), post_id=p["id"])
 
 
 def resume(conn: sqlite3.Connection, event_id: int, now: datetime, level: str | None = None) -> None:
@@ -617,9 +659,12 @@ def plan_response(conn: sqlite3.Connection, ev, now: datetime) -> dict:
 
 
 def _latest_open_response(conn, is_sample: bool) -> int | None:
-    """The newest event with a response under way, for a ladder member who was not texted about it."""
+    """The newest event with a response under way, for a ladder member who was not texted about it.
+
+    A ladder hold counts: it swallowed the level, so there is no response yet but PAGE must still reach it.
+    """
     r = conn.execute(
-        "SELECT id FROM events WHERE response_json IS NOT NULL AND status NOT IN ('closed', 'dismissed') "
+        "SELECT id FROM events WHERE (response_json IS NOT NULL OR ack_level = 'ladder') AND status NOT IN ('closed', 'dismissed') "
         "AND is_sample = ? ORDER BY updated_at DESC, id DESC LIMIT 1",
         (int(is_sample),),
     ).fetchone()
@@ -677,6 +722,21 @@ def _confirm_reply(r: dict) -> str:
     if not r.get("ok"):
         return "Firewatch: that post is no longer open."
     return "Firewatch: thanks. The fire district has your answer."
+
+
+def _newest_post_text(conn, contact):
+    """The post row behind the newest decision text this contact got, if that text was about a post with no event."""
+    if contact is None:
+        return None
+    purposes = DECIDERS + ("post_timer", "post_hazard")
+    r = conn.execute(
+        f"SELECT event_id, post_id FROM messages WHERE contact_id = ? AND direction = 'out' AND purpose IN ({','.join('?' * len(purposes))}) "
+        "AND (event_id IS NOT NULL OR post_id IS NOT NULL) ORDER BY id DESC LIMIT 1",
+        (contact["id"], *purposes),
+    ).fetchone()
+    if r is None or r["event_id"] or r["post_id"] is None:
+        return None
+    return conn.execute("SELECT * FROM posts WHERE id = ?", (r["post_id"],)).fetchone()
 
 
 def handle_inbound(
@@ -809,10 +869,29 @@ def handle_inbound(
                     out.update(action="help", reply="Firewatch: that one is already closed.")
     elif word in ("PAGE", "NO", "SEND") and contact and contact["role"] in LADDER_ROLES:
         purposes = ("mutual_aid_draft",) + DECIDERS if word == "SEND" else DECIDERS
-        eid = latest_event(purposes) or _latest_open_response(conn, is_sample)
-        if eid is None:
-            out.update(action="help", reply="Firewatch: no open alert for you to answer.")
+        post = None if word == "SEND" else _newest_post_text(conn, contact)
+        eid = None
+        if post is not None and post["event_id"] is None:
+            if post["status"] != "open":
+                out.update(action="help", reply="Firewatch: that report is already closed.")
+            elif word == "NO":
+                conn.execute(f"UPDATE posts SET status = 'dismissed', {POST_HOLD_COLS}, updated_at = ? WHERE id = ?",
+                             (iso(now), post["id"]))
+                out.update(action="no", reply="Firewatch: Stood down. Logged.")
+            elif post["category"] not in ("fire", "smoke") or post["lat"] is None:
+                out.update(action="help", reply="Firewatch: that report is not a located fire. Check the board.")
+            else:
+                eid = posts_mod.open_event(conn, post, now, is_sample, channel)
+                evaluate_event(conn, eid, None, now)
+        elif post is not None:
+            eid = post["event_id"]
         else:
+            eid = latest_event(purposes) or _latest_open_response(conn, is_sample)
+            if eid is not None and _event(conn, eid)["status"] == "closed":
+                eid = _latest_open_response(conn, is_sample)
+        if post is None and eid is None:
+            out.update(action="help", reply="Firewatch: no open alert for you to answer.")
+        elif eid is not None:
             decide(conn, eid, word.lower(), contact["name"], now)
             reply = {"page": "Paged. Dispatch and crews notified.", "no": "Stood down. Logged.",
                      "send": "Mutual aid requested."}[word.lower()]

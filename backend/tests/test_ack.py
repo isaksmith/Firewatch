@@ -608,3 +608,234 @@ def test_dismissed_event_gets_no_ladder_step():
         assert ev(conn, eid)["status"] == "dismissed"
         notify.tick(conn, at(20), is_sample=True)
         assert not out(conn, "ladder", eid)
+
+
+# ---- defects 4, 5, 8, 9 -------------------------------------------------------------------------
+
+def _stranger_post(conn, minute=0, phone="+13165559003", body="smoke by road", cat="smoke"):
+    sync_roster(conn)
+    return posts.create(conn, None, phone, body, cat, False, at(minute), True, at=FIRE)["post_id"]
+
+
+def _post(conn, pid):
+    return conn.execute("SELECT * FROM posts WHERE id = ?", (pid,)).fetchone()
+
+
+def _contact(conn, phone):
+    return conn.execute("SELECT * FROM contacts WHERE phone = ?", (phone,)).fetchone()
+
+
+def test_d4_ladder_hold_on_post_carries_to_the_event_it_opens():
+    with connect() as conn:
+        pid = _stranger_post(conn)
+        notify.acknowledge(conn, post_id=pid, by="Duty", role="duty_officer", now=at(1))
+        n_out = all_out(conn)
+        r = posts.confirm(conn, pid, _contact(conn, WES), "see", at(2), True)
+        assert r["ok"] and r["counted"] and r["count"] == 1
+        assert all_out(conn) == n_out, "a ladder hold on the post silences the event it opens"
+        assert ev(conn, r["event_id"])["ack_level"] == "ladder"
+        assert _post(conn, pid)["ack_until"] is None, "the hold moved to the event"
+
+
+def test_d4_carried_ladder_hold_replays_at_its_end():
+    with connect() as conn:
+        pid = _stranger_post(conn)
+        notify.acknowledge(conn, post_id=pid, by="Duty", role="duty_officer", now=at(1))
+        r = posts.confirm(conn, pid, _contact(conn, WES), "see", at(2), True)
+        assert not out(conn, "duty_fyi", r["event_id"])
+        notify.hold_tick(conn, at(40), True)
+        assert out(conn, "duty_fyi", r["event_id"]), "the swallowed level is replayed"
+
+
+def test_d4_carried_crowd_hold_sends_duty_fyi_but_no_neighbor_ask():
+    with connect() as conn:
+        pid = _stranger_post(conn)
+        notify.acknowledge(conn, post_id=pid, by="Vol", role="volunteer", now=at(1))
+        r = posts.confirm(conn, pid, _contact(conn, WES), "see", at(2), True)
+        eid = r["event_id"]
+        assert ev(conn, eid)["ack_level"] == "crowd"
+        assert out(conn, "duty_fyi", eid)
+        assert not out(conn, "ask_neighbor", eid)
+        assert "asks_skipped" in (ev(conn, eid)["response_json"] or "")
+
+
+def _swallowed(conn):
+    sync_roster(conn)
+    eid = add_signal(conn, "line_fault", *FIRE, iso(at(0)), "coop:feeder-4", "lockout", is_sample=True)
+    notify.acknowledge(conn, event_id=eid, by="Duty", role="duty_officer", now=at(0))
+    evaluate_event(conn, eid, WEATHER, at(1))
+    return eid
+
+
+def test_d5_ladder_hold_swallows_level_but_is_still_found_for_a_page():
+    with connect() as conn:
+        eid = _swallowed(conn)
+        assert ev(conn, eid)["ack_level"] == "ladder"
+        assert notify._latest_open_response(conn, True) == eid
+
+
+def test_d5_console_page_works_under_a_ladder_hold():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with connect() as conn:
+        eid = _swallowed(conn)
+        conn.commit()
+    with TestClient(app) as client:
+        r = client.post(f"/api/alerts/{eid}/decision", json={"action": "page", "operator": "Dispatch 2"})
+        assert r.status_code == 200, r.text
+    with connect() as conn:
+        assert ev(conn, eid)["ack_until"] is None
+        assert out(conn, "page", eid)
+
+
+def test_d5_texted_page_from_duty_pages_under_a_ladder_hold():
+    with connect() as conn:
+        eid = _swallowed(conn)
+        r = notify.handle_inbound(conn, DUTY, "PAGE", at(3), is_sample=True)
+        assert r["action"] == "page" and r["event_id"] == eid
+        assert out(conn, "page", eid)
+
+
+def test_d5_crowd_hold_keeps_its_response_so_page_still_works():
+    """Guard: a crowd hold does not swallow the ladder, so the fix must not change this path."""
+    with connect() as conn:
+        sync_roster(conn)
+        eid = add_signal(conn, "line_fault", *FIRE, iso(at(0)), "coop:feeder-4", "lockout", is_sample=True)
+        notify.acknowledge(conn, event_id=eid, by="Vol", role="volunteer", now=at(0))
+        evaluate_event(conn, eid, WEATHER, at(1))
+        assert ev(conn, eid)["response_json"] is not None
+        r = notify.handle_inbound(conn, DUTY, "PAGE", at(3), is_sample=True)
+        assert r["action"] == "page" and r["event_id"] == eid
+
+
+def test_d8_post_only_ladder_hold_lapse_tells_duty_once(monkeypatch):
+    monkeypatch.setattr(posts, "high_danger", lambda *a, **k: True)
+    with connect() as conn:
+        pid = _stranger_post(conn)
+        notify.acknowledge(conn, post_id=pid, by="Duty", role="duty_officer", now=at(1))
+        notify.hold_tick(conn, at(40), True)
+        sent = out(conn, "hold_expired")
+        assert len(sent) == 1 and sent[0]["post_id"] == pid and sent[0]["event_id"] is None
+        assert _post(conn, pid)["ack_until"] is None
+        notify.hold_tick(conn, at(41), True)
+        assert len(out(conn, "hold_expired")) == 1
+        assert posts.tick(conn, at(42), True) == [] and not out(conn, "post_timer")
+
+
+def test_d8_post_only_crowd_hold_lapse_is_silent_then_timer_fires(monkeypatch):
+    monkeypatch.setattr(posts, "high_danger", lambda *a, **k: True)
+    with connect() as conn:
+        pid = _stranger_post(conn)
+        notify.acknowledge(conn, post_id=pid, by="Vol", role="volunteer", now=at(1))
+        notify.hold_tick(conn, at(40), True)
+        assert not out(conn, "hold_expired")
+        posts.tick(conn, at(41), True)
+        assert len(out(conn, "post_timer")) == 1
+
+
+def test_d8_unlocated_post_hold_lapse_does_not_raise_and_fits():
+    with connect() as conn:
+        pid = _stranger_post(conn)
+        conn.execute("UPDATE posts SET lat = NULL, lon = NULL WHERE id = ?", (pid,))
+        notify.acknowledge(conn, post_id=pid, by="Duty", role="duty_officer", now=at(1))
+        notify.hold_tick(conn, at(40), True)
+        sent = out(conn, "hold_expired")
+        assert len(sent) == 1 and len(sent[0]["body"]) <= SMS_MAX
+
+
+def test_d8_old_replay_post_hold_is_left_alone():
+    with connect() as conn:
+        pid = _stranger_post(conn)
+        notify.acknowledge(conn, post_id=pid, by="Duty", role="duty_officer", now=at(1))
+        conn.execute("UPDATE posts SET created_at = ? WHERE id = ?", (iso(at(0) - timedelta(days=200)), pid))
+        notify.hold_tick(conn, at(40), True)
+        assert not out(conn, "hold_expired")
+        assert _post(conn, pid)["ack_until"] is not None
+
+
+def test_d8_duty_ack_after_hold_expired_text_holds_again():
+    with connect() as conn:
+        pid = _stranger_post(conn)
+        notify.acknowledge(conn, post_id=pid, by="Duty", role="duty_officer", now=at(1))
+        notify.hold_tick(conn, at(40), True)
+        r = notify.handle_inbound(conn, DUTY, "ACK", at(41), is_sample=True)
+        assert r["action"] == "ack"
+        assert _post(conn, pid)["ack_level"] == "ladder" and _post(conn, pid)["ack_until"] is not None
+
+
+def _post_text(conn, purpose, cat="smoke"):
+    """Duty has a duty_fyi on an older event and a newer text about a post with no event."""
+    sync_roster(conn)
+    old = add_signal(conn, "line_fault", 37.5, -96.3, iso(at(0)), "coop:feeder-9", "lockout", is_sample=True)
+    duty = _contact(conn, DUTY)
+    notify.send(conn, duty, "FIREWATCH old", "duty_fyi", old, at(1), True)
+    pid = posts.create(conn, None, "+13165559003", "smoke by road", cat, False, at(10), True, at=FIRE)["post_id"]
+    assert _post(conn, pid)["event_id"] is None
+    notify.send(conn, duty, "FIREWATCH post", purpose, None, at(11), True, post_id=pid)
+    return old, pid
+
+
+def _decision(conn, eid):
+    return (loads(ev(conn, eid)["response_json"]) or {}).get("decision") if ev(conn, eid)["response_json"] else None
+
+
+def test_d9_page_after_post_text_opens_that_posts_event():
+    with connect() as conn:
+        old, pid = _post_text(conn, "post_timer")
+        r = notify.handle_inbound(conn, DUTY, "PAGE", at(12), is_sample=True)
+        new = _post(conn, pid)["event_id"]
+        assert new and new != old and r["action"] == "page" and r["event_id"] == new
+        assert _decision(conn, new) == "page"
+        assert _decision(conn, old) is None
+
+
+def test_d9_page_after_post_text_with_older_event_closed():
+    with connect() as conn:
+        old, pid = _post_text(conn, "post_timer")
+        conn.execute("UPDATE events SET status = 'closed' WHERE id = ?", (old,))
+        r = notify.handle_inbound(conn, DUTY, "PAGE", at(12), is_sample=True)
+        new = _post(conn, pid)["event_id"]
+        assert new and r["event_id"] == new and _decision(conn, new) == "page"
+        assert _decision(conn, old) is None
+
+
+def test_d9_no_after_post_timer_dismisses_the_post():
+    with connect() as conn:
+        old, pid = _post_text(conn, "post_timer")
+        r = notify.handle_inbound(conn, DUTY, "NO", at(12), is_sample=True)
+        assert r["action"] == "no"
+        assert _post(conn, pid)["status"] == "dismissed" and _post(conn, pid)["event_id"] is None
+        assert _decision(conn, old) is None
+
+
+def test_d9_page_after_hazard_text_opens_no_event():
+    with connect() as conn:
+        old, pid = _post_text(conn, "post_hazard", cat="hazard")
+        r = notify.handle_inbound(conn, DUTY, "PAGE", at(12), is_sample=True)
+        assert _post(conn, pid)["event_id"] is None
+        assert "check the board" in r["reply"].lower()
+        assert _decision(conn, old) is None
+
+
+def test_d9_page_when_post_already_has_an_event_pages_that_event():
+    with connect() as conn:
+        old, pid = _post_text(conn, "post_timer")
+        eid = add_signal(conn, "report", *FIRE, iso(at(10)), "web:post:x", "smoke", None, is_sample=True)
+        conn.execute("UPDATE posts SET event_id = ? WHERE id = ?", (eid, pid))
+        r = notify.handle_inbound(conn, DUTY, "PAGE", at(12), is_sample=True)
+        assert r["event_id"] == eid and _decision(conn, eid) == "page"
+        assert _decision(conn, old) is None
+
+
+def test_d9_page_after_text_about_a_closed_event_finds_no_alert():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = add_signal(conn, "line_fault", *FIRE, iso(at(0)), "coop:feeder-4", "lockout", is_sample=True)
+        conn.execute("DELETE FROM messages WHERE direction = 'out'")
+        notify.send(conn, _contact(conn, DUTY), "FIREWATCH x", "duty_fyi", eid, at(1), True)
+        conn.execute("UPDATE events SET status = 'closed' WHERE id = ?", (eid,))
+        r = notify.handle_inbound(conn, DUTY, "PAGE", at(3), is_sample=True)
+        assert "no open alert" in r["reply"]
+        assert not out(conn, "page")
