@@ -47,8 +47,11 @@ CREATE TABLE IF NOT EXISTS events (
   recommendation   TEXT,
   degraded         INTEGER NOT NULL DEFAULT 0,
   guardrail        TEXT,
-  suppression      TEXT,                   -- static_source | likely_prescribed | low_signal (monitor only)
+  suppression      TEXT,                   -- static_source | likely_prescribed | registered_burn | low_signal (monitor only)
   reraised         INTEGER NOT NULL DEFAULT 0,
+  evidence_json    TEXT,                   -- [{kind, label, at, counts}] behind the level
+  level_reason     TEXT,
+  response_json    TEXT,                   -- notification state: ladder, decision, page, mutual aid
   updated_at       TEXT NOT NULL
 );
 
@@ -81,7 +84,67 @@ CREATE TABLE IF NOT EXISTS source_health (
   last_error    TEXT,
   last_error_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS contacts (
+  id            INTEGER PRIMARY KEY,
+  name          TEXT NOT NULL,
+  phone         TEXT UNIQUE NOT NULL,
+  role          TEXT NOT NULL,
+  lat           REAL,
+  lon           REAL,
+  weekday_avail INTEGER NOT NULL DEFAULT 0,
+  ladder_rank   INTEGER,
+  opted_in      INTEGER NOT NULL DEFAULT 1,
+  registered    INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS signals (
+  id           INTEGER PRIMARY KEY,
+  event_id     INTEGER REFERENCES events(id),
+  kind         TEXT NOT NULL,              -- line_fault | report | neighbor_reply | camera_smoke
+  lat          REAL NOT NULL,
+  lon          REAL NOT NULL,
+  observed_at  TEXT NOT NULL,
+  source       TEXT NOT NULL,
+  value        TEXT,
+  contact_id   INTEGER REFERENCES contacts(id),
+  is_sample    INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_signals_event ON signals(event_id);
+CREATE INDEX IF NOT EXISTS idx_signals_time ON signals(observed_at);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id          INTEGER PRIMARY KEY,
+  event_id    INTEGER REFERENCES events(id),
+  contact_id  INTEGER REFERENCES contacts(id),
+  phone       TEXT NOT NULL,
+  direction   TEXT NOT NULL,               -- out | in
+  purpose     TEXT,
+  body        TEXT NOT NULL,
+  status      TEXT NOT NULL,               -- sent | failed | received
+  gateway_id  TEXT,
+  is_sample   INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_messages_event ON messages(event_id);
+
+CREATE TABLE IF NOT EXISTS burn_notices (
+  id          INTEGER PRIMARY KEY,
+  contact_id  INTEGER NOT NULL REFERENCES contacts(id),
+  lat         REAL NOT NULL,
+  lon         REAL NOT NULL,
+  radius_km   REAL NOT NULL DEFAULT 1.5,
+  burn_date   TEXT NOT NULL,               -- local date, YYYY-MM-DD
+  is_sample   INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL
+);
 """
+
+# Columns added after the first release; ALTER them onto older databases.
+MIGRATIONS = {
+    "events": {"evidence_json": "TEXT", "level_reason": "TEXT", "response_json": "TEXT"},
+}
 
 
 def utcnow() -> datetime:
@@ -118,6 +181,11 @@ def connect(path: str | None = None) -> Iterator[sqlite3.Connection]:
 def init_db(path: str | None = None) -> None:
     with connect(path) as conn:
         conn.executescript(SCHEMA)
+        for table, cols in MIGRATIONS.items():
+            have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+            for col, decl in cols.items():
+                if col not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

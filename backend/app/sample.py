@@ -22,10 +22,10 @@ def load_fixtures() -> list[dict]:
 def clear_sample_data() -> None:
     with connect() as conn:
         ids = [r["id"] for r in conn.execute("SELECT id FROM events WHERE is_sample = 1")]
-        for table in ("scores", "actions"):
+        for table in ("scores", "actions", "messages"):
             conn.executemany(f"DELETE FROM {table} WHERE event_id = ?", [(i,) for i in ids])
-        conn.execute("DELETE FROM detections WHERE is_sample = 1")
-        conn.execute("DELETE FROM events WHERE is_sample = 1")
+        for table in ("detections", "signals", "messages", "burn_notices", "events"):
+            conn.execute(f"DELETE FROM {table} WHERE is_sample = 1")
 
 
 def _ingest_pass(fixture: dict, detections: list[dict]) -> None:

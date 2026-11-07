@@ -1,0 +1,42 @@
+{
+  "slug": "cottonwood-creek",
+  "title": "Cottonwood Creek: Saturday line-down grass fire",
+  "story": "A co-op feeder locks out at 1:50 pm on a dry, windy March Saturday and the downed line lights the grass 4 mi SW of Rosalia. Today nobody sees smoke until 2:17, 911 is called at 2:21, the trucks roll at 2:34 and arrive at 2:52 to a fire 2-3 mi long. The same afternoon a rancher 6 mi east burns pasture he registered that morning.",
+  "district": "cottonwood-creek",
+  "synthetic": true,
+  "t0": "2026-03-14T18:50:00Z",
+  "t0_local": "1:50 pm CDT, Sat Mar 14 2026",
+  "duration_min": 62,
+  "ignition": {"lat": 37.77, "lon": -96.66, "cause": "downed distribution line"},
+  "weather": {
+    "wind_kmh": 26, "gust_kmh": 45, "wind_dir_deg": 200, "rh_pct": 18, "temp_c": 24,
+    "precip_72h_mm": 0, "thunder_24h": 0
+  },
+  "baseline": {
+    "source": "Challenge brief (today's chain, no Firewatch)",
+    "milestones": [
+      {"key": "visual", "t": 27, "label": "First visual (rancher)"},
+      {"key": "call", "t": 31, "label": "911 call"},
+      {"key": "roll", "t": 44, "label": "Trucks roll"},
+      {"key": "on_scene", "t": 62, "label": "On scene"}
+    ]
+  },
+  "timeline": [
+    {"t": -230, "type": "sms", "from": "+13165550135", "body": "BURN", "note": "Gary Pruitt registers a pasture burn for today"},
+    {"t": 0, "type": "signal", "kind": "line_fault", "lat": 37.77, "lon": -96.66, "source": "coop:feeder-4", "value": "lockout",
+     "note": "Co-op SCADA: feeder 4 recloser locks out"},
+    {"t": 8, "type": "sms", "from": "+13165550131", "body": "1", "note": "Wes Kittle, 1 mi E: sees smoke"},
+    {"t": 9, "type": "sms", "from": "+13165550101", "body": "PAGE", "note": "Duty officer pages from her phone"},
+    {"t": 10, "type": "sms", "from": "+13165550111", "body": "R", "note": "Volunteer responding"},
+    {"t": 11, "type": "sms", "from": "+13165550151", "body": "R", "note": "Lease water truck heading there"},
+    {"t": 12, "type": "sms", "from": "+13165550102", "body": "SEND", "note": "Chief sends the mutual-aid request"},
+    {"t": 13, "type": "sms", "from": "+13165550113", "body": "R", "note": "Second volunteer responding"},
+    {"t": 38, "type": "detections", "note": "VIIRS NOAA-20 afternoon pass sees the fire and the registered burn",
+     "detections": [
+       {"source": "VIIRS_NOAA20_NRT", "satellite": "N20", "lat": 37.7776, "lon": -96.6565, "brightness_k": 352.1, "frp_mw": 28.4, "confidence": "nominal", "scan_km": 0.39, "track_km": 0.36, "daynight": "D"},
+       {"source": "VIIRS_NOAA20_NRT", "satellite": "N20", "lat": 37.7844, "lon": -96.6534, "brightness_k": 367.0, "frp_mw": 61.7, "confidence": "high", "scan_km": 0.39, "track_km": 0.36, "daynight": "D"},
+       {"source": "VIIRS_NOAA20_NRT", "satellite": "N20", "lat": 37.7912, "lon": -96.6503, "brightness_k": 359.8, "frp_mw": 44.2, "confidence": "high", "scan_km": 0.39, "track_km": 0.36, "daynight": "D"},
+       {"source": "VIIRS_NOAA20_NRT", "satellite": "N20", "lat": 37.7512, "lon": -96.5462, "brightness_k": 331.4, "frp_mw": 7.5, "confidence": "nominal", "scan_km": 0.39, "track_km": 0.36, "daynight": "D"}
+     ]}
+  ]
+}

@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     curing_pct_override: float | None = None
     nws_user_agent: str = "firewatch-demo (contact@example.com)"
     db_path: str = str(DATA_DIR / "firewatch.sqlite")
+    district: str = "cottonwood-creek"  # data/districts/<slug>/
+    sms_gateway: str = "outbox"  # outbox (records only) | twilio
+    twilio_account_sid: str = ""
+    twilio_auth_token: str = ""
+    twilio_from: str = ""
+    public_base_url: str = ""  # used to verify Twilio webhook signatures
+    scenario_seconds_per_minute: float = 2.0
+    api_token: str = ""  # when set, required (X-Firewatch-Token) on endpoints that can text people
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @property

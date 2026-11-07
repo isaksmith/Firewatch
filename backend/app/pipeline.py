@@ -2,17 +2,15 @@
 
 import logging
 import sqlite3
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 import httpx
 
 from .config import get_settings
-from .db import connect, iso, mark_source, parse_iso, utcnow
+from .confirm import evaluate_event, fetch_weather
+from .db import connect, iso, mark_source, utcnow
 from .features.cluster import assign_detection
-from .features.enrich import build_features
 from .ingest import firms
-from .ingest.weather import weather_at
-from .scoring.score import persist_score
 
 log = logging.getLogger(__name__)
 
@@ -40,23 +38,21 @@ def insert_detections(conn: sqlite3.Connection, dets: list[dict], is_sample: boo
     return new_ids
 
 
-def score_event(conn: sqlite3.Connection, event_id: int, weather: dict | None = None) -> None:
-    """Enrich and score one event. If `weather` is None, fetch it live (failure -> degraded)."""
+def score_event(
+    conn: sqlite3.Connection, event_id: int, weather: dict | None = None, now: datetime | None = None
+) -> None:
+    """Enrich, score, and re-level one event. If `weather` is None, fetch it live (failure -> degraded)."""
     if weather is None:
-        ev = conn.execute("SELECT lat, lon, last_seen FROM events WHERE id = ?", (event_id,)).fetchone()
-        try:
-            weather = weather_at(ev["lat"], ev["lon"], parse_iso(ev["last_seen"]))
-            mark_source(conn, "open_meteo", ok=True)
-        except (httpx.HTTPError, KeyError, ValueError) as e:
-            log.warning("weather unavailable for event %s: %s", event_id, e)
-            mark_source(conn, "open_meteo", ok=False, error=str(e))
-            weather = None
-    features, degraded = build_features(conn, event_id, weather)
-    persist_score(conn, event_id, features, degraded, weather)
+        weather = fetch_weather(conn, event_id)
+    evaluate_event(conn, event_id, weather, now)
 
 
 def process_detections(
-    conn: sqlite3.Connection, dets: list[dict], is_sample: bool = False, weather: dict | None = None
+    conn: sqlite3.Connection,
+    dets: list[dict],
+    is_sample: bool = False,
+    weather: dict | None = None,
+    now: datetime | None = None,
 ) -> set[int]:
     touched: set[int] = set()
     for det_id in insert_detections(conn, dets, is_sample):
@@ -64,7 +60,7 @@ def process_detections(
     existing = {r["id"] for r in conn.execute("SELECT id FROM events").fetchall()}
     touched &= existing
     for event_id in sorted(touched):
-        score_event(conn, event_id, weather)
+        score_event(conn, event_id, weather, now)
     return touched
 
 

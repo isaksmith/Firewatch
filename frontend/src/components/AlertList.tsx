@@ -1,6 +1,6 @@
 import { AlertTriangle, RotateCcw } from 'lucide-react'
 import type { AlertSummary } from '../api'
-import { REC_META, SUPPRESSION_LABEL, seenLabel, trackId } from '../lib/format'
+import { REC_META, SUPPRESSION_LABEL, seenLabel, sourcesLabel, trackId } from '../lib/format'
 import { filterQueue, type QueueTab } from '../lib/queue'
 import { ScoreReadout, Sparkline, StatusTag, TrackGlyph } from './ui'
 
@@ -25,7 +25,7 @@ export function AlertList(p: Props) {
     <aside className="flex w-[360px] shrink-0 flex-col border-r border-line bg-panel">
       <div className="flex h-9 items-center justify-between border-b border-line px-4">
         <span className="label !text-muted">Alert queue</span>
-        <span className="num text-[10px] text-dim">SORT: REC ▸ SCORE</span>
+        <span className="num text-[10px] text-dim">SORT: LEVEL ▸ SCORE</span>
       </div>
       <div className="grid grid-cols-3 border-b border-line">
         {tabs.map(([k, label]) => {
@@ -76,8 +76,12 @@ function AlertRow({ a, selected, hovered, onClick, onHover }: {
   onHover: (id: number | null) => void
 }) {
   const meta = REC_META[a.recommendation]
-  const sources = Object.entries(a.sources).map(([k, v]) => `${k}×${v}`).join(' ')
-  const sub = a.recommendation === 'monitor' && a.suppression ? `Suppressed: ${SUPPRESSION_LABEL[a.suppression]}` : a.top_reason
+  const sources = sourcesLabel(a.sources, a.signals)
+  const sub =
+    a.recommendation === 'monitor' && a.suppression
+      ? `Suppressed: ${SUPPRESSION_LABEL[a.suppression]}`
+      : (a.level_reason?.replace(/^\w+: /, '') ?? a.top_reason)
+  const awaiting = a.response?.awaiting
   return (
     <li
       onClick={onClick}
@@ -126,6 +130,18 @@ function AlertRow({ a, selected, hovered, onClick, onHover }: {
             <span className="truncate">{sources}</span>
           </div>
           {sub && <div className="mt-1.5 truncate text-[11.5px] text-muted">{sub}</div>}
+          {a.response && (
+            <div className="num mt-1.5 flex items-center gap-2 text-[10px] tracking-[0.06em]">
+              {a.response.decision === 'page' ? (
+                <span className="text-escalate">PAGED{a.response.decision_by ? ` · ${a.response.decision_by.split(' (')[0].toUpperCase()}` : ''}</span>
+              ) : a.response.decision === 'no' ? (
+                <span className="text-dim">STOOD DOWN</span>
+              ) : (
+                awaiting && <span className="blink text-investigate">AWAITING {awaiting.split(' (')[0].toUpperCase()}</span>
+              )}
+              <span className="ml-auto text-dim">{a.response.texts_sent} TEXTS</span>
+            </div>
+          )}
         </div>
       </div>
     </li>
