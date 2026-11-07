@@ -240,7 +240,7 @@ def test_ack_text_by_volunteer_holds_at_crowd_level():
     with connect() as conn:
         eid = escalated(conn)
         vol = volunteer(conn)
-        notify.send(conn, vol, "FIREWATCH check", "ask_neighbors", eid, at(8), True)
+        notify.send(conn, vol, "FIREWATCH page", "page", eid, at(8), True)
         r = notify.handle_inbound(conn, vol["phone"], "ack", at(9), is_sample=True)
         assert r["action"] == "ack" and ev(conn, eid)["ack_level"] == "crowd"
 
@@ -457,3 +457,45 @@ def test_operator_acknowledge_upgrades_a_crowd_hold_and_repeat_is_200():
         with connect() as conn:
             assert ev(conn, eid)["ack_level"] == "ladder"
         assert _act(client, eid, "acknowledge").status_code == 200
+
+
+def test_volunteer_ack_with_no_text_about_an_event_holds_nothing():
+    with connect() as conn:
+        eid = escalated(conn)
+        vol = volunteer(conn)
+        r = notify.handle_inbound(conn, vol["phone"], "ACK", at(9), is_sample=True)
+        assert r["action"] == "help" and "nothing open" in last_reply(conn)
+        assert ev(conn, eid)["ack_until"] is None
+
+
+def test_volunteer_ask_text_is_not_an_ack_target():
+    with connect() as conn:
+        eid = escalated(conn)
+        vol = volunteer(conn)
+        notify.send(conn, vol, "FIREWATCH check", "ask_neighbors", eid, at(8), True)
+        r = notify.handle_inbound(conn, vol["phone"], "ACK", at(9), is_sample=True)
+        assert r["action"] == "help" and ev(conn, eid)["ack_until"] is None
+
+
+def test_duty_ack_targets_the_newer_post_text_over_a_closed_event():
+    with connect() as conn:
+        eid = escalated(conn)
+        conn.execute("UPDATE events SET status = 'closed' WHERE id = ?", (eid,))
+        pid = posts.create(conn, None, "+13165559003", "smoke by road", "smoke", False, at(10), True, at=FIRE)["post_id"]
+        duty = conn.execute("SELECT * FROM contacts WHERE phone = ?", (DUTY,)).fetchone()
+        notify.send(conn, duty, "FIREWATCH post", "post_timer", None, at(11), True, post_id=pid)
+        r = notify.handle_inbound(conn, DUTY, "ACK", at(12), is_sample=True)
+        assert r["action"] == "ack"
+        assert conn.execute("SELECT ack_level FROM posts WHERE id = ?", (pid,)).fetchone()["ack_level"] == "ladder"
+        assert ev(conn, eid)["ack_until"] is None
+
+
+def test_duty_ack_with_no_texts_falls_back_to_the_open_response():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = add_signal(conn, "line_fault", *FIRE, iso(at(0)), "coop:feeder-4", "lockout", is_sample=True)
+        evaluate_event(conn, eid, WEATHER, at(0))
+        conn.execute("DELETE FROM messages WHERE direction = 'out'")
+        assert conn.execute("SELECT response_json FROM events WHERE id = ?", (eid,)).fetchone()[0] is not None
+        r = notify.handle_inbound(conn, DUTY, "ACK", at(2), is_sample=True)
+        assert r["action"] == "ack" and ev(conn, eid)["ack_level"] == "ladder"

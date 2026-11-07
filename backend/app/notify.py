@@ -613,6 +613,28 @@ def _latest_open_response(conn, is_sample: bool) -> int | None:
     return r["id"] if r else None
 
 
+# Texts an ACK can answer: the ladder messages plus a page and the post alerts to the duty officer.
+ACK_PURPOSES = DECIDERS + ("page", "post_timer", "post_hazard")
+
+
+def _ack_target(conn, contact, is_sample: bool) -> tuple[int | None, int | None]:
+    """(event_id, post_id) of the newest text this contact got that an ACK can answer.
+
+    Only a ladder member with no such text falls back to the newest open response; a volunteer never does.
+    """
+    marks = ",".join("?" * len(ACK_PURPOSES))
+    r = conn.execute(
+        f"SELECT event_id, post_id FROM messages WHERE contact_id = ? AND direction = 'out' AND purpose IN ({marks}) "
+        "AND (event_id IS NOT NULL OR post_id IS NOT NULL) ORDER BY id DESC LIMIT 1",
+        (contact["id"], *ACK_PURPOSES),
+    ).fetchone()
+    if r:
+        return r["event_id"], (None if r["event_id"] else r["post_id"])
+    if contact["role"] in LADDER_ROLES:
+        return _latest_open_response(conn, is_sample), None
+    return None, None
+
+
 # --- inbound ---------------------------------------------------------------------------------------------
 
 HELP = "{name} Firewatch: text FIRE to report a fire, BURN to register a burn today, STOP to opt out."
@@ -761,12 +783,7 @@ def handle_inbound(
         if not level_ok:
             out["reply"] = HELP.format(name=d.short_name)
         else:
-            eid = latest_event(DECIDERS) or _latest_open_response(conn, is_sample)
-            pid = None
-            if eid is None and (r := conn.execute(
-                    "SELECT post_id FROM messages WHERE contact_id = ? AND direction = 'out' AND post_id IS NOT NULL "
-                    "AND purpose IN ('post_timer','post_hazard') ORDER BY id DESC LIMIT 1", (contact["id"],)).fetchone()):
-                pid = r["post_id"]
+            eid, pid = _ack_target(conn, contact, is_sample)
             if eid is None and pid is None:
                 out.update(action="help", reply="Firewatch: nothing open for you to acknowledge.")
             else:
