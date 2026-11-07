@@ -291,6 +291,15 @@ export interface PlanSite {
   priority: number
   adds_coverage: number
   reasons: string[]
+  risk: {
+    rank: number
+    factors: { key: RiskFactor; label: string; share: number }[]
+    tallgrass: boolean
+    downwind_of_town: number
+  }
+  choice: string[]
+  placement: string
+  layout: string
   checks: string[]
   bare: number
   rich: number
@@ -299,9 +308,13 @@ export interface PlanSite {
   nodes: { tier: 'bare' | 'rich'; lon: number; lat: number; faces: string | null }[]
 }
 
+export type RiskFactor = 'history' | 'burns' | 'lines' | 'people'
+
 export interface PlanRelay extends RadioLink {
   name: string
-  kind: 'town' | 'substation' | 'high_point' | 'site_mast'
+  kind: 'town' | 'substation' | 'high_point' | 'site_mast' | 'new_mast'
+  why: string
+  serves: number[]
   mount: 'tower' | 'mast'
   power: 'mains' | 'solar'
   lon: number

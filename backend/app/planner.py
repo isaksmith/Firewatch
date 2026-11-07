@@ -414,18 +414,33 @@ def choose_sites(g: Grid, clim: dict, p: dict, n: int) -> tuple[list[dict], list
     miss = np.ones_like(g.x)
     chosen, curve = [], [0.0]
     limit = max(n, min(2 * n, 40), 10)
+    taken = set()
     for _ in range(limit):
-        best, gain = None, 0.0
+        best, gain, gains, blocked = None, 0.0, {}, {}
         for c in cands:
-            if any(math.hypot(c[1] - s["x"], c[2] - s["y"]) < p["site_min_sep_km"] for s in chosen):
+            if c[0] in taken:
+                continue
+            close = [k for k, s in enumerate(chosen) if math.hypot(c[1] - s["x"], c[2] - s["y"]) < p["site_min_sep_km"]]
+            if close:
+                blocked[c[0]] = close
                 continue
             gn = float((g.priority * miss * c[4]).sum())
+            gains[c[0]] = gn
             if gn > gain:
                 best, gain = c, gn
         if best is None:
             break
+        # Riskier cells this pick beat, so the page can say why the greedy search passed over them.
+        riskier = [c[0] for c in cands if c[0] not in taken and g.priority[c[0]] > g.priority[best[0]]]
+        too_close = sorted({k + 1 for i in riskier if i in blocked for k in blocked[i]})
+        runner = max((v for i, v in gains.items() if i != best[0]), default=0.0)
+        taken.add(best[0])
         miss *= 1 - best[4]
-        chosen.append({"cell": best[0], "x": best[1], "y": best[2], "on": best[3], "cover": best[4], "gain": gain / total})
+        chosen.append({
+            "cell": best[0], "x": best[1], "y": best[2], "on": best[3], "cover": best[4], "gain": gain / total,
+            "riskier_too_close": sum(i in blocked for i in riskier), "too_close_to": too_close,
+            "riskier_watched": sum(i in gains for i in riskier), "runner_up_gain": runner / total,
+        })
         curve.append(round(1 - float((g.priority * miss).sum()) / total, 4))
     return chosen, curve
 
@@ -722,6 +737,83 @@ def _reasons(g: Grid, i: int, lon: float, lat: float, clim: dict, region_fires: 
     return out or ["Fills a coverage gap between higher-risk sites"]
 
 
+FACTOR_LABELS = {
+    "history": "Reported wildfires", "burns": "Satellite-seen burning", "lines": "Power lines and substations",
+    "people": "Towns nearby",
+}
+RELAY_WHY = {
+    "town": "Grain elevator or water tower: a 30 m mount on mains power, the longest reach for the least cost.",
+    "substation": "Substation structure: a tall mount with mains power on site.",
+    "high_point": "High ground: a 10 m mast here sees over the surrounding draws and needs no tower.",
+    "site_mast": "A 10 m mast at the plot itself: no existing tower or high ground reaches it directly.",
+    "new_mast": "No existing tower or high ground connects this stretch, so the plan adds a 10 m solar mast.",
+}
+SIDES = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+
+
+def _risk_rank(g: Grid) -> np.ndarray:
+    """Share of the region's cells with lower priority than each cell."""
+    return np.searchsorted(np.sort(g.priority), g.priority, side="left") / max(1, len(g.x))
+
+
+def _shares(g: Grid, i: int) -> dict[str, float]:
+    """How much of a cell's likelihood score each factor supplies."""
+    parts = {k: WEIGHTS[k] * float(g.comps[k][i]) for k in WEIGHTS}
+    total = sum(parts.values()) or 1.0
+    return {k: round(v / total, 2) for k, v in parts.items()}
+
+
+def _risk(g: Grid, i: int, rank: float) -> dict:
+    return {
+        "rank": round(float(rank), 3),
+        "factors": sorted(({"key": k, "label": FACTOR_LABELS[k], "share": v} for k, v in _shares(g, i).items()),
+                          key=lambda f: -f["share"]),
+        "tallgrass": bool(g.comps["fuel"][i] == TALLGRASS_FUEL),
+        "downwind_of_town": round(float(g.consequence[i]), 2),
+    }
+
+
+def _choice(s: dict, k: int, sep_km: float) -> list[str]:
+    if k == 0:
+        lead = (f"First pick: a plot here watches {s['gain']:.2%} of the region's fire-start risk, more than a plot "
+                f"anywhere else (next best {s['runner_up_gain']:.2%}).")
+    else:
+        lead = (f"Pick {k + 1}: it adds {s['gain']:.2%} of the region's risk that earlier plots don't watch, "
+                f"the most of any spot left (next best {s['runner_up_gain']:.2%}).")
+    out = [lead]
+    if s["riskier_too_close"]:
+        near = ", ".join(f"S{j}" for j in s["too_close_to"])
+        out.append(f"{s['riskier_too_close']} riskier cell{'s were' if s['riskier_too_close'] > 1 else ' was'} skipped for "
+                   f"being within {sep_km:g} km of {near}, so plots don't crowd one patch of ground.")
+    if s["riskier_watched"]:
+        n = s["riskier_watched"]
+        why = "less risky ground lies upwind of them" if k == 0 else "less risky ground lies upwind of them, or earlier plots already watch it"
+        out.append(f"{n} riskier cell{'s' if n > 1 else ''} would catch less: a plot only smells fires upwind, and {why}.")
+    return out
+
+
+def _placement(g: Grid, s: dict) -> str:
+    if s["on"] == "line":
+        return (f"Placed on the {g.line_name[s['cell']]} where it crosses the cell: line faults start fires, and the "
+                "right-of-way gives road access.")
+    return f"Placed at the center of its {g.cell_km:g} km grid cell; no transmission line crosses it."
+
+
+def _layout(s: dict) -> str:
+    rich = []
+    for nd in s["nodes"]:
+        if nd["tier"] == "rich":
+            side = SIDES[int((math.degrees(math.atan2(nd["x"] - s["x"], nd["y"] - s["y"])) % 360) / 45 + 0.5) % 8]
+            rich.append(f"{side} corner for {nd['faces']} winds")
+    bare = sum(nd["tier"] == "bare" for nd in s["nodes"])
+    parts = []
+    if rich:
+        parts.append("Rich nodes sit downwind on the " + " and ".join(rich))
+    if bare:
+        parts.append(f"{bare} bare node{'s' if bare > 1 else ''} fill the next most-downwind spots")
+    return "; ".join(parts) + ", since a sensor only smells a fire upwind of it."
+
+
 def _site_checks(lon: float, lat: float, g: Grid, i: int, clim: dict) -> list[str]:
     out = []
     sub = nearest_substation(lat, lon)
@@ -797,6 +889,7 @@ def plan_region(region: Region, overrides: dict | None = None, fetch_climate: bo
                         f"(${cost * (1 + SPARES):,.0f}); showing one plot anyway.")
 
     region_fires = [f for f in _wildfires() if f["type"] == "WF"]
+    rank = _risk_rank(g)
     site_out, node_feats = [], []
     for k, s in enumerate(sites):
         lon, lat = (float(v) for v in g.plane.lonlat(s["x"], s["y"]))
@@ -815,6 +908,10 @@ def plan_region(region: Region, overrides: dict | None = None, fetch_climate: bo
             "id": k + 1, "label": label, "lon": round(lon, 5), "lat": round(lat, 5), "on": s["on"],
             "priority": round(float(g.priority[s["cell"]]), 3), "adds_coverage": round(s["gain"], 4),
             "reasons": _reasons(g, s["cell"], lon, lat, clim, region_fires),
+            "risk": _risk(g, s["cell"], rank[s["cell"]]),
+            "choice": _choice(s, k, p["site_min_sep_km"]),
+            "placement": _placement(g, s),
+            "layout": _layout(s),
             "checks": _site_checks(lon, lat, g, s["cell"], clim),
             "bare": sum(nd["tier"] == "bare" for nd in s["nodes"]),
             "rich": sum(nd["tier"] == "rich" for nd in s["nodes"]),
@@ -828,6 +925,11 @@ def plan_region(region: Region, overrides: dict | None = None, fetch_climate: bo
         warnings.append(f"Site {ids} needs more than {HOP_LIMIT} relays to reach the station; raise the Meshtastic "
                         "hop limit on those nodes or find a taller mount.")
 
+    serves: dict[int, list[int]] = {}
+    for gi, (i, _) in mesh["attach"].items():
+        while i != 0:
+            serves.setdefault(i, []).append(gi + 1)
+            i = mesh["parent"][i][0]
     relays = []
     link_feats = []
     for i in mesh["relays"]:
@@ -835,7 +937,8 @@ def plan_region(region: Region, overrides: dict | None = None, fetch_climate: bo
         up, ln = mesh["parent"][i]
         upn = mesh["nodes"][up]
         relays.append({"name": c["name"], "kind": c["kind"], "mount": c["mount"], "power": c["power"],
-                       "lon": round(c["lon"], 5), "lat": round(c["lat"], 5), "uplink": upn["name"], **ln})
+                       "lon": round(c["lon"], 5), "lat": round(c["lat"], 5), "uplink": upn["name"],
+                       "why": RELAY_WHY[c["kind"]], "serves": sorted(serves.get(i, [])), **ln})
         link_feats.append(_feature({"type": "LineString", "coordinates": [[c["lon"], c["lat"]], [upn["lon"], upn["lat"]]]},
                                    kind="backbone", **ln))
     for k, s in enumerate(site_out):
@@ -858,7 +961,9 @@ def plan_region(region: Region, overrides: dict | None = None, fetch_climate: bo
         lo, la = g.plane.lonlat(xs, ys)
         cells.append(_feature(
             {"type": "Polygon", "coordinates": [[[round(float(a), 5), round(float(b), 5)] for a, b in zip(lo, la)]]},
-            priority=round(float(g.priority[i]), 3), covered=round(float(covered[i]), 2),
+            priority=round(float(g.priority[i]), 3), covered=round(float(covered[i]), 2), rank=round(float(rank[i]), 3),
+            **_shares(g, i),
+            tallgrass=bool(g.comps["fuel"][i] == TALLGRASS_FUEL), downwind=round(float(g.consequence[i]), 2),
         ))
 
     fires_in = [f for f in region_fires if _inside(np.array([f["lon"]]), np.array([f["lat"]]), region.rings)[0]]

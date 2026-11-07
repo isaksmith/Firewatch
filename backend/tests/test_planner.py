@@ -148,3 +148,17 @@ def test_planner_api():
     assert r.status_code == 200
     assert r.json()["summary"]["sites"] == 4
     assert client.get("/api/planner/plan", params={"region": "county:Atlantis"}).status_code == 404
+
+
+def test_plan_explains_each_site_and_relay(plan):
+    first, *rest = plan["sites"]
+    assert first["choice"][0].startswith("First pick")
+    assert all(s["choice"][0].startswith(f"Pick {s['id']}:") for s in rest)
+    for s in plan["sites"]:
+        assert 0 <= s["risk"]["rank"] <= 1
+        assert abs(sum(f["share"] for f in s["risk"]["factors"]) - 1) < 0.02
+        assert s["placement"] and "downwind" in s["layout"]
+    for r in plan["relays"]:
+        assert r["why"] and r["serves"]
+    cell = plan["geojson"]["cells"]["features"][0]["properties"]
+    assert {"rank", "history", "burns", "lines", "people", "tallgrass", "downwind"} <= cell.keys()

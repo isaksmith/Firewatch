@@ -493,13 +493,20 @@ The tower relays carry sensors: a PMSA003I particulate sensor and an SHTC3 or BM
    - an industrial heat source within 5 km;
    - Flint Hills burn-season haze;
    - foggy mornings.
+10. **Explanations.** Following principle 2, every placement says why:
+    - **The ground:** the cell's risk rank within the region, and how much of its score each factor supplies (reported wildfires, satellite-seen burning, power lines, towns), plus tallgrass fuel and whether fire winds carry it toward a town.
+    - **The pick:** the share of the region's risk the plot adds, and the next-best spot's share. It also says how many riskier cells were passed over, and why: too close to an earlier plot, or with less risk upwind of them.
+    - **The layout:** whether the plot sits on a line right-of-way or at the cell center, and which corners the rich nodes take for which fire winds.
+    - **Each relay:** why that kind of mount was used, and which plots it carries.
+
+    The map shades risk in three classes by rank within the region (the top 5%, the next 15%, the next 30%), because scores are normalized per region. Hovering a cell shows its breakdown.
 
 **Output.** `GET /api/planner/plan?region=district:cottonwood-creek` returns:
 - the region, climate and power check;
-- plots with reasons, checks, node positions, gateway link and hop count;
-- relays with uplinks;
+- plots with reasons, a risk breakdown, why each was picked and laid out, checks, node positions, gateway link and hop count;
+- relays with uplinks, why each was used, and the plots each carries;
 - a bill of materials at the README's prices, plus the custom-PCB estimate;
-- GeoJSON for the priority grid, nodes and links;
+- GeoJSON for the priority grid (with each cell's rank and factor shares), nodes and links;
 - the assumptions, and any warnings.
 
 For Cottonwood Creek's 446 sq mi, the default 10 plots (70 bare, 20 rich) need 8 relays and come to about $19,700 with spares. They watch about 10% of the priority-weighted ground. That's the honest number: plots add evidence where fires are most likely, and satellites, line faults and neighbor reports cover the rest.
@@ -788,8 +795,8 @@ App
 └── PlannerPage (/planner)
     ├── Controls (Region, Plots or Budget, Bare/Rich per plot, detection ranges)
     ├── Summary (counts, cost, CoverageCurve), ClimatePanel (WindRose, MonthBars), PowerRow[]
-    ├── SiteCard[] (reasons, checks, gateway link), Relays, Bill of materials, Assumptions
-    └── PlanMap (priority grid, watched cells, plots, nodes at zoom ≥ 12, relays, links, station, reported wildfires)
+    ├── SiteCard[] (why this ground, why this plot, layout, checks, gateway link), Relays (why, plots carried), Bill of materials, Assumptions
+    └── PlanMap (risk classes with hover breakdown, watched cells, plots, nodes at zoom ≥ 12, relays, links, station, reported wildfires; collapsible legend)
 ```
 
 ## 9. Configuration

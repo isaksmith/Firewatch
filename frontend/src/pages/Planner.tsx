@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { AlertTriangle, ChevronRight, Radio } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Map, { Layer, Marker, NavigationControl, ScaleControl, Source, type MapRef } from 'react-map-gl/maplibre'
-import { api, type Climatology, type PlanParams, type PlanSite, type RegionPlan, type TierPower } from '../api'
+import { api, type Climatology, type PlanParams, type PlanSite, type RegionPlan, type RiskFactor, type TierPower } from '../api'
 import { TopBar } from '../components/TopBar'
 import { KV, SectionHeader } from '../components/ui'
 import { BASEMAP_STYLE, KANSAS_VIEW } from '../lib/map'
@@ -12,6 +12,24 @@ const MONTHS = 'JFMAMJJASOND'
 const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
 const pct = (x: number) => `${Math.round(x * 100)}%`
 const KM_PER_MI = 1.609344
+
+// Classes by rank within the region, since scores are normalized per region and only compare inside it.
+const RISK_CLASSES = [
+  { min: 0.95, color: '#ff4b2b', opacity: 0.5, label: 'Highest', note: 'top 5% of the region' },
+  { min: 0.8, color: '#ff8a1f', opacity: 0.32, label: 'High', note: 'next 15%' },
+  { min: 0.5, color: '#ffb21a', opacity: 0.16, label: 'Elevated', note: 'next 30%' },
+]
+const FACTOR_LABELS: Record<RiskFactor, string> = {
+  history: 'Reported wildfires',
+  burns: 'Satellite-seen burning',
+  lines: 'Power lines',
+  people: 'Towns nearby',
+}
+const riskClass = (rank: number) => RISK_CLASSES.find((c) => rank >= c.min)
+const topShare = (rank: number) => `top ${Math.max(1, Math.ceil((1 - rank) * 100))}%`
+const riskStep = (scale: number) => ['step', ['get', 'rank'], 0, ...[...RISK_CLASSES].reverse().flatMap((c) => [c.min, c.opacity * scale])]
+// Keeps the region and the selected plot clear of the legend in the top-right corner, when the map is wide enough.
+const mapPadding = (m: MapRef) => ({ top: 48, bottom: 48, left: 48, right: m.getContainer().clientWidth >= 640 ? 280 : 48 })
 
 type FormKey = 'sites' | 'bare' | 'rich' | 'budget' | 'richKm' | 'bareKm'
 const LIMITS: Record<FormKey, { min: number; max: number; label: string }> = {
@@ -155,6 +173,36 @@ function PowerRow({ tier, p }: { tier: string; p: TierPower }) {
   )
 }
 
+function FactorBars({ shares }: { shares: { key: RiskFactor; share: number }[] }) {
+  return (
+    <div className="space-y-[3px]">
+      {shares.map((f) => (
+        <div key={f.key} className="grid grid-cols-[118px_1fr_30px] items-center gap-2 text-[10.5px]">
+          <span className="text-muted">{FACTOR_LABELS[f.key]}</span>
+          <span className="h-1.5 bg-raised">
+            <span className="block h-full bg-investigate/80" style={{ width: `${f.share * 100}%` }} />
+          </span>
+          <span className="num text-right text-dim">{pct(f.share)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function RiskLine({ rank, tallgrass, downwind }: { rank: number; tallgrass: boolean; downwind: number }) {
+  const cls = riskClass(rank)
+  return (
+    <div className="text-[11.5px] leading-snug">
+      <span style={{ color: cls?.color ?? '#8b939c' }}>{cls?.label ?? 'Lower'} risk</span>
+      <span className="text-muted">
+        {' '}
+        · {topShare(rank)} of the region{tallgrass ? ' · tallgrass fuel' : ''}
+        {downwind >= 0.2 ? ' · fire winds carry it toward a town' : ''}
+      </span>
+    </div>
+  )
+}
+
 function SiteCard({ s, open, onToggle }: { s: PlanSite; open: boolean; onToggle: () => void }) {
   return (
     <div className={`border-b border-line ${open ? 'bg-panel-2' : ''}`}>
@@ -167,12 +215,32 @@ function SiteCard({ s, open, onToggle }: { s: PlanSite; open: boolean; onToggle:
         <ChevronRight size={12} className={`text-dim transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
       {open && (
-        <div className="space-y-2 px-4 pb-3 pl-13 text-[11.5px] leading-snug">
-          <ul className="space-y-1 text-muted">
-            {s.reasons.map((r) => (
-              <li key={r}>· {r}</li>
-            ))}
-          </ul>
+        <div className="space-y-2.5 px-4 pb-3 pl-13 text-[11.5px] leading-snug">
+          <div className="space-y-1.5">
+            <div className="label !text-[9px]">Why this ground</div>
+            <RiskLine rank={s.risk.rank} tallgrass={s.risk.tallgrass} downwind={s.risk.downwind_of_town} />
+            <FactorBars shares={s.risk.factors} />
+            <ul className="space-y-1 text-muted">
+              {s.reasons.map((r) => (
+                <li key={r}>· {r}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="space-y-1">
+            <div className="label !text-[9px]">Why this plot over others</div>
+            <ul className="space-y-1 text-muted">
+              {s.choice.map((r) => (
+                <li key={r}>· {r}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="space-y-1">
+            <div className="label !text-[9px]">Where in the cell</div>
+            <ul className="space-y-1 text-muted">
+              <li>· {s.placement}</li>
+              <li>· {s.layout}</li>
+            </ul>
+          </div>
           {s.checks.length > 0 && (
             <ul className="space-y-1 text-investigate/90">
               {s.checks.map((r) => (
@@ -189,9 +257,6 @@ function SiteCard({ s, open, onToggle }: { s: PlanSite; open: boolean; onToggle:
             ) : (
               <span className="text-escalate">NO RADIO PATH: SURVEY A TALLER MOUNT</span>
             )}
-          </div>
-          <div className="num text-[10.5px] text-dim">
-            ADDS {(s.adds_coverage * 100).toFixed(1)}% OF PRIORITY · {s.on === 'line' ? 'ON THE POWER LINE' : 'CELL CENTER'}
           </div>
         </div>
       )}
@@ -216,6 +281,8 @@ function NumField({ label, value, onChange, min, max, step = 1 }: { label: strin
   )
 }
 
+type CellProps = Record<RiskFactor, number> & { rank: number; covered: number; tallgrass: boolean; downwind: number }
+
 function PlanMap({
   plan,
   selected,
@@ -229,17 +296,22 @@ function PlanMap({
 }) {
   const mapRef = useRef<MapRef>(null)
   const [ready, setReady] = useState(false)
+  const [hovered, setHover] = useState<{ id: number; plan: RegionPlan; props: CellProps } | null>(null)
+  const hover = hovered?.plan === plan ? hovered : null
+  const [legendOpen, setLegendOpen] = useState(true)
   const lines = useQuery({ queryKey: ['layer', 'power_lines'], queryFn: () => api.layer('power_lines') })
   const fires = useQuery({ queryKey: ['layer', 'wildfire_history'], queryFn: () => api.layer('wildfire_history') })
   const key = plan?.region.key
   const bbox = plan?.region.bbox
   useEffect(() => {
-    if (ready && bbox) mapRef.current?.fitBounds([bbox[0], bbox[1], bbox[2], bbox[3]], { padding: 48, duration: 900 })
+    const m = mapRef.current
+    if (ready && bbox && m) m.fitBounds([bbox[0], bbox[1], bbox[2], bbox[3]], { padding: mapPadding(m), duration: 900 })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, key])
   const site = plan?.sites.find((s) => s.id === selected)
   useEffect(() => {
-    if (ready && site) mapRef.current?.flyTo({ center: [site.lon, site.lat], zoom: 15, duration: 1000 })
+    const m = mapRef.current
+    if (ready && site && m) m.flyTo({ center: [site.lon, site.lat], zoom: 15, duration: 1000, padding: mapPadding(m) })
   }, [ready, site])
   const wildfires = useMemo(
     () => (fires.data ? { ...fires.data, features: fires.data.features.filter((f) => f.properties?.type === 'WF') } : null),
@@ -255,20 +327,31 @@ function PlanMap({
         style={{ width: '100%', height: '100%' }}
         attributionControl={{ compact: true }}
         onLoad={() => setReady(true)}
+        interactiveLayerIds={plan ? ['cells-fill'] : []}
+        onMouseMove={(e) => {
+          const f = e.features?.[0]
+          if (!f || !plan) return setHover(null)
+          setHover((h) => (h && h.id === f.id && h.plan === plan ? h : { id: f.id as number, plan, props: f.properties as CellProps }))
+        }}
+        onMouseLeave={() => setHover(null)}
       >
         <NavigationControl position="bottom-right" showCompass={false} />
         <ScaleControl position="bottom-left" unit="imperial" maxWidth={90} />
         {plan && (
-          <Source id="cells" type="geojson" data={plan.geojson.cells}>
+          <Source id="cells" type="geojson" data={plan.geojson.cells} generateId>
             <Layer
               id="cells-fill"
               type="fill"
               paint={{
                 'fill-antialias': false,
-                'fill-color': ['interpolate', ['linear'], ['get', 'priority'], 0, '#121519', 0.25, '#ffb21a', 0.5, '#ff4b2b'],
-                'fill-opacity': ['interpolate', ['linear'], ['get', 'priority'], 0, 0, 0.1, 0.12, 0.5, 0.45],
+                'fill-color': ['step', ['get', 'rank'], '#121519', ...[...RISK_CLASSES].reverse().flatMap((c) => [c.min, c.color])] as unknown as string,
+                // Fades when zoomed into a plot so the nodes and basemap stay readable.
+                'fill-opacity': ['interpolate', ['linear'], ['zoom'], 12, riskStep(1), 15, riskStep(0.25)] as unknown as number,
               }}
             />
+            {hover && (
+              <Layer id="cells-hover" type="line" filter={['==', ['id'], hover.id]} paint={{ 'line-color': '#e6e8eb', 'line-width': 1.25 }} />
+            )}
             <Layer
               id="cells-covered"
               type="line"
@@ -376,30 +459,61 @@ function PlanMap({
           <span className="blink h-1.5 w-1.5 bg-sample" /> PLANNING {busy.toUpperCase()}…
         </div>
       )}
-      <div className="hud absolute top-4 right-4 w-[210px] space-y-1.5 p-3 text-[11px] text-muted">
-        <div className="label mb-1">Legend</div>
-        <div className="flex items-center gap-2.5">
-          <span className="h-2.5 w-4 bg-gradient-to-r from-investigate/30 to-escalate/70" /> Fire-start priority
-        </div>
-        <div className="flex items-center gap-2.5">
-          <span className="h-2.5 w-4 border border-ok/80" /> Watched by a plot
-        </div>
-        <div className="flex items-center gap-2.5">
-          <span className="ml-0.5 h-2.5 w-2.5 rotate-45 border border-investigate" /> <span className="ml-1">Sensor plot</span>
-        </div>
-        <div className="flex items-center gap-2.5">
-          <span className="ml-1 h-2 w-2 rounded-full bg-text" /> <span className="ml-0.5">Bare node</span>
-          <span className="ml-2 h-2 w-2 rounded-full bg-ok" /> Rich
-        </div>
-        <div className="flex items-center gap-2.5">
-          <Radio size={13} className="text-sample" /> Relay · <span className="h-px w-4 bg-sample" /> link
-        </div>
-        <div className="flex items-center gap-2.5">
-          <span className="ml-0.5 h-2.5 w-2.5 rounded-full border border-escalate" /> <span className="ml-0.5">Reported wildfire</span>
-        </div>
-        <div className="pt-1 text-[10px] text-dim">Zoom into a plot to see its nodes.</div>
+      <div className={`hud absolute top-4 right-4 space-y-1.5 p-3 text-[11px] text-muted ${legendOpen ? 'w-[230px]' : ''}`}>
+        <button onClick={() => setLegendOpen((o) => !o)} className="label flex w-full items-center justify-between gap-3 hover:text-text">
+          {legendOpen ? 'Fire-start risk' : 'Legend'}
+          <ChevronRight size={12} className={`transition-transform ${legendOpen ? 'rotate-90' : ''}`} />
+        </button>
+        {legendOpen && <Legend />}
       </div>
+      {hover && (
+        <div className="hud absolute bottom-12 left-4 w-[260px] max-w-[calc(100%-5rem)] space-y-1.5 p-3">
+          <RiskLine rank={hover.props.rank} tallgrass={hover.props.tallgrass} downwind={hover.props.downwind} />
+          <FactorBars
+            shares={(Object.keys(FACTOR_LABELS) as RiskFactor[]).map((k) => ({ key: k, share: hover.props[k] })).sort((a, b) => b.share - a.share)}
+          />
+          <div className="num text-[10px] text-dim">
+            {hover.props.covered >= 0.3 ? `WATCHED ${pct(hover.props.covered)} BY THE PLAN'S PLOTS` : 'NOT WATCHED BY A PLOT'}
+          </div>
+        </div>
+      )}
     </div>
+  )
+}
+
+function Legend() {
+  return (
+    <>
+      {RISK_CLASSES.map((c) => (
+        <div key={c.label} className="flex items-center gap-2.5">
+          <span className="h-2.5 w-4 border" style={{ background: c.color, opacity: Math.min(1, c.opacity * 2), borderColor: c.color }} />
+          <span className="text-text">{c.label}</span>
+          <span className="text-[10px] text-dim">{c.note}</span>
+        </div>
+      ))}
+      <div className="pb-1.5 text-[10px] leading-snug text-dim">
+        Scored from reported wildfires, satellite-seen burning, power lines, and towns; raised in tallgrass and where fire winds blow toward a town.
+        Hover the map for a cell's breakdown.
+      </div>
+      <div className="label mb-1 border-t border-line pt-2">Network</div>
+      <div className="flex items-center gap-2.5">
+        <span className="h-2.5 w-4 border border-ok/80" /> Watched by a plot
+      </div>
+      <div className="flex items-center gap-2.5">
+        <span className="ml-0.5 h-2.5 w-2.5 rotate-45 border border-investigate" /> <span className="ml-1">Sensor plot</span>
+      </div>
+      <div className="flex items-center gap-2.5">
+        <span className="ml-1 h-2 w-2 rounded-full bg-text" /> <span className="ml-0.5">Bare node</span>
+        <span className="ml-2 h-2 w-2 rounded-full bg-ok" /> Rich
+      </div>
+      <div className="flex items-center gap-2.5">
+        <Radio size={13} className="text-sample" /> Relay · <span className="h-px w-4 bg-sample" /> link
+      </div>
+      <div className="flex items-center gap-2.5">
+        <span className="ml-0.5 h-2.5 w-2.5 rounded-full border border-escalate" /> <span className="ml-0.5">Reported wildfire</span>
+      </div>
+      <div className="pt-1 text-[10px] text-dim">Zoom into a plot to see its nodes.</div>
+    </>
   )
 }
 
@@ -595,11 +709,16 @@ export function Planner() {
                   <span className="num text-[10px] text-dim">BRIDGE</span>
                 </div>
                 {p.relays.map((r) => (
-                  <div key={`${r.lon},${r.lat}`} className="flex justify-between gap-3">
-                    <span className="min-w-0 text-muted">{r.name}</span>
-                    <span className="num shrink-0 text-[10px] text-dim">
-                      {r.power === 'mains' ? 'MAINS' : 'SOLAR'} · {(r.km / KM_PER_MI).toFixed(1)} MI
-                    </span>
+                  <div key={`${r.lon},${r.lat}`} className="pt-1">
+                    <div className="flex justify-between gap-3">
+                      <span className="min-w-0 text-muted">{r.name}</span>
+                      <span className="num shrink-0 text-[10px] text-dim">
+                        {r.power === 'mains' ? 'MAINS' : 'SOLAR'} · {(r.km / KM_PER_MI).toFixed(1)} MI
+                      </span>
+                    </div>
+                    <div className="text-[10.5px] leading-snug text-dim">
+                      {r.why} Carries {r.serves.map((id) => `S${id}`).join(', ')} toward {r.uplink}.
+                    </div>
                   </div>
                 ))}
               </div>
