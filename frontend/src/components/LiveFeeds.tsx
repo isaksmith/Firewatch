@@ -180,10 +180,10 @@ export function LiveLayers({ feeds }: { feeds: FeedState[] }) {
         return (
           <Source key={k} id={`live-${k}`} type="geojson" data={f.geo}>
             {f.def.kind === 'polygon' ? (
-              <>
-                <Layer id={`live-${k}-fill`} type="fill" filter={['==', ['geometry-type'], 'Polygon']} paint={{ 'fill-color': c, 'fill-opacity': 0.18 }} />
-                <Layer id={`live-${k}-line`} type="line" paint={{ 'line-color': c, 'line-width': 1.5, 'line-opacity': 0.9 }} />
-              </>
+              [
+                <Layer key="fill" id={`live-${k}-fill`} type="fill" filter={['==', ['geometry-type'], 'Polygon']} paint={{ 'fill-color': c, 'fill-opacity': 0.18 }} />,
+                <Layer key="line" id={`live-${k}-line`} type="line" paint={{ 'line-color': c, 'line-width': 1.5, 'line-opacity': 0.9 }} />,
+              ]
             ) : (
               <Layer
                 id={`live-${k}-pt`}
