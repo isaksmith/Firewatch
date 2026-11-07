@@ -129,24 +129,35 @@ def _item(conn, r, station: bool, now) -> dict:
     return out
 
 
+def _list(conn, now, is_sample: bool, station: bool) -> list[dict]:
+    q = ("SELECT p.*, c.registered a_registered, c.name a_name, "
+         "e.status e_status, (SELECT COUNT(*) FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 1) n_counted, "
+         "(SELECT COUNT(*) FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 0) n_notes "
+         "FROM posts p LEFT JOIN contacts c ON c.id = p.contact_id "
+         "LEFT JOIN posts par ON par.id = p.parent_id LEFT JOIN events e ON e.id = COALESCE(p.event_id, par.event_id) WHERE p.created_at >= ? AND p.is_sample = ? ")
+    if not station:
+        q += ("AND p.status = 'open' AND (c.registered = 1 OR p.category = 'burn' OR "
+              "EXISTS (SELECT 1 FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 1)) "
+              "AND (e.id IS NULL OR e.status NOT IN ('dismissed', 'closed')) ")
+    q += "ORDER BY " + ("p.flagged DESC, " if station else "") + "p.created_at DESC, p.id DESC LIMIT 200"
+    rows = conn.execute(q, (iso(now - timedelta(hours=24)), int(is_sample))).fetchall()
+    return [_item(conn, r, station, now) for r in rows]
+
+
 @public_router.get("/board/posts")
 def list_posts(x_firewatch_device: str = Header(default="")):
     now, is_sample = _clock()
     with connect() as conn:
         c = _device(conn, x_firewatch_device)
         station = c is not None and c["role"] in STATION_ROLES
-        q = ("SELECT p.*, c.registered a_registered, c.name a_name, "
-             "e.status e_status, (SELECT COUNT(*) FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 1) n_counted, "
-             "(SELECT COUNT(*) FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 0) n_notes "
-             "FROM posts p LEFT JOIN contacts c ON c.id = p.contact_id "
-             "LEFT JOIN posts par ON par.id = p.parent_id LEFT JOIN events e ON e.id = COALESCE(p.event_id, par.event_id) WHERE p.created_at >= ? AND p.is_sample = ? ")
-        if not station:
-            q += ("AND p.status = 'open' AND (c.registered = 1 OR p.category = 'burn' OR "
-                  "EXISTS (SELECT 1 FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 1)) "
-                  "AND (e.id IS NULL OR e.status NOT IN ('dismissed', 'closed')) ")
-        q += "ORDER BY " + ("p.flagged DESC, " if station else "") + "p.created_at DESC, p.id DESC LIMIT 200"
-        rows = conn.execute(q, (iso(now - timedelta(hours=24)), int(is_sample))).fetchall()
-        return [_item(conn, r, station, now) for r in rows]
+        return _list(conn, now, is_sample, station)
+
+
+@admin_router.get("/board/admin/posts")
+def admin_posts():
+    now, is_sample = _clock()
+    with connect() as conn:
+        return _list(conn, now, is_sample, True)
 
 
 @public_router.post("/board/posts")

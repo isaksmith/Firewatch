@@ -11,7 +11,7 @@ from functools import lru_cache
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .redflag import replay_red_flag
-from .db import connect, iso, loads, parse_iso
+from .db import connect, iso, loads, parse_iso, utcnow
 from .district import load_district, overrides, sync_roster
 from .fire_weather import default_curing, gfdi, gfdi_band
 from .ngfs_signal import add_ngfs_signals
@@ -26,6 +26,19 @@ HA_PER_ACRE = 0.404686
 
 _task: asyncio.Task | None = None
 _clock: dict = {}  # slug, t_min, running
+STALE_CLOCK_S = 180
+
+
+def _set_clock(**kw) -> None:
+    """Every clock write goes through here so a second process sees it in the replay_clock row."""
+    _clock.update(kw)
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO replay_clock(id, slug, t_min, running, updated_at) VALUES (1,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET slug = excluded.slug, t_min = excluded.t_min, "
+            "running = excluded.running, updated_at = excluded.updated_at",
+            (_clock.get("slug"), _clock.get("t_min"), int(bool(_clock.get("running"))), iso(utcnow())),
+        )
 
 
 def load_scenario(slug: str) -> dict:
@@ -154,7 +167,7 @@ def run_now(slug: str, until: int | None = None) -> None:
         sync_roster(conn, sc["district"])
         for t in [*_pre_steps(sc), *range(end + 1)]:
             _minute(conn, sc, t)
-    _clock.update(slug=slug, t_min=end, running=False)
+    _set_clock(slug=slug, t_min=end, running=False)
 
 
 async def _replay(slug: str, seconds_per_minute: float) -> None:
@@ -169,7 +182,7 @@ async def _replay(slug: str, seconds_per_minute: float) -> None:
                 for t in _pre_steps(sc):
                     _minute(conn, sc, t)
 
-        _clock.update(slug=slug, t_min=-1, running=True)
+        _set_clock(slug=slug, t_min=-1, running=True)
         try:
             await asyncio.to_thread(setup)
             for t in range(sc["duration_min"] + 1):
@@ -178,10 +191,10 @@ async def _replay(slug: str, seconds_per_minute: float) -> None:
                         _minute(conn, sc, t)
 
                 await asyncio.to_thread(step)
-                _clock["t_min"] = t
+                _set_clock(t_min=t)
                 await asyncio.sleep(seconds_per_minute)
         finally:
-            _clock["running"] = False
+            _set_clock(running=False)
     log.info("scenario %s finished", slug)
 
 
@@ -193,20 +206,33 @@ def start(slug: str, seconds_per_minute: float | None = None) -> None:
     _task = asyncio.create_task(_replay(slug, seconds_per_minute or get_settings().scenario_seconds_per_minute))
 
 
-def clock_now(slug: str | None) -> datetime | None:
+def clock_now(slug: str | None, t_min: int | None = None) -> datetime | None:
     """The scenario's current time, so console actions on its events land on its timeline."""
-    if not slug or _clock.get("slug") != slug or _clock.get("t_min") is None:
+    if t_min is None:
+        if not slug or _clock.get("slug") != slug:
+            return None
+        t_min = _clock.get("t_min")
+    if not slug or t_min is None:
         return None
     try:
         sc = load_scenario(slug)
     except KeyError:
         return None
-    return parse_iso(sc["t0"]) + timedelta(minutes=max(_clock["t_min"], 0))
+    return parse_iso(sc["t0"]) + timedelta(minutes=max(t_min, 0))
 
 
 def running_now() -> datetime | None:
-    """The running replay's clock, for replies from real radios while it plays."""
-    return clock_now(_clock.get("slug")) if _clock.get("running") else None
+    """The running replay's clock, for replies from real radios while it plays. Falls back to the shared row
+    when another process runs the replay."""
+    if _clock.get("running"):
+        return clock_now(_clock.get("slug"))
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM replay_clock WHERE id = 1").fetchone()
+    if not row or not row["running"] or row["t_min"] is None:
+        return None
+    if (utcnow() - parse_iso(row["updated_at"])).total_seconds() > STALE_CLOCK_S:
+        return None
+    return clock_now(row["slug"], row["t_min"])
 
 
 @lru_cache(maxsize=4)

@@ -114,6 +114,8 @@ async def _mesh_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    with connect() as conn:
+        conn.execute("UPDATE replay_clock SET running = 0")
     s = get_settings()
     try:
         with connect() as conn:
@@ -564,20 +566,20 @@ def health():
     }
 
 
-@api.post("/ingest/run")
+@api.post("/ingest/run", dependencies=[Depends(require_token)])
 async def ingest_run():
     if get_settings().mode == "sample":
         raise HTTPException(400, "ingest is disabled in sample mode; use /api/sample/replay")
     return await asyncio.to_thread(poll_firms_once)
 
 
-@api.post("/sample/replay")
+@api.post("/sample/replay", dependencies=[Depends(require_token)])
 async def sample_replay(duration_s: float = Query(60, ge=5, le=600)):
     sample.start_replay(duration_s)
     return {"status": "started", "duration_s": duration_s, "fixtures": len(sample.load_fixtures())}
 
 
-@api.post("/sample/load")
+@api.post("/sample/load", dependencies=[Depends(require_token)])
 async def sample_load():
     n = await asyncio.to_thread(sample.load_all_now)
     return {"status": "loaded", "fixtures": n}
@@ -624,6 +626,8 @@ async def sms_inbound(request: Request):
         url = f"{s.public_base_url.rstrip('/')}{request.url.path}"
         if not notify.valid_twilio_signature(s.twilio_auth_token, url, params, request.headers.get("X-Twilio-Signature", "")):
             raise HTTPException(403, "bad Twilio signature")
+    else:
+        require_admin(request.headers.get("X-Firewatch-Token", ""))
     phone, text = params.get("From"), params.get("Body", "")
     if not phone:
         raise HTTPException(422, "From is required")
@@ -657,7 +661,7 @@ def list_messages(event_id: int | None = None, limit: int = Query(300, ge=1, le=
         return _messages(conn, event_id=event_id, limit=limit)
 
 
-@api.get("/contacts")
+@api.get("/contacts", dependencies=[Depends(require_admin)])
 def list_contacts():
     with connect() as conn:
         return [
@@ -768,7 +772,7 @@ def get_scenario(slug: str):
         raise HTTPException(404, "unknown scenario") from None
 
 
-@api.post("/scenario/{slug}/run")
+@api.post("/scenario/{slug}/run", dependencies=[Depends(require_token)])
 async def run_scenario(slug: str, seconds_per_minute: float | None = Query(None, ge=0.05, le=60)):
     """Replay the scenario on a scaled clock (default 2 s per scenario minute)."""
     try:
@@ -778,7 +782,7 @@ async def run_scenario(slug: str, seconds_per_minute: float | None = Query(None,
     return {"status": "started", "slug": slug}
 
 
-@api.post("/scenario/{slug}/load")
+@api.post("/scenario/{slug}/load", dependencies=[Depends(require_token)])
 async def load_scenario_now(slug: str):
     """Run the whole scenario instantly (no animation)."""
     try:

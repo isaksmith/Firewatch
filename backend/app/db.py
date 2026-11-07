@@ -200,6 +200,10 @@ CREATE TABLE IF NOT EXISTS post_asks (
   contact_id INTEGER NOT NULL REFERENCES contacts(id), asked_at TEXT NOT NULL, answered_at TEXT,
   UNIQUE(post_id, contact_id)
 );
+CREATE TABLE IF NOT EXISTS replay_clock (
+  id INTEGER PRIMARY KEY CHECK (id = 1), slug TEXT, t_min INTEGER,
+  running INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
+);
 """
 
 # Columns added after the first release; ALTER them onto older databases.
