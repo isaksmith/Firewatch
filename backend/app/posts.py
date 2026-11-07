@@ -70,6 +70,25 @@ def _parent_for(conn, category: str, pt, is_sample: bool, now: datetime):
     return min(near, key=lambda x: x[0])[1] if near else None
 
 
+def _known_hold(conn, pt, is_sample: bool, now: datetime):
+    """(event_id, parent_id) of a held event or post within post_join_km and 6 h of the point, else None. Sends nothing."""
+    from .notify import held
+
+    if pt is None:
+        return None
+    km = _setting("post_join_km", 3.0)
+    for e in conn.execute("SELECT * FROM events WHERE ack_until IS NOT NULL AND status NOT IN ('closed','dismissed') "
+                          "AND is_sample = ? ORDER BY id", (int(is_sample),)).fetchall():
+        if held(e, now) and haversine_km(pt[0], pt[1], e["lat"], e["lon"]) <= km:
+            return e["id"], None
+    for p in conn.execute("SELECT * FROM posts WHERE ack_until IS NOT NULL AND status = 'open' AND lat IS NOT NULL "
+                          "AND is_sample = ? AND created_at > ? ORDER BY id",
+                          (int(is_sample), iso(now - timedelta(hours=EXPIRE_HOURS["fire"])))).fetchall():
+        if held(p, now) and haversine_km(pt[0], pt[1], p["lat"], p["lon"]) <= km:
+            return p["event_id"], p["id"]
+    return None
+
+
 def create(
     conn: sqlite3.Connection, contact, phone: str, body: str, category: str, hearsay: bool, now: datetime,
     is_sample: bool = False, channel: str = "sms", at: tuple[float, float] | None = None,
@@ -83,6 +102,12 @@ def create(
     member = bool(contact and contact["registered"])
     out = {"post_id": None, "event_id": None, "asked": 0, "flagged": 0, "parent_id": None}
     if category in FIRE_LIKE:
+        known = _known_hold(conn, pt, is_sample, now)
+        if known:
+            eid, parent_id = known
+            pid = _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, False, parent_id, eid, is_sample, now)
+            out.update(post_id=pid, event_id=eid, parent_id=parent_id, known=True)
+            return out
         if member and not hearsay and pt:
             pid = _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, False, None, None, is_sample, now)
             from .notify import ESTIMATE_JOIN_KM

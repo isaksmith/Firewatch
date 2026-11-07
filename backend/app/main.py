@@ -364,6 +364,8 @@ def act_on_alert(event_id: int, body: ActionIn):
         if ev["status"] not in allowed_from:
             raise HTTPException(400, f"cannot {body.action} an alert that is {ev['status']}")
         now = iso(utcnow())
+        if body.action == "acknowledge":
+            notify.acknowledge(conn, event_id=event_id, by=body.operator, role="operator", now=utcnow())
         conn.execute(
             "INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, ?, ?, ?)",
             (event_id, body.action, body.operator, body.note, now),

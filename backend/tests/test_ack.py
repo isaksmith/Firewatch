@@ -213,3 +213,130 @@ def test_rise_swallowed_by_a_ladder_hold_fires_on_expiry():
         assert not out(conn, "duty_escalate")
         notify.hold_tick(conn, at(32), is_sample=True)
         assert len(out(conn, "duty_escalate", eid)) == 1
+
+
+# --- step 3: ACK text, button, attach, estimated join ------------------------------------------------------
+
+def all_out(conn):
+    return conn.execute("SELECT COUNT(*) n FROM messages WHERE direction = 'out'").fetchone()["n"]
+
+
+def last_reply(conn):
+    return conn.execute("SELECT body FROM messages WHERE direction = 'out' AND purpose = 'reply' ORDER BY id DESC").fetchone()["body"]
+
+
+def test_ack_text_by_duty_holds_at_ladder_level():
+    with connect() as conn:
+        eid = escalated(conn)
+        r = notify.handle_inbound(conn, DUTY, "ACK", at(9), is_sample=True)
+        assert r["action"] == "ack" and r["event_id"] == eid
+        assert ev(conn, eid)["ack_level"] == "ladder"
+        assert len(last_reply(conn)) <= SMS_MAX
+
+
+def test_ack_text_by_volunteer_holds_at_crowd_level():
+    with connect() as conn:
+        eid = escalated(conn)
+        vol = volunteer(conn)
+        notify.send(conn, vol, "FIREWATCH check", "ask_neighbors", eid, at(8), True)
+        r = notify.handle_inbound(conn, vol["phone"], "ack", at(9), is_sample=True)
+        assert r["action"] == "ack" and ev(conn, eid)["ack_level"] == "crowd"
+
+
+def test_member_ack_text_gets_help_and_no_hold():
+    with connect() as conn:
+        eid = escalated(conn)
+        r = notify.handle_inbound(conn, WES, "ACK", at(9), is_sample=True)
+        assert r["action"] == "help"
+        assert ev(conn, eid)["ack_until"] is None
+
+
+def test_ack_with_no_target_says_so():
+    with connect() as conn:
+        sync_roster(conn)
+        r = notify.handle_inbound(conn, DUTY, "ACK", at(1), is_sample=True)
+        assert r["action"] == "help" and "nothing open" in last_reply(conn)
+        assert conn.execute("SELECT COUNT(*) n FROM events WHERE ack_until IS NOT NULL").fetchone()["n"] == 0
+
+
+def test_ack_text_matches_the_button():
+    with connect() as conn:
+        a = escalated(conn)
+        notify.handle_inbound(conn, DUTY, "ACK", at(9), is_sample=True)
+        text_row = dict(ev(conn, a))
+    with connect() as conn:
+        conn.execute("UPDATE events SET ack_level = NULL, ack_by = NULL, ack_at = NULL, ack_until = NULL, status = 'new' WHERE id = ?", (a,))
+        notify.acknowledge(conn, event_id=a, by="Duty", role="operator", now=at(9))
+        btn = ev(conn, a)
+        for k in ("ack_level", "ack_until", "status", "ack_mark_det", "ack_mark_sig"):
+            assert btn[k] == text_row[k]
+
+
+def test_button_acknowledge_holds_at_ladder_level():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        top = client.get("/api/alerts").json()["alerts"][0]
+        r = client.post(f"/api/alerts/{top['id']}/actions", json={"action": "acknowledge", "operator": "Dispatch 2"})
+        assert r.status_code == 200
+    with connect() as conn:
+        row = ev(conn, top["id"])
+        assert row["ack_level"] == "ladder" and row["ack_by"] == "Dispatch 2" and row["ack_until"]
+
+
+def test_post_near_held_event_attaches_and_sends_nothing():
+    with connect() as conn:
+        eid = escalated(conn)
+        notify.acknowledge(conn, event_id=eid, by="Duty", role="duty_officer", now=at(9))
+        n_out, n_ev = all_out(conn), conn.execute("SELECT COUNT(*) n FROM events").fetchone()["n"]
+        r = notify.handle_inbound(conn, WES, "heard there is smoke near the creek", at(10), is_sample=True)
+        post = conn.execute("SELECT * FROM posts ORDER BY id DESC").fetchone()
+        assert post["event_id"] == eid and post["flagged"] == 0
+        assert conn.execute("SELECT COUNT(*) n FROM events").fetchone()["n"] == n_ev
+        assert "already known" in last_reply(conn)
+        assert all_out(conn) == n_out + (1 if r["reply"] else 0)  # only the poster's reply
+
+
+def test_post_near_held_post_attaches_to_it(monkeypatch):
+    monkeypatch.setattr(posts, "high_danger", lambda *a, **k: True)
+    with connect() as conn:
+        sync_roster(conn)
+        p = posts.create(conn, None, "+13165559000", "smoke north", "smoke", False, T0, True, at=FIRE)["post_id"]
+        notify.acknowledge(conn, post_id=p, by="Vol", role="volunteer", now=at(1))
+        n_out = all_out(conn)
+        r = posts.create(conn, None, "+13165559001", "smoke north too", "smoke", False, at(2), True, at=(FIRE[0] + 0.01, FIRE[1]))
+        assert r.get("known") and r["parent_id"] == p and r["asked"] == 0
+        assert all_out(conn) == n_out
+
+
+def test_post_ten_km_away_is_a_new_item():
+    with connect() as conn:
+        eid = escalated(conn)
+        notify.acknowledge(conn, event_id=eid, by="Duty", role="duty_officer", now=at(9))
+        r = posts.create(conn, None, "+13165559002", "smoke far", "smoke", False, at(10), True, at=(FIRE[0] + 0.09, FIRE[1]))
+        assert not r.get("known") and r["flagged"] == 1 and r["parent_id"] is None
+        assert conn.execute("SELECT event_id FROM posts WHERE id = ?", (r["post_id"],)).fetchone()["event_id"] is None
+
+
+def test_estimated_report_five_km_out_opens_a_new_event():
+    with connect() as conn:
+        eid = escalated(conn)
+        notify.acknowledge(conn, event_id=eid, by="Duty", role="duty_officer", now=at(9))
+        far = add_signal(conn, "report", FIRE[0] + 0.045, FIRE[1], iso(at(10)), "sms:est", None, None, True,
+                         join_radius_km=notify.ESTIMATE_JOIN_KM)
+        assert far != eid
+
+
+def test_confirms_during_a_hold_send_no_texts_and_count_rises():
+    with connect() as conn:
+        eid = escalated(conn)
+        notify.acknowledge(conn, event_id=eid, by="Duty", role="duty_officer", now=at(9))
+        sync_roster(conn)
+        pid = posts.create(conn, None, "+13165559003", "smoke by road", "smoke", False, at(10), True, at=FIRE)["post_id"]
+        n_out = all_out(conn)
+        wes = conn.execute("SELECT * FROM contacts WHERE phone = ?", (WES,)).fetchone()
+        r = posts.confirm(conn, pid, wes, "see", at(11), True)
+        assert r["ok"] and r["counted"] and r["count"] == 1
+        assert all_out(conn) == n_out

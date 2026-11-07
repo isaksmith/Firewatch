@@ -746,6 +746,27 @@ def handle_inbound(
                            contact["id"], is_sample, event_id=eid)
                 evaluate_event(conn, eid, None, now)
                 out.update(action="neighbor_reply", event_id=eid, reply="Thanks. The fire district has your answer.")
+    elif word == "ACK":
+        level_ok = contact and (contact["role"] in LADDER_ROLES or contact["role"] == "volunteer")
+        if not level_ok:
+            out["reply"] = HELP.format(name=d.short_name)
+        else:
+            eid = latest_event(DECIDERS) or _latest_open_response(conn, is_sample)
+            pid = None
+            if eid is None and (r := conn.execute(
+                    "SELECT post_id FROM messages WHERE contact_id = ? AND direction = 'out' AND post_id IS NOT NULL "
+                    "AND purpose IN ('post_timer','post_hazard') ORDER BY id DESC LIMIT 1", (contact["id"],)).fetchone()):
+                pid = r["post_id"]
+            if eid is None and pid is None:
+                out.update(action="help", reply="Firewatch: nothing open for you to acknowledge.")
+            else:
+                res = acknowledge(conn, event_id=eid, post_id=pid, by=contact["name"], role=contact["role"], now=now)
+                if res["ok"]:
+                    mins = round((parse_iso(res["until"]) - now).total_seconds() / 60)
+                    place = _short_place(_event(conn, eid)) if eid else "that report"
+                    out.update(action="ack", event_id=eid, reply=f"Firewatch: {t_ack_reply(place, mins)}"[:SMS_MAX])
+                else:
+                    out.update(action="help", reply="Firewatch: that one is already closed.")
     elif word in ("PAGE", "NO", "SEND") and contact and contact["role"] in LADDER_ROLES:
         purposes = ("mutual_aid_draft",) + DECIDERS if word == "SEND" else DECIDERS
         eid = latest_event(purposes) or _latest_open_response(conn, is_sample)
@@ -794,7 +815,10 @@ def handle_inbound(
                 r = posts_mod.create(conn, contact, phone, text, cat.category, cat.hearsay, now, is_sample, channel, at=here)
                 if cat.category != "other":
                     out["event_id"] = r["event_id"]
-                    if r["event_id"]:
+                    if r.get("known"):
+                        out.update(action="post_known", event_id=r["event_id"],
+                                   reply="Firewatch: this one is already known and being watched. Call 911 if anyone is in danger.")
+                    elif r["event_id"]:
                         out.update(action="post_report", reply="Firewatch: report received. The duty officer is being told.")
                     elif r["flagged"]:
                         reply = "Firewatch: posted."

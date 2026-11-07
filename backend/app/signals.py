@@ -69,10 +69,12 @@ def _nearest_open(conn: sqlite3.Connection, matched: set[int], lat: float, lon: 
     """The matched event nearest the point, ignoring dismissed and closed ones. Never merges events."""
     best, best_km = None, None
     for eid in sorted(matched):
-        row = conn.execute("SELECT lat, lon, status FROM events WHERE id = ?", (eid,)).fetchone()
+        row = conn.execute("SELECT lat, lon, status, ack_until FROM events WHERE id = ?", (eid,)).fetchone()
         if row is None or row["status"] in ("closed", "dismissed"):
             continue
         km = haversine_km(lat, lon, row["lat"], row["lon"])
+        if row["ack_until"] and km > SIGNAL_RADIUS_KM:
+            continue  # a wide estimated join must not bury a report far from a held event
         if best_km is None or km < best_km:
             best, best_km = eid, km
     return best
