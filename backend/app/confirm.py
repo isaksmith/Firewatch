@@ -223,8 +223,8 @@ def _registered_burn(conn, ev, f, signals, cfg) -> tuple[dict | None, list[str]]
     points += [(s["lat"], s["lon"]) for s in signals if s["kind"] in LOCATING_SIGNALS]
     if any(haversine_km(lat, lon, burn["lat"], burn["lon"]) > limit for lat, lon in points):
         escaped.append(f"fire seen more than {BURN_ESCAPE_OUTSIDE_KM:g} km outside the notice")
-    if f["gfdi"] >= cfg.get("burn_escape_gfdi", 25):
-        escaped.append(f"fire danger {gfdi_band(f['gfdi'])} (GFDI {f['gfdi']:.0f})")
+    # Fire danger is a condition, not evidence of escape: on a Red Flag day every registered burn
+    # would count as escaped (GFDI 101 in the packet replay), so a burn would never stay quiet.
     if any(s["kind"] == "report" and s["contact_id"] != burn["contact_id"] for s in signals):
         escaped.append("reported by someone other than the burner")
     return burn, escaped

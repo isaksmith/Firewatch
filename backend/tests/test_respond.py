@@ -172,7 +172,38 @@ def test_registered_burn_stays_quiet_until_it_escapes():
         eid = _line_fault(conn, where=burn)
         assert _event(conn, eid)["suppression"] == "registered_burn"
         assert not _out(conn, "duty_fyi")
-        evaluate_event(conn, eid, BLOWING, _at(5))
+        add_signal(conn, "report", *burn, iso(_at(5)), "sms:+13165559991", "fire spreading", is_sample=True)
+        evaluate_event(conn, eid, WEATHER, _at(5))
+        ev = _event(conn, eid)
+        assert ev["recommendation"] != "monitor"
+        assert any("escaped" in e.get("note", "") for e in loads(ev["evidence_json"]))
+
+
+def test_registered_burn_stays_quiet_on_an_extreme_day():
+    # Root cause of the packet bug: fire danger alone (GFDI >= 25) used to mark every burn escaped.
+    extreme = {**WEATHER, "wind_kmh": 56, "gust_kmh": 90, "rh_pct": 11}
+    burn = (37.75, -96.545)
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
+        eid = _line_fault(conn, weather=extreme, where=burn)
+        ev = _event(conn, eid)
+        assert ev["suppression"] == "registered_burn" and ev["recommendation"] == "monitor"
+        assert not any("escaped" in e.get("note", "") for e in loads(ev["evidence_json"]))
+        assert not _out(conn, "duty_fyi")
+
+
+def test_burn_that_left_its_notice_escalates_on_an_extreme_day():
+    extreme = {**WEATHER, "wind_kmh": 56, "gust_kmh": 90, "rh_pct": 11}
+    burn = (37.75, -96.545)
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
+        eid = _line_fault(conn, weather=extreme, where=burn)
+        gary = conn.execute("SELECT id FROM contacts WHERE phone = ?", (GARY,)).fetchone()["id"]
+        # The burner's own report 2.7 km out, past the 1.5 km notice plus 1 km: the "outside the notice" path alone.
+        add_signal(conn, "report", 37.7745, -96.545, iso(_at(3)), f"sms:{GARY}", "fire", contact_id=gary, is_sample=True)
+        evaluate_event(conn, eid, extreme, _at(3))
         ev = _event(conn, eid)
         assert ev["recommendation"] != "monitor"
         assert any("escaped" in e.get("note", "") for e in loads(ev["evidence_json"]))
