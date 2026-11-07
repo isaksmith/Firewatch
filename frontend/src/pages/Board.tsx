@@ -4,6 +4,7 @@ import {
   boardApi,
   boardPhotoUrl,
   BoardError,
+  type Burn,
   getDeviceToken,
   isWellFormedToken,
   setDeviceToken,
@@ -13,7 +14,7 @@ import {
   type StationAction,
 } from '../api'
 import { Mark } from '../components/ui'
-import { plainAge, threadLine } from '../lib/board'
+import { burnCoords, burnDistanceText, kmAndBearing, plainAge, threadLine } from '../lib/board'
 
 const CATEGORIES: { key: BoardCategory; label: string }[] = [
   { key: 'fire', label: 'Fire' },
@@ -95,6 +96,90 @@ function confirmMessage(reason: string, counted: boolean): string {
     default:
       return 'Saved.'
   }
+}
+
+const BURN_NEAR_EXTRA_KM = 1
+
+/** Open fire or smoke posts within the burn's radius plus 1 km (rounded points, same as the server's cue). */
+function nearbyPostIds(burn: Burn, posts: BoardPost[] | null): number[] {
+  return (posts ?? [])
+    .filter(
+      (p) =>
+        p.status === 'open' &&
+        (p.category === 'fire' || p.category === 'smoke') &&
+        p.lat != null &&
+        p.lon != null &&
+        kmAndBearing(burn, { lat: p.lat, lon: p.lon }).km <= burn.radius_km + BURN_NEAR_EXTRA_KM,
+    )
+    .map((p) => p.id)
+}
+
+function BurnsToday({
+  burns,
+  posts,
+  position,
+  locState,
+  onAskLocation,
+}: {
+  burns: Burn[]
+  posts: BoardPost[] | null
+  position: Position
+  locState: 'idle' | 'asking' | 'off'
+  onAskLocation: () => void
+}) {
+  const n = burns.length
+  function jump(burn: Burn) {
+    const ids = nearbyPostIds(burn, posts)
+    if (!ids.length) return
+    const el = document.getElementById(`post-${Math.max(...ids)}`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  return (
+    <section className="border border-line bg-panel p-4" aria-label="Burns today">
+      <h2 className="label mb-2">Burns today ({n})</h2>
+      {n === 0 && <p className="text-[13px] text-muted">No controlled burns registered today.</p>}
+      {n > 0 && (
+        <ul className="flex flex-col gap-2">
+          {burns.map((b, i) => {
+            const has = b.reports_nearby && nearbyPostIds(b, posts).length > 0
+            const body = (
+              <>
+                <span className="block text-[15px] font-medium text-text">Controlled burn</span>
+                <span className="block text-[13px] break-words text-muted">
+                  {position ? burnDistanceText(position, b) : burnCoords(b)}
+                </span>
+                <span className="block text-[12px] text-muted">Registered {b.registered_at}</span>
+                {b.reports_nearby && <span className="mt-1 block text-[13px] font-medium text-investigate">Reports nearby. Check the posts below.</span>}
+              </>
+            )
+            return (
+              <li key={`${b.lat},${b.lon},${i}`} className="border border-line-2 bg-void">
+                {has ? (
+                  <button type="button" onClick={() => jump(b)} className="block min-h-11 w-full p-3 text-left">
+                    {body}
+                  </button>
+                ) : (
+                  <div className="p-3">{body}</div>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {n > 0 && !position && (
+        <p className="mt-2 text-[13px]">
+          {locState === 'off' ? (
+            <span className="text-muted">Location is off. Distances need it.</span>
+          ) : (
+            <button type="button" className="min-h-11 text-text underline" disabled={locState === 'asking'} onClick={onAskLocation}>
+              Show distance from me
+            </button>
+          )}
+        </p>
+      )}
+      <p className="mt-2 text-[12px] text-muted">A registered burn can still escape. If it looks out of control, call 911.</p>
+    </section>
+  )
 }
 
 function NewPost({ onPosted, onVideoSaved }: { onPosted: () => void; onVideoSaved: (postId: number, url: string) => void }) {
@@ -402,7 +487,7 @@ function PostCard({
   const hot = post.category === 'fire' || post.category === 'smoke'
 
   return (
-    <article className={`border bg-panel p-4 ${post.flagged ? 'border-escalate/70' : 'border-line'}`}>
+    <article id={`post-${post.id}`} className={`scroll-mt-20 border bg-panel p-4 ${post.flagged ? 'border-escalate/70' : 'border-line'}`}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className={`num border px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] uppercase ${hot ? 'border-escalate/60 text-escalate' : 'border-line-2 text-muted'}`}>
           {cat}
@@ -584,6 +669,26 @@ export function Board() {
     refetchInterval: 15_000,
   })
 
+  const burnsQ = useQuery({
+    queryKey: ['board-burns'],
+    queryFn: boardApi.burns,
+    refetchInterval: 15_000,
+  })
+  const burnsGood = useRef<Burn[] | null>(null)
+  if (burnsQ.data) burnsGood.current = burnsQ.data
+  const burnList = burnsQ.data ?? burnsGood.current
+  // Never asked on load: only the "Show distance from me" link sets this.
+  const [position, setPosition] = useState<Position>(null)
+  const [locState, setLocState] = useState<'idle' | 'asking' | 'off'>('idle')
+  async function askLocation() {
+    setLocState('asking')
+    const p = await getPosition()
+    if (p) {
+      setPosition(p)
+      setLocState('idle')
+    } else setLocState('off')
+  }
+
   if (posts.data) lastGood.current = posts.data
   const list = posts.data ?? lastGood.current
   const station = !!me.data?.station
@@ -632,6 +737,8 @@ export function Board() {
         )}
 
         <NewPost onPosted={refresh} onVideoSaved={(id, url) => setVideos((v) => ({ ...v, [id]: url }))} />
+
+        {burnList && <BurnsToday burns={burnList} posts={list} position={position} locState={locState} onAskLocation={() => void askLocation()} />}
 
         <section className="flex flex-col gap-3" aria-label="Posts">
           <h2 className="label">Last 24 hours</h2>
