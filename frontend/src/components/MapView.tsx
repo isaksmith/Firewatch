@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Map, { Layer, Marker, NavigationControl, ScaleControl, Source, useMap, type MapRef } from 'react-map-gl/maplibre'
 import { api, type AlertSummary } from '../api'
 import { REC_META, latLon, trackId } from '../lib/format'
-import { AOI_BBOX, BASEMAP_STYLE, KANSAS_VIEW, ringPolygon } from '../lib/map'
+import { useLowData } from '../lib/lowData'
+import { AOI_BBOX, BASEMAP_STYLE, BLANK_STYLE, KANSAS_VIEW, ringPolygon } from '../lib/map'
 import { TrackGlyph } from './ui'
 
 interface Props {
@@ -44,6 +45,7 @@ const SWATCH: Record<LayerKey, string> = {
 
 export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Props) {
   const mapRef = useRef<MapRef>(null)
+  const { on: lowData } = useLowData()
   const [panelOpen, setPanelOpen] = useState(() => window.innerWidth >= 1280)
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({ power_lines: true, static_sources: true, flint_hills: false, aoi: true })
   const lines = useQuery({ queryKey: ['layer', 'power_lines'], queryFn: () => api.layer('power_lines') })
@@ -71,7 +73,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
       <Map
         ref={mapRef}
         initialViewState={{ bounds: [AOI_BBOX[0], AOI_BBOX[1], AOI_BBOX[2], AOI_BBOX[3]], fitBoundsOptions: { padding: 40 } }}
-        mapStyle={BASEMAP_STYLE}
+        mapStyle={lowData ? BLANK_STYLE : BASEMAP_STYLE}
         style={{ width: '100%', height: '100%' }}
         attributionControl={{ compact: true }}
         onLoad={() => setMapReady(true)}
@@ -163,6 +165,9 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
         <CursorReadout />
       </Map>
 
+      {lowData && (
+        <div className="hud num pointer-events-none absolute top-4 left-4 px-2 py-1 text-[10.5px] text-degraded">Low data: map pictures are off</div>
+      )}
       <div className="pointer-events-none absolute inset-3 brackets" style={{ ['--b' as string]: '#3a414b' }} />
 
       <div className="hud absolute top-4 right-4 w-[200px]">

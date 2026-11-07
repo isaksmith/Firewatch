@@ -1,28 +1,67 @@
-import { useQuery } from '@tanstack/react-query'
-import { useCallback, useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { useCallback, useState, useSyncExternalStore } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
 import { AlertDrawer } from '../components/AlertDrawer'
 import { AlertList } from '../components/AlertList'
 import { MapView } from '../components/MapView'
+import { BurnLog } from '../components/BurnLog'
 import { TopBar } from '../components/TopBar'
-import { SUPPRESSION_LABEL } from '../lib/format'
+import { dismissAutoBanner, noteFetchFailure, noteFetchTime, setLowData, useLowData } from '../lib/lowData'
+import { SUPPRESSION_LABEL, clock12 } from '../lib/format'
 import { filterQueue, type QueueTab } from '../lib/queue'
 
+const subscribeOnline = (cb: () => void) => {
+  window.addEventListener('online', cb)
+  window.addEventListener('offline', cb)
+  return () => {
+    window.removeEventListener('online', cb)
+    window.removeEventListener('offline', cb)
+  }
+}
+
 export function Dashboard() {
+  const online = useSyncExternalStore(subscribeOnline, () => navigator.onLine)
   const params = useParams()
   const navigate = useNavigate()
   const selectedId = params.id ? Number(params.id) : null
   const [hoveredId, setHoveredId] = useState<number | null>(null)
   const [tab, setTab] = useState<QueueTab>('active')
 
+  const { on: lowData, auto: autoLowData } = useLowData()
+  const [burnOpen, setBurnOpen] = useState(false)
+
   const alerts = useQuery({
-    queryKey: ['alerts'],
-    queryFn: () => api.alerts(true),
-    refetchInterval: 5_000,
+    queryKey: ['alerts', lowData ? 'lite' : 'full'],
+    queryFn: lowData
+      ? api.liteAlerts
+      : async () => {
+          const t0 = performance.now()
+          try {
+            const r = await api.alerts(true)
+            noteFetchTime(performance.now() - t0)
+            return r
+          } catch (e) {
+            noteFetchFailure()
+            throw e
+          }
+        },
+    placeholderData: keepPreviousData,
+    // While the server is down, retry every 10 s so the list comes back quickly (not after a 60 s lite poll).
+    refetchInterval: (q) => (q.state.status === 'error' ? 10_000 : lowData ? 60_000 : 5_000),
   })
-  const all = alerts.data?.alerts ?? []
-  const suppressed = alerts.data?.suppressed
+  // Keep the last good list, even across the full/lite switch, so a server outage never empties the screen.
+  const [lastGood, setLastGood] = useState<number | null>(null)
+  const [lastData, setLastData] = useState<typeof alerts.data>()
+  if (alerts.data && !alerts.isPlaceholderData && alerts.dataUpdatedAt && alerts.dataUpdatedAt !== lastGood) {
+    setLastGood(alerts.dataUpdatedAt)
+    setLastData(alerts.data)
+  }
+  const shown = alerts.data ?? lastData
+  const offline = !online || alerts.isError
+  const loading = shown == null && !alerts.isError
+  const all = shown?.alerts ?? []
+  const suppressed = shown?.suppressed
   const onMap = tab === 'suppressed' ? all : filterQueue(all, tab)
   const close = useCallback(() => navigate('/'), [navigate])
 
@@ -33,19 +72,38 @@ export function Dashboard() {
 
   return (
     <div className="flex h-full flex-col bg-bg">
-      <TopBar />
+      <TopBar burnOpen={burnOpen} onBurnLog={() => setBurnOpen((o) => !o)} />
+      {offline && (
+        <div role="status" className="flex shrink-0 items-center gap-3 border-b border-line bg-investigate/10 px-4 py-1.5 text-[12.5px] text-investigate">
+          Offline. {lastGood ? `Last updated ${clock12(new Date(lastGood).toISOString())}` : 'No data yet'}
+        </div>
+      )}
+      {lowData && autoLowData && (
+        <div role="status" className="flex shrink-0 items-center gap-4 border-b border-line bg-degraded/10 px-4 py-1.5 text-[12.5px]">
+          <span>Low data mode is on because your connection looks slow.</span>
+          <button onClick={() => setLowData(false)} className="btn !h-7">
+            Undo
+          </button>
+          <button onClick={dismissAutoBanner} className="text-dim hover:text-text">
+            Keep it
+          </button>
+        </div>
+      )}
       <div className="flex min-h-0 flex-1">
         <AlertList
           alerts={all}
           tab={tab}
           setTab={setTab}
+          suppressed={suppressed}
+          lowData={lowData}
+          loading={loading}
           selectedId={selectedId}
           hoveredId={hoveredId}
           onSelect={(id) => navigate(`/alerts/${id}`)}
           onHover={setHoveredId}
         />
         <MapView alerts={onMap} selectedId={selectedId} hoveredId={hoveredId} onSelect={(id) => navigate(`/alerts/${id}`)} onHover={setHoveredId} />
-        {selectedId != null && <AlertDrawer id={selectedId} onClose={close} />}
+        {burnOpen ? <BurnLog onClose={() => setBurnOpen(false)} /> : selectedId != null && <AlertDrawer id={selectedId} onClose={close} />}
       </div>
 
       <footer className="num flex h-7 shrink-0 items-center gap-5 overflow-hidden border-t border-line bg-void px-4 text-[10px] tracking-[0.08em] whitespace-nowrap text-dim">

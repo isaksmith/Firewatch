@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Box, ShieldAlert, X } from 'lucide-react'
+import { AlertTriangle, Box, Download, ShieldAlert, X } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { api, type ActionName, type AlertDetail } from '../api'
-import { REC_META, centralTime, compass, kmhToMph, latLon, pad3, seenLabel, trackId } from '../lib/format'
+import { BASE, api, type ActionName, type AlertDetail, type DataAge, type InPathPlace } from '../api'
+import { REC_META, agoLabel, centralTime, compass, kmhToMph, latLon, pad3, seenLabel, trackId } from '../lib/format'
+import { useLowData } from '../lib/lowData'
 import { useOperator } from '../lib/operator'
-import { KV, RecTag, ScoreReadout, SectionHeader, StatusTag } from './ui'
+import { useUndoable } from '../lib/undoable'
+import { KV, RecTag, ScoreReadout, SectionHeader, StatusTag, UndoBar } from './ui'
 
 const QUICK_NOTES = ['Paged VFD', 'Known Rx burn', 'Industrial site', 'Called landowner']
 
@@ -23,7 +25,8 @@ const isTyping = (e: KeyboardEvent) => {
 }
 
 export function AlertDrawer({ id, onClose }: { id: number; onClose: () => void }) {
-  const q = useQuery({ queryKey: ['alert', id], queryFn: () => api.alert(id), refetchInterval: 15_000 })
+  const { on: lowData } = useLowData()
+  const q = useQuery({ queryKey: ['alert', id], queryFn: () => api.alert(id), refetchInterval: lowData ? false : 15_000 })
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -56,6 +59,137 @@ function Section({ title, right, children }: { title: string; right?: ReactNode;
       <SectionHeader right={right}>{title}</SectionHeader>
       <div className="px-4 py-3">{children}</div>
     </section>
+  )
+}
+
+const EXPECTED_MIN: Record<string, number> = { Satellite: 15, Weather: 90 }
+const expectedFor = (label: string) => EXPECTED_MIN[label.split(' (')[0]]
+
+function DataAgeSection({ a }: { a: AlertDetail }) {
+  const rows: DataAge[] = a.data_age ?? []
+  const path = useQuery({ queryKey: ['in-path', a.id], queryFn: () => api.inPath(a.id) })
+  // Sample alerts carry a scenario clock; the server tells us what "now" is.
+  const [wall, setWall] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setWall(Date.now()), 30_000)
+    return () => clearInterval(t)
+  }, [])
+  const now = a.is_sample && path.data ? new Date(path.data.now).getTime() : wall
+  if (rows.length === 0) return null
+  return (
+    <Section title="How fresh is the data">
+      <ul className="space-y-1.5">
+        {rows.map((r) => {
+          const mins = r.last_seen ? (now - new Date(r.last_seen).getTime()) / 60000 : null
+          const limit = expectedFor(r.label)
+          const gap = r.last_seen == null || (limit != null && mins != null && mins > limit)
+          return (
+            <li key={`${r.label}-${r.source}`} className="flex items-baseline justify-between gap-3 text-[12.5px]">
+              <span className="min-w-0">{r.label}</span>
+              <span className={`num shrink-0 text-[12px] ${gap ? 'text-degraded' : 'text-ok'}`}>
+                {r.last_seen ? agoLabel(r.last_seen, now) : 'no time on record'}
+                {gap && r.last_seen && <span className="ml-1.5 border border-degraded/60 px-1 text-[9.5px]">GAP</span>}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </Section>
+  )
+}
+
+function whenLabel(p: InPathPlace): string {
+  if (p.status === 'reached') return `reached at ${p.reached_local ?? p.eta_local ?? ''}`
+  if (p.eta_min != null) return `in ${p.eta_min} min (${p.eta_local ?? p.arrival_local ?? ''})`
+  return p.arrival_local ? `about ${p.arrival_local}` : 'not expected soon'
+}
+
+function PathSection({ id }: { id: number }) {
+  const q = useQuery({ queryKey: ['in-path', id], queryFn: () => api.inPath(id) })
+  if (q.isLoading) return null
+  const places = q.data?.places ?? []
+  return (
+    <Section title="Who is in the path">
+      {q.isError && <p className="text-[12px] text-dim">Could not load the path.</p>}
+      {q.data && places.length === 0 && <p className="text-[12px] text-dim">Nothing known in the path yet.</p>}
+      <ul className="space-y-2">
+        {places.map((p) => (
+          <li key={p.id} className="flex items-baseline justify-between gap-3 text-[12.5px]">
+            <span className="min-w-0">{p.label}</span>
+            <span className={`num shrink-0 text-[12px] ${p.status === 'reached' ? 'text-escalate' : 'text-investigate'}`}>{whenLabel(p)}</span>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  )
+}
+
+const CHANNEL_LABEL: Record<string, string> = { push: 'App push', sms: 'Text message', pager: 'County pager', mesh: 'Mesh radio' }
+
+function Count({ text }: { text: string }) {
+  return <span className={`num text-[10.5px] ${text.length > 160 ? 'text-escalate' : 'text-dim'}`}>{text.length} of 160 characters</span>
+}
+
+function SendSection({ id }: { id: number }) {
+  const msgs = useQuery({ queryKey: ['messages', id], queryFn: () => api.messages(id) })
+  const undoable = useUndoable(5)
+  const send = useMutation({ mutationFn: () => api.notify(id) })
+  const m = msgs.data
+  const live = send.data?.live === true
+  return (
+    <Section title="Messages">
+      {msgs.isError && <p className="text-[12px] text-dim">Could not load the messages.</p>}
+      {m && (
+        <div className="space-y-3">
+          <div>
+            <div className="label mb-1">{m.escalated ? 'Text to the chief' : 'Quiet notice to the chief'}</div>
+            <p className="border border-line bg-void px-3 py-2 text-[12.5px] leading-snug">{m.escalated ? m.chief : m.quiet}</p>
+            <Count text={m.escalated ? m.chief : m.quiet} />
+          </div>
+          {m.escalated &&
+            m.landowners.map((l) => (
+              <div key={l.id}>
+                <div className="label mb-1">Text to {l.name}</div>
+                <p className="border border-line bg-void px-3 py-2 text-[12.5px] leading-snug">{l.text}</p>
+                <Count text={l.text} />
+              </div>
+            ))}
+          {m.escalated && m.landowners.length === 0 && <p className="text-[12px] text-dim">No landowners to text right now.</p>}
+        </div>
+      )}
+      <div className="mt-4 space-y-2">
+        {undoable.left !== null ? (
+          <UndoBar message="Sending the practice alerts." left={undoable.left} onUndo={undoable.undo} />
+        ) : (
+          <button disabled={!m || send.isPending} onClick={() => undoable.start(() => send.mutate())} className="btn !h-11 w-full !text-[12px]">
+            {send.data ? (live ? 'Send alerts again' : 'Send alerts again (practice)') : 'Send alerts (practice)'}
+          </button>
+        )}
+        {send.isError && <p className="text-[12px] text-escalate">Could not send: {(send.error as Error).message}</p>}
+        {send.data && (
+          <div role="status">
+            <p className={`mb-1 text-[12px] ${live ? 'text-escalate' : 'text-sample'}`}>
+              {live ? 'These alerts were really sent.' : 'Practice only. Nothing was sent to anyone.'}
+            </p>
+            <ul className="space-y-1">
+              {send.data.results.map((r, i) => (
+                <li key={i} className="flex items-baseline justify-between gap-3 border-t border-line py-1 text-[12px]">
+                  <span>
+                    {CHANNEL_LABEL[r.channel] ?? r.channel} <span className="text-dim">to {r.to}</span>
+                  </span>
+                  <span className={`num shrink-0 ${r.error ? 'text-escalate' : r.status === 'dry_run' ? 'text-sample' : 'text-ok'}`}>
+                    {r.error ? `failed: ${r.error}` : r.status === 'dry_run' ? 'practice' : r.status}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <a href={`${BASE}/alerts/${id}/cap.xml`} download className="flex h-9 items-center gap-2 text-[12.5px] text-sample underline underline-offset-2">
+          <Download size={13} /> Download CAP file
+        </a>
+      </div>
+    </Section>
   )
 }
 
@@ -112,7 +246,7 @@ function DrawerBody({ a }: { a: AlertDetail }) {
                   {r.contribution > 0 ? '+' : ''}
                   {r.contribution}
                 </span>
-                <span className="truncate text-[12.5px] text-text">{r.label}</span>
+                <span className="text-[12.5px] leading-snug text-text">{r.label}</span>
                 <span className="relative h-[6px] bg-line">
                   <span
                     className="absolute inset-y-0 left-0"
@@ -126,6 +260,10 @@ function DrawerBody({ a }: { a: AlertDetail }) {
             ))}
           </ul>
         </Section>
+
+        <DataAgeSection a={a} />
+        <PathSection id={a.id} />
+        <SendSection id={a.id} />
 
         <Section title="Conditions" right={w.source ? <span className="num text-[10px] text-dim">{w.source.toUpperCase()}</span> : undefined}>
           {w.wind_kmh != null ? (
@@ -223,6 +361,7 @@ function ActionBar({ a }: { a: AlertDetail }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const operator = useOperator()
+  const { on: lowData } = useLowData()
   const [note, setNote] = useState('')
   const act = useMutation({
     mutationFn: (action: ActionName) => api.act(a.id, action, operator, note),
@@ -244,7 +383,7 @@ function ActionBar({ a }: { a: AlertDetail }) {
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey || act.isPending) return
       const key = e.key.toLowerCase()
-      if (key === 'v') navigate(`/alerts/${a.id}/3d`)
+      if (key === 'v' && !lowData) navigate(`/alerts/${a.id}/3d`)
       const map: Record<string, ActionName> = { a: 'acknowledge', e: 'escalate', d: 'dismiss', r: 'reopen' }
       const action = map[key]
       if (action && can[action]) act.mutate(action)
@@ -255,9 +394,15 @@ function ActionBar({ a }: { a: AlertDetail }) {
 
   return (
     <div className="shrink-0 border-t border-line-2 bg-void">
-      <Link to={`/alerts/${a.id}/3d`} className="btn !h-9 w-full !border-x-0 !border-t-0 !border-b-line">
-        <Box size={13} /> 3D spread preview <span className="kbd ml-1">V</span>
-      </Link>
+      {lowData ? (
+        <div className="num flex h-9 w-full items-center justify-center gap-2 border-b border-line text-[11px] text-dim">
+          <Box size={13} /> Not available in low-data mode
+        </div>
+      ) : (
+        <Link to={`/alerts/${a.id}/3d`} className="btn !h-9 w-full !border-x-0 !border-t-0 !border-b-line">
+          <Box size={13} /> 3D spread preview <span className="kbd ml-1">V</span>
+        </Link>
+      )}
       <div className="space-y-2 p-3">
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="ADD NOTE…" className="field w-full" />
         <div className="flex flex-wrap gap-1">

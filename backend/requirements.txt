@@ -6,3 +6,5 @@ pydantic-settings>=2.4
 contourpy>=1.2
 pillow>=10.4
 pytest>=8.3
+apprise>=2.1
+netCDF4==1.7.5.1.post1

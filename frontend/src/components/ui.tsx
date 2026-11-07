@@ -120,3 +120,17 @@ export function Mark({ size = 16 }: { size?: number }) {
     </svg>
   )
 }
+
+/** A toast with one Undo button; the action runs when the countdown ends. */
+export function UndoBar({ message, left, onUndo }: { message: string; left: number; onUndo: () => void }) {
+  return (
+    <div role="status" className="flex items-center justify-between gap-3 border border-line-2 border-l-2 border-l-ok bg-raised px-3 py-2 text-[12.5px]">
+      <span>
+        {message} <span className="num text-dim">{left}s</span>
+      </span>
+      <button onClick={onUndo} className="btn !h-9 shrink-0 !px-4">
+        Undo
+      </button>
+    </div>
+  )
+}

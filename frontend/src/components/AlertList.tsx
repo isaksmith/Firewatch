@@ -1,5 +1,5 @@
 import { AlertTriangle, RotateCcw } from 'lucide-react'
-import type { AlertSummary } from '../api'
+import type { AlertsResponse, AlertSummary } from '../api'
 import { REC_META, SUPPRESSION_LABEL, seenLabel, trackId } from '../lib/format'
 import { filterQueue, type QueueTab } from '../lib/queue'
 import { ScoreReadout, Sparkline, StatusTag, TrackGlyph } from './ui'
@@ -8,10 +8,21 @@ interface Props {
   alerts: AlertSummary[]
   tab: QueueTab
   setTab: (t: QueueTab) => void
+  suppressed?: AlertsResponse['suppressed']
+  lowData?: boolean
+  loading?: boolean
   selectedId: number | null
   hoveredId: number | null
   onSelect: (id: number) => void
   onHover: (id: number | null) => void
+}
+
+const GROUP_ORDER = ['logged_burn', 'likely_prescribed', 'static_source', 'low_signal'] as const
+const GROUP_LABEL: Record<(typeof GROUP_ORDER)[number], string> = {
+  logged_burn: 'Logged burns',
+  likely_prescribed: 'Likely prescribed burns',
+  static_source: 'Static heat sources',
+  low_signal: 'Low signal',
 }
 
 export function AlertList(p: Props) {
@@ -29,7 +40,7 @@ export function AlertList(p: Props) {
       </div>
       <div className="grid grid-cols-3 border-b border-line">
         {tabs.map(([k, label]) => {
-          const n = filterQueue(p.alerts, k).length
+          const n = k === 'suppressed' && p.lowData && p.suppressed ? p.suppressed.total : filterQueue(p.alerts, k).length
           const on = p.tab === k
           return (
             <button
@@ -47,17 +58,51 @@ export function AlertList(p: Props) {
         })}
       </div>
       <ul className="flex-1 overflow-y-auto">
-        {visible.map((a) => (
-          <AlertRow
-            key={a.id}
-            a={a}
-            selected={a.id === p.selectedId}
-            hovered={a.id === p.hoveredId}
-            onClick={() => p.onSelect(a.id)}
-            onHover={p.onHover}
-          />
-        ))}
-        {visible.length === 0 && (
+        {p.tab === 'suppressed' && p.lowData && p.suppressed ? (
+          <li className="px-4 py-3">
+            {GROUP_ORDER.map((k) => (
+              <div key={k} className="flex justify-between border-b border-line py-2 text-[12.5px]">
+                <span>{GROUP_LABEL[k]}</span>
+                <span className="num text-muted">{p.suppressed![k]}</span>
+              </div>
+            ))}
+            <p className="mt-3 text-[12px] text-dim">The details load when you turn Low data off.</p>
+          </li>
+        ) : p.tab === 'suppressed' ? (
+          GROUP_ORDER.map((k) => {
+            const rows = visible.filter((a) => a.suppression === k)
+            if (rows.length === 0) return null
+            return (
+              <li key={k}>
+                <div className="flex h-7 items-center justify-between border-b border-line bg-void px-4">
+                  <span className="label">{GROUP_LABEL[k]}</span>
+                  <span className="num text-[10px] text-dim">{String(rows.length).padStart(2, '0')}</span>
+                </div>
+                <ul>
+                  {rows.map((a) => (
+                    <AlertRow key={a.id} a={a} selected={a.id === p.selectedId} hovered={a.id === p.hoveredId} onClick={() => p.onSelect(a.id)} onHover={p.onHover} />
+                  ))}
+                </ul>
+              </li>
+            )
+          }).concat(
+            visible
+              .filter((a) => !a.suppression)
+              .map((a) => (
+                <AlertRow key={a.id} a={a} selected={a.id === p.selectedId} hovered={a.id === p.hoveredId} onClick={() => p.onSelect(a.id)} onHover={p.onHover} />
+              )),
+          )
+        ) : (
+          visible.map((a) => (
+            <AlertRow key={a.id} a={a} selected={a.id === p.selectedId} hovered={a.id === p.hoveredId} onClick={() => p.onSelect(a.id)} onHover={p.onHover} />
+          ))
+        )}
+        {p.loading && (
+          <li className="flex flex-col items-center gap-2 px-6 py-12 text-center">
+            <span className="label">Loading…</span>
+          </li>
+        )}
+        {!p.loading && visible.length === 0 && !(p.tab === 'suppressed' && p.lowData) && (
           <li className="flex flex-col items-center gap-2 px-6 py-12 text-center">
             <span className="label">No tracks</span>
             <span className="text-[12px] text-dim">Nothing in this queue right now.</span>

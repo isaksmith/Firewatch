@@ -1,0 +1,31 @@
+{
+  "_about": "Shared coordinates for the fictional Cottonwood Creek scenario (design/SCENARIO.md). Placed in Clark County KS terrain. Every builder reads positions from here; do not invent others. Date is Tuesday 2026-03-17, local time CDT (UTC-5), so 1:50 pm = 18:50Z.",
+  "date_local": "2026-03-17",
+  "utc_offset_hours": -5,
+  "district": "Cottonwood Creek Fire District",
+  "station": {"name": "Cottonwood station", "lat": 37.1870, "lon": -99.6580},
+  "ignition": {"label": "Rd K, half a mile south of CR 12", "lat": 37.3000, "lon": -99.8000, "time_local": "13:50"},
+  "line_fault": {"circuit": "Ortiz lease line", "kind": "fault", "lat": 37.3000, "lon": -99.8000, "time_local": "13:50"},
+  "goes_first_look": {"lat": 37.3043, "lon": -99.8000, "time_local": "14:00", "note": "0.3 mi north of the fault"},
+  "roads": {
+    "CR 8": {"lat": 37.27827}, "CR 10": {"lat": 37.29276}, "CR 12": {"lat": 37.30725},
+    "CR 14": {"lat": 37.32174}, "CR 16": {"lat": 37.33623},
+    "Rd J": {"lon": -99.81817}, "Rd K": {"lon": -99.80000}, "Rd L": {"lon": -99.78183}
+  },
+  "places": [
+    {"id": "miller-house", "kind": "house", "family": "Miller", "label": "Miller ranch house", "lat": 37.34347, "lon": -99.8000,
+     "phone": "+15550100001", "sms": "Cottonwood Creek FD: grass fire 3 mi south of your house, moving north. Could reach you near 2:49. Reply 1 if you can move cattle or disc a line."},
+    {"id": "hale-cattle", "kind": "cattle", "family": "Hale", "label": "Hale cattle on CR 14 east", "lat": 37.32174, "lon": -99.7850, "phone": "+15550100002"},
+    {"id": "ortiz-tank", "kind": "water", "family": "Ortiz", "label": "Ortiz lease tank battery, water truck", "lat": 37.30725, "lon": -99.81817, "phone": "+15550100003"},
+    {"id": "cr14-at-rdk", "kind": "road", "label": "CR 14 at Rd K", "lat": 37.32174, "lon": -99.8000}
+  ],
+  "burns": [
+    {"id": "henderson", "caller": "Henderson", "label": "Henderson pasture burn", "lat": 37.30725, "lon": -99.72732,
+     "called_in_local": "10:40", "start_local": "11:00", "end_local": "16:00"},
+    {"id": "ortiz-burn", "caller": "Ortiz", "label": "Ortiz pasture burn", "lat": 37.2386, "lon": -99.8770,
+     "called_in_local": "11:15", "start_local": "12:00", "end_local": "17:00"}
+  ],
+  "weather": {"red_flag": true, "red_flag_since_local": "06:00", "wind_dir_deg": 180, "wind_mph": 35, "gust_mph": 55, "rh_pct": 11, "temp_f": 78, "station": "Medicine Lodge airport (K51)"},
+  "public_report": {"time_local": "14:17", "sent_local": "14:21", "lat": 37.2960, "lon": -99.7700, "text": "Smoke to the west of CR 10, big and black", "phone": "+15550100009"},
+  "targets": {"score": 87, "recommendation": "escalate", "page_local": "14:05", "head_at_cr14_local": "14:29", "head_at_miller_local": "14:49"}
+}

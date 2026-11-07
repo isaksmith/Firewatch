@@ -12,6 +12,8 @@ export default defineConfig({
     proxy: {
       // 127.0.0.1 rather than localhost: localhost can resolve to IPv6 and hit another service on :8000.
       '/api': process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:8000',
+      // The one-bar page is rendered by the backend, not by this app.
+      '/lite': process.env.API_PROXY_TARGET ?? 'http://127.0.0.1:8000',
     },
   },
 })

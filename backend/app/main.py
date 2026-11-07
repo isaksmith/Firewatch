@@ -1,19 +1,25 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import timedelta
+import re
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import sample
 from .config import get_settings
 from .db import connect, init_db, iso, loads, parse_iso, utcnow
 from .fire_weather import default_curing, gfdi_band
 from .layers import LAYER_NAMES, load_layer, nearest_assets
-from .pipeline import poll_firms_once
+from .pipeline import add_burn, poll_firms_once, process_line_fault, process_report
+from .alerts.routes import router as alerts_router
+from .lite import router as lite_router
 from .sim.spread import SpreadInput, simulate
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -38,7 +44,7 @@ async def lifespan(app: FastAPI):
     global _poll_task
     init_db()
     s = get_settings()
-    if s.mode == "sample" and not sample.has_sample_events():
+    if s.mode == "sample" and not sample.sample_is_current():
         n = await asyncio.to_thread(sample.load_all_now)
         log.info("loaded %d sample fixtures", n)
     if s.mode == "live":
@@ -49,6 +55,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Firewatch Confirmation Layer", lifespan=lifespan)
+# One bar of signal: compress anything over 500 bytes.
+app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in get_settings().cors_origins.split(",")],
@@ -56,6 +64,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 api = APIRouter(prefix="/api")
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(_: Request, exc: RequestValidationError):
+    # FastAPI's default 422 echoes the rejected input back. That would put a phone number in the
+    # response (and in any proxy log), so report only where the problem is and what it is.
+    errors = [{"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]} for e in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": errors})
 
 RECOMMENDATION_ORDER = {"escalate": 0, "investigate": 1, "monitor": 2}
 TRANSITIONS = {
@@ -71,6 +87,8 @@ def _sources(conn, event_id: int) -> dict[str, int]:
     for r in conn.execute("SELECT source FROM detections WHERE event_id = ?", (event_id,)):
         family = r["source"].split("_")[0]
         out[family] = out.get(family, 0) + 1
+    for r in conn.execute("SELECT kind FROM signals WHERE event_id = ?", (event_id,)):
+        out[r["kind"]] = out.get(r["kind"], 0) + 1
     return out
 
 
@@ -83,6 +101,8 @@ def _summary(conn, ev) -> dict:
     ).fetchone()
     reasons = loads(latest["reasons_json"], []) if latest else []
     top = next((r for r in reasons if r["contribution"] > 0), reasons[0] if reasons else None)
+    if ev["suppression"] == "logged_burn" and reasons:
+        top = reasons[0]
     return {
         "id": ev["id"],
         "lat": ev["lat"],
@@ -121,7 +141,7 @@ def list_alerts(
             "AND score IS NOT NULL AND (is_sample = 1 OR last_seen >= ?)",
             (*statuses, since),
         ).fetchall()
-        alerts, suppressed = [], {"total": 0, "static_source": 0, "likely_prescribed": 0, "low_signal": 0}
+        alerts, suppressed = [], {"total": 0, "static_source": 0, "likely_prescribed": 0, "logged_burn": 0, "low_signal": 0}
         for ev in rows:
             if ev["recommendation"] == "monitor":
                 suppressed["total"] += 1
@@ -172,7 +192,161 @@ def get_alert(event_id: int):
             "SELECT action, operator, note, created_at FROM actions WHERE event_id = ? ORDER BY id DESC", (event_id,)
         )]
         out["nearest_assets"] = nearest_assets(ev["lat"], ev["lon"])
+        out["signals"] = [
+            {"id": r["id"], "kind": r["kind"], "lat": r["lat"], "lon": r["lon"], "time": r["time"], **_signal_public(r)}
+            for r in conn.execute("SELECT * FROM signals WHERE event_id = ? ORDER BY time", (event_id,))
+        ]
+        out["data_age"] = _data_age(conn, ev, out["detections"], out["signals"], out["weather"])
     return out
+
+
+def _signal_public(row) -> dict:
+    """What the screen may show of a signal. A reporter's phone number is never sent back out."""
+    p = loads(row["payload_json"], {})
+    if row["kind"] == "line_fault":
+        return {"circuit": p.get("circuit"), "fault_kind": p.get("kind")}
+    phone = p.get("phone") or ""
+    return {"text": p.get("text"), "phone_last4": phone[-4:] if phone else None}
+
+
+def _data_age(conn, ev, detections: list[dict], signals: list[dict], weather: dict) -> list[dict]:
+    """One row per source with when it was last heard from, so the screen can say "3 min ago".
+    A source with no timestamp keeps its row with last_seen null: a gap, not a quiet "no fire"."""
+    rows: list[dict] = []
+    latest_by_source: dict[str, str] = {}
+    for d in detections:
+        latest_by_source[d["source"]] = max(latest_by_source.get(d["source"], ""), d["acq_time"])
+    for source, t in sorted(latest_by_source.items(), key=lambda kv: kv[1], reverse=True):
+        rows.append({"source": source, "label": "Satellite", "last_seen": t})
+    for kind, label in (("line_fault", "Line fault"), ("report", "Public report")):
+        times = [x for x in signals if x["kind"] == kind]
+        if times:
+            last = max(times, key=lambda x: x["time"])
+            rows.append({"source": last.get("circuit") or kind, "label": label, "last_seen": last["time"]})
+    if weather:
+        station = re.sub(r"\s*\([^)]*\)\s*$", "", weather.get("station") or "") or None  # "Medicine Lodge airport (K51)" -> "Medicine Lodge airport"
+        rows.append({
+            "source": station or weather.get("source") or "weather",
+            "label": f"Weather ({station})" if station else "Weather",
+            "last_seen": weather.get("observed_at"),
+        })
+    return rows
+
+
+def _utc_iso(dt: datetime) -> str:
+    return iso(dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc))
+
+
+class BurnIn(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    start: datetime
+    end: datetime
+    called_in: datetime | None = None
+    caller: str = Field(min_length=1, max_length=80)
+    label: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def _window(self):
+        if self.end <= self.start:
+            raise ValueError("end must be after start")
+        return self
+
+
+@api.post("/burns", status_code=201)
+def post_burn(body: BurnIn):
+    called_in = body.called_in or utcnow()
+    with connect() as conn:
+        r = add_burn(conn, body.lat, body.lon, _utc_iso(body.start), _utc_iso(body.end), _utc_iso(called_in),
+                     body.caller, body.label, is_sample=get_settings().mode == "sample")
+        return _burn_row(conn.execute("SELECT * FROM burns WHERE id = ?", (r["id"],)).fetchone())
+
+
+def _burn_row(b) -> dict:
+    return {"id": b["id"], "lat": b["lat"], "lon": b["lon"], "start": b["start"], "end": b["end"],
+            "called_in": b["called_in"], "caller": b["caller"], "label": b["label"], "is_sample": bool(b["is_sample"])}
+
+
+@api.get("/burns")
+def list_burns():
+    with connect() as conn:
+        return {"burns": [_burn_row(b) for b in conn.execute('SELECT * FROM burns ORDER BY "start", id')]}
+
+
+def _recent(v: datetime | None) -> datetime | None:
+    """Live signal times: within the last 48 hours, at most 10 minutes ahead (clocks drift)."""
+    if v is None:
+        return v
+    t = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+    now = utcnow()
+    if t < now - timedelta(hours=48) or t > now + timedelta(minutes=10):
+        raise ValueError("time must be within the last 48 hours and not in the future")
+    return v
+
+
+class LineFaultIn(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    time: datetime | None = None
+    circuit: str = Field(min_length=1, max_length=80)
+    kind: str = Field(default="fault", min_length=1, max_length=40)
+
+    _time_ok = field_validator("time")(_recent)
+
+
+PHONE_RE = re.compile(r"^\+?[0-9]{7,15}$")
+
+
+class ReportIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    text: str = Field(min_length=1, max_length=500)
+    phone: str | None = Field(default=None, max_length=30)
+    time: datetime | None = None
+
+    _time_ok = field_validator("time")(_recent)
+
+    @field_validator("phone")
+    @classmethod
+    def _phone(cls, v: str | None):
+        if v is None or v == "":
+            return None
+        cleaned = re.sub(r"[\s().-]", "", v)
+        if not PHONE_RE.match(cleaned):
+            raise ValueError("phone must be 7 to 15 digits, with an optional leading +")  # never echo the value
+        return cleaned
+
+
+def _signal_weather() -> dict | None:
+    """Sample mode has no live weather feed; hand-posted signals use the scenario's weather."""
+    return sample.scenario_weather() if get_settings().mode == "sample" else None
+
+
+def _signal_result(conn, r: dict) -> dict:
+    out = dict(r)
+    if r["event_id"]:
+        ev = conn.execute("SELECT score, recommendation FROM events WHERE id = ?", (r["event_id"],)).fetchone()
+        out.update(score=ev["score"], recommendation=ev["recommendation"])
+    return out
+
+
+@api.post("/signals/line-fault", status_code=201)
+def post_line_fault(body: LineFaultIn):
+    when = _utc_iso(body.time) if body.time else iso(utcnow())
+    with connect() as conn:
+        r = process_line_fault(conn, body.lat, body.lon, when, body.circuit, body.kind,
+                               is_sample=get_settings().mode == "sample", weather=_signal_weather())
+        return _signal_result(conn, r)
+
+
+@api.post("/signals/report", status_code=201)
+def post_report(body: ReportIn):
+    when = _utc_iso(body.time) if body.time else iso(utcnow())
+    with connect() as conn:
+        r = process_report(conn, body.lat, body.lon, when, body.text, body.phone,
+                           is_sample=get_settings().mode == "sample", weather=_signal_weather())
+        return _signal_result(conn, r)
 
 
 class ActionIn(BaseModel):
@@ -294,6 +468,8 @@ def sample_fixtures():
     ]
 
 
+app.include_router(alerts_router)  # Respond: CAP, in-path, messages, notify (dry-run unless FIREWATCH_NOTIFY_LIVE=1)
+app.include_router(lite_router)  # Low-data: /lite page (no JS) and /api/lite/alerts
 app.include_router(api)
 
 

@@ -8,6 +8,8 @@ from ..geo import haversine_km
 from ..layers import place_label
 
 WINDOW = timedelta(hours=12)
+SIGNAL_JOIN_BEFORE = timedelta(minutes=5)   # satellite clocks and fault clocks disagree a little
+SIGNAL_JOIN_AFTER = timedelta(minutes=15)   # a satellite look this soon after a fault/report is the same fire
 BASE_RADIUS_KM = 2.0
 
 
@@ -33,7 +35,15 @@ def assign_detection(conn: sqlite3.Connection, det_id: int) -> int:
         rows = conn.execute(
             "SELECT lat, lon FROM detections WHERE event_id = ?", (ev["id"],)
         ).fetchall()
-        if any(haversine_km(d["lat"], d["lon"], r["lat"], r["lon"]) <= radius for r in rows):
+        near = any(haversine_km(d["lat"], d["lon"], r["lat"], r["lon"]) <= radius for r in rows)
+        if not near:
+            sigs = conn.execute("SELECT lat, lon, time FROM signals WHERE event_id = ?", (ev["id"],)).fetchall()
+            near = any(
+                haversine_km(d["lat"], d["lon"], s["lat"], s["lon"]) <= radius
+                and parse_iso(s["time"]) - SIGNAL_JOIN_BEFORE <= t <= parse_iso(s["time"]) + SIGNAL_JOIN_AFTER
+                for s in sigs
+            )
+        if near:
             matched.append(ev["id"])
 
     if not matched:
@@ -55,20 +65,32 @@ def assign_detection(conn: sqlite3.Connection, det_id: int) -> int:
 
 
 def _merge(conn: sqlite3.Connection, keep: int, drop: int) -> None:
-    for table in ("detections", "scores", "actions"):
+    for table in ("detections", "signals", "scores", "actions"):
         conn.execute(f"UPDATE {table} SET event_id = ? WHERE event_id = ?", (keep, drop))
     conn.execute("DELETE FROM events WHERE id = ?", (drop,))
+
+
+def event_points(conn: sqlite3.Connection, event_id: int) -> list[tuple[float, float]]:
+    """Every place something was seen for this event: detections and signals."""
+    pts = [(r["lat"], r["lon"]) for r in conn.execute("SELECT lat, lon FROM detections WHERE event_id = ?", (event_id,))]
+    pts += [(r["lat"], r["lon"]) for r in conn.execute("SELECT lat, lon FROM signals WHERE event_id = ?", (event_id,))]
+    return pts
 
 
 def refresh_event_geometry(conn: sqlite3.Connection, event_id: int) -> None:
     rows = conn.execute(
         "SELECT lat, lon, frp_mw, acq_time FROM detections WHERE event_id = ?", (event_id,)
     ).fetchall()
-    weights = [max(r["frp_mw"] or 0.0, 1.0) for r in rows]
-    total = sum(weights)
-    lat = sum(r["lat"] * w for r, w in zip(rows, weights)) / total
-    lon = sum(r["lon"] * w for r, w in zip(rows, weights)) / total
-    times = sorted(r["acq_time"] for r in rows)
+    sigs = conn.execute("SELECT lat, lon, time FROM signals WHERE event_id = ?", (event_id,)).fetchall()
+    if rows:  # satellite heat sets the position; signals only widen the time range
+        weights = [max(r["frp_mw"] or 0.0, 1.0) for r in rows]
+        total = sum(weights)
+        lat = sum(r["lat"] * w for r, w in zip(rows, weights)) / total
+        lon = sum(r["lon"] * w for r, w in zip(rows, weights)) / total
+    else:
+        lat = sum(s["lat"] for s in sigs) / len(sigs)
+        lon = sum(s["lon"] for s in sigs) / len(sigs)
+    times = sorted([r["acq_time"] for r in rows] + [s["time"] for s in sigs])
     label, town, county = place_label(lat, lon)
     conn.execute(
         "UPDATE events SET lat = ?, lon = ?, first_seen = ?, last_seen = ?, place_label = ?, "

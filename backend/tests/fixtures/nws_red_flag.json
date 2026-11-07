@@ -1,0 +1,8 @@
+{
+  "type": "FeatureCollection",
+  "title": "Current watches, warnings, and advisories for 37.27 N, 99.31 W",
+  "features": [
+    {"properties": {"event": "Wind Advisory", "headline": "Wind Advisory issued November 6 at 3:00PM CST until November 7 at 6:00PM CST by NWS Dodge City KS", "expires": "2026-11-08T00:00:00+00:00"}},
+    {"properties": {"event": "Red Flag Warning", "headline": "Red Flag Warning issued November 6 at 3:00PM CST until November 6 at 8:00PM CST by NWS Dodge City KS", "expires": "2026-11-07T02:00:00+00:00", "ends": "2026-11-07T02:00:00+00:00"}}
+  ]
+}

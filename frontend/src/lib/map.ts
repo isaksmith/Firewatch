@@ -2,6 +2,13 @@ import type { StyleSpecification } from 'maplibre-gl'
 
 export const BASEMAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
 
+/** Low-data mode: no tiles at all, just a dark background under the local Kansas layers. */
+export const BLANK_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {},
+  layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#0a0c0f' } }],
+}
+
 export const KANSAS_VIEW = { longitude: -98.3, latitude: 38.5, zoom: 6.2 }
 
 export const AOI_BBOX = [-102.05, 36.99, -94.59, 40.0] as const

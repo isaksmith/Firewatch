@@ -45,8 +45,22 @@ def score_features(f: dict, degraded: bool) -> ScoreResult:
         rec = "monitor"
         guardrail = "Capped at Monitor: known industrial heat source, not growing"
 
+    if f.get("burn_match"):
+        rec = "monitor"
+        guardrail = "Held at Monitor: matches a burn called in to dispatch"
+    elif f.get("burn_escape") and rec == "monitor":
+        rec = "investigate"
+        guardrail = "Raised to Investigate: growing past a burn called in to dispatch"
+    elif f.get("n_detections", 1) == 0:
+        # A fault or a report alone is a "go look", never a page. The satellite has to confirm.
+        if rec != "investigate":
+            rec = "investigate"
+            guardrail = "Held at Investigate: the satellite has not confirmed it yet"
+
     suppression = None
-    if rec == "monitor":
+    if f.get("burn_match"):
+        suppression = "logged_burn"
+    elif rec == "monitor":
         if f["dist_static_km"] <= 1:
             suppression = "static_source"
         elif (f["in_flint_hills"] and f["month"] in (3, 4)) or f["nearby_events_24h"] >= 3:
@@ -54,7 +68,7 @@ def score_features(f: dict, degraded: bool) -> ScoreResult:
         else:
             suppression = "low_signal"
 
-    reasons = sorted(reasons, key=lambda r: abs(r["contribution"]), reverse=True)
+    reasons = sorted(reasons, key=lambda r: (r.get("rank", 99), -abs(r["contribution"])))
     return ScoreResult(score, rec, reasons, scorer, guardrail, suppression)
 
 

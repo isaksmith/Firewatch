@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS events (
   recommendation   TEXT,
   degraded         INTEGER NOT NULL DEFAULT 0,
   guardrail        TEXT,
-  suppression      TEXT,                   -- static_source | likely_prescribed | low_signal (monitor only)
+  suppression      TEXT,                   -- static_source | likely_prescribed | logged_burn | low_signal (monitor only)
   reraised         INTEGER NOT NULL DEFAULT 0,
   updated_at       TEXT NOT NULL
 );
@@ -72,6 +72,33 @@ CREATE TABLE IF NOT EXISTS actions (
   note        TEXT,
   created_at  TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS burns (
+  id          INTEGER PRIMARY KEY,
+  lat         REAL NOT NULL,
+  lon         REAL NOT NULL,
+  "start"     TEXT NOT NULL,           -- UTC ISO, burn window opens
+  "end"       TEXT NOT NULL,           -- UTC ISO, burn window closes
+  called_in   TEXT NOT NULL,           -- UTC ISO, when it was called in to dispatch
+  caller      TEXT NOT NULL,
+  label       TEXT,
+  is_sample   INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_burns_sample ON burns(is_sample);
+
+CREATE TABLE IF NOT EXISTS signals (
+  id            INTEGER PRIMARY KEY,
+  kind          TEXT NOT NULL,         -- line_fault | report
+  lat           REAL NOT NULL,
+  lon           REAL NOT NULL,
+  time          TEXT NOT NULL,         -- UTC ISO
+  payload_json  TEXT,                  -- circuit/kind for faults; text/phone for reports
+  event_id      INTEGER REFERENCES events(id),
+  is_sample     INTEGER NOT NULL DEFAULT 0,
+  ingested_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_signals_event ON signals(event_id);
 
 CREATE TABLE IF NOT EXISTS source_health (
   source        TEXT PRIMARY KEY,

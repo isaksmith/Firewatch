@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Play, RefreshCw } from 'lucide-react'
+import { ClipboardList, Play, RefreshCw, Wifi } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { api, type SourceHealth } from '../api'
+import { setLowData, useLowData } from '../lib/lowData'
 import { setOperator, useOperator } from '../lib/operator'
 import { Mark } from './ui'
 
@@ -45,10 +46,11 @@ function Clock() {
 
 const Divider = () => <span className="h-4 w-px bg-line-2" />
 
-export function TopBar() {
+export function TopBar({ burnOpen, onBurnLog }: { burnOpen: boolean; onBurnLog: () => void }) {
+  const { on: lowData } = useLowData()
   const qc = useQueryClient()
   const operator = useOperator()
-  const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 15_000 })
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: lowData ? 60_000 : 15_000 })
   const replay = useMutation({
     mutationFn: api.replay,
     onSuccess: () => setTimeout(() => qc.invalidateQueries(), 500),
@@ -82,6 +84,24 @@ export function TopBar() {
 
       <div className="ml-auto flex items-center gap-4">
         <Clock />
+        <Divider />
+        <button onClick={onBurnLog} aria-pressed={burnOpen} className={`btn !h-6 ${burnOpen ? '!border-text' : ''}`}>
+          <ClipboardList size={11} /> Burn log
+        </button>
+        <button
+          role="switch"
+          aria-checked={lowData}
+          onClick={() => setLowData(!lowData)}
+          className={`btn !h-6 ${lowData ? '!border-degraded !text-degraded' : ''}`}
+          title="Use less data: no map pictures, slower updates"
+        >
+          <Wifi size={11} /> Low data {lowData ? 'on' : 'off'}
+        </button>
+        {lowData && (
+          <a href="/lite" className="text-[11.5px] text-sample underline underline-offset-2">
+            Open the one-bar page
+          </a>
+        )}
         <Divider />
         <label className="flex items-center gap-2">
           <span className="label">OP</span>

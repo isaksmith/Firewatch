@@ -1,0 +1,15 @@
+{
+ "data": [
+  {
+   "station": "K51",
+   "name": "Medicine Lodge",
+   "network": "KS_ASOS",
+   "utc_valid": "2026-11-07T00:35:00Z",
+   "tmpf": 42.8,
+   "relh": 100.0,
+   "sknt": 5.0,
+   "drct": 40.0,
+   "gust": null
+  }
+ ]
+}

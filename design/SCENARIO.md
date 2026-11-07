@@ -19,6 +19,10 @@ Red Flag Warning since 6:00 am. South wind 35 mph, gusts 55, humidity 11%, 78°F
 - The head moves north at about 3 mph on average; the flanks widen.
 - Head reaches CR 14 about **2:29 pm**, the Miller house about **2:49 pm**.
 - The 60-min forecast from 2:05 is a north-pointing teardrop about 3 mi long and 1.2 mi wide.
+- **Worst case (decided 2026-11-06):** the existing spread model (`backend/app/sim/spread.py`) runs the head at about 7.5 mph in this wind. Timed from ignition at 1:50 (corrected 2026-11-06), the fire reaches CR 14 about **2:05**, as the page goes out, and the Miller house about **2:15**. So in the worst case the Miller ranch gets about 10 minutes' warning, and none at all today. Show both: the story uses about 3 mph, and the model's run is labelled "worst case (spread model)". Never present either as a measurement.
+
+## Weather station
+IEM lists Coldwater (3K8) as offline since 2022. Use **Medicine Lodge airport (K51)** for live weather and data-age labels: "Weather (Medicine Lodge airport): 6 min ago". Older screens and decks that say Coldwater need this change.
 
 ## Timeline: today vs Firewatch (targets, not results)
 | Time | Today | With Firewatch |

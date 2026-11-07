@@ -59,7 +59,23 @@ export function latLon(lat: number, lon: number): string {
 }
 
 export const SUPPRESSION_LABEL = {
+  logged_burn: 'logged burn',
   static_source: 'static heat source',
   likely_prescribed: 'likely prescribed burn',
   low_signal: 'low signal',
 } as const
+
+/** Plain 12-hour Central clock, e.g. "10:40 am". */
+export function clock12(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase()
+}
+
+/** "3 min ago" style age for the drawer's data-age rows. */
+export function agoLabel(iso: string, now: number): string {
+  const mins = Math.max(0, Math.round((now - new Date(iso).getTime()) / 60000))
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} min ago`
+  const h = Math.round(mins / 60)
+  if (h < 48) return `${h} hr ago`
+  return `${Math.round(h / 24)} days ago`
+}
