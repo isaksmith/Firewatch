@@ -6,7 +6,7 @@ Weekend build for [Firewatch 2026](https://wsuinnovationworks.com/) (WSU Innovat
 
 **What we build:** a **Detect → Confirm → Respond** chain that turns the first cheap signals of a grass fire (a power line faulting on a red-flag afternoon, a satellite hotspot, a rancher's text) into a confirmed alert. The alert goes to the duty officer's phone, and the right neighbors get a targeted text, minutes before anyone would otherwise call 911. Everything the district touches works over SMS.
 
-Software design details live in [DESIGN.md](DESIGN.md).
+Software design details live in [DESIGN.md](DESIGN.md). Verified outside research (landscape, Lockheed, tools, prices, grants, and what is not confirmed) is in [RESEARCH.md](RESEARCH.md). Sections 19 to 29 below add Shane's research and decisions; where they disagree with sections 1 to 18, sections 1 to 18 win (see section 30).
 
 ---
 
@@ -300,3 +300,122 @@ docs/             PLAN.md, DESIGN.md
 | Sun 10 am | Code frozen | — |
 | Sun 11 am | Slides due in app | — |
 | Sun 11:30 am | Finalist pitches | 5-minute demo rehearsed |
+
+---
+
+# Added from Shane's research (sections 19 to 30)
+
+These sections add what the `shane` branch researched and decided. The facts come from [RESEARCH.md](RESEARCH.md) and the packet. Times that are Firewatch targets are targets, not results. Scenario art and screens are in [../design/](../design/SCENARIO.md); they still show the old map positions and need a redraw.
+
+## 19. The three barriers, minute by minute (from Shane's research)
+
+The packet names three barriers: **time**, **false alarms** and **field reality** (one bar of cell, no fiber). Here is the afternoon with the barrier that bites at each minute. The packet's own times are on the left; our targets use the team's chain in section 1.
+
+| Time | Packet: what happened | What needs to happen | Firewatch does (target) | Barrier |
+|---|---|---|---|---|
+| 1:50 | Line falls into CRP grass. Nobody knows. | The fault itself raises the alarm | Co-op fault plus red flag plus dry grass opens an event and texts the duty officer | Time |
+| 1:52 | 15 acres, smoke column, nobody within 4 mi | Something sees it without a person there | Waits for the next satellite scan (GOES every 5 to 10 min) or a neighbor reply | Time |
+| 2:00 to 2:10 | Smoke is normal this month: two permitted pasture burns | Tell the real fire from the burns without driving out | A satellite hotspot near the fault raises the score; both burns match the burn log and stay at Monitor | False alarms |
+| 2:05 | Chief is at work, 30 mi away | The chief acts from a phone | The text and link carry the map, spread and who is in the path; mutual aid is requested now, not at 3:10 | Time |
+| 2:05 | Downwind rancher does not know | Respond means more than the station | Landowners, the lease water truck and disc owners get texts | Time, cost |
+| 2:17 | Driver sees smoke, no signal for 3 miles | His report arrives whenever he gets a bar | His text joins the existing event as a confirmation, not a new alarm | Field reality |
+| 2:21 to 2:23 | 911 call; district paged | n/a | Already paged earlier | Time |
+| 2:34 to 2:52 | Brush 1 rolls, on scene at fire age 62 min, head 2 to 3 mi out | A truck that arrives while it can still flank the fire | Rolls and arrives earlier, sent to the flank the forecast shows. The packet warns that even a fast page leaves the head about 1.5 mi out, so the disc line and early mutual aid carry the rest | Time |
+| 3:10 | Mutual aid requested, 30 to 40 min out | Ask sooner | Requested at the page, so it could arrive about 40 minutes sooner (our estimate) | Time |
+
+**What has to be true** (each is a test or an ask):
+
+| Condition | If it fails | How we check it |
+|---|---|---|
+| The co-op can see a fault on that line and share it | No 1:50 signal; satellites alone page only a few minutes before 911 | Pitch it as an ask to the co-op. Old oil-lease taps may have only fuses and no telemetry |
+| GOES flags a fast grass fire within roughly 10 to 20 minutes | No confirmation before 911 | Historical test (section 29) and the live delay log |
+| The dispatch burn log has location and time window | A permitted burn pages the district | Scenario decoys; reason text says "no burn logged here" and dismissal takes one tap |
+| Fault-only alerts stay rare enough to keep | Windy-day faults without fire make the chief mute it | Fault alone stays a quiet text; a page needs a second signal (see section 30, question 1) |
+
+## 20. Whole-system simulation versus spread simulation (from Shane's research)
+
+The packet says something "built, simulated or tested beats a slide". There are two kinds of simulation and both count as evidence.
+
+1. **Fire spread simulation (built).** `backend/app/sim/spread.py` runs the 60-minute wind and slope forecast that the 3D view animates (section 12). It drives who is in the path and where to send Brush 1. Upgrading it to pyretechnics (Rothermel, Scott-Burgan fuel models) is a stretch goal after a license check; the license is not declared in the GitHub API ([RESEARCH.md](RESEARCH.md) section 4).
+2. **Whole-system simulation (the stronger evidence).** Replay the Cottonwood Creek afternoon twice with the same fire and weather: **today's chain** (911 only) and **Firewatch**. Model each source's timing: GOES scan cadence plus the delivery delay we measure, FIRMS pass times, whether the line has fault telemetry, the driver's report when he regains signal, and each delivery channel's delay and failure rate on one bar. Output a side-by-side timeline plus fire size and distance from the head when Brush 1 arrives. Then sweep it (ignition at random minutes against the GOES scan, fault telemetry on or off, push versus text versus radio page) and report the **range** of minutes saved, not one lucky number.
+
+The team's Cottonwood Creek replay (section 9) is the base for item 2; the sweep and the "today versus Firewatch" side-by-side are what is still to add.
+
+## 21. One bar of cell: the delivery ladder (from Shane's research)
+
+The heavy work happens where the bandwidth is. The district only has to receive small messages, and every alert can reach it by more than one route, all at once:
+
+1. App push (ntfy) when there is data.
+2. **Text (SMS)**, which gets through on one bar and is held until signal returns.
+3. **County dispatch's radio pager**, by email-to-page. It works with zero cell, so it is the **backbone**. Firewatch feeds dispatch rather than going around it, which matches section 4.3.
+4. **Meshtastic LoRa mesh** from the station to trucks and ranches with no cell (optional). Prices are in the team's [hardware pricing report](research/hardware-pricing.txt): about $51 for a duty-officer radio and about $157 for a solar tower node.
+5. Satellite-to-phone texting is a next step (pricing not confirmed).
+
+Rules: a text is under 160 characters; the full alert is a few KB of GeoJSON; the base map is cached ahead (PMTiles) so the field never downloads tiles; a field report is queued and sent when a bar appears, and joins the event even if late; every alert shows the age of its data; if a phone has not acknowledged, the next route is tried. Weekend tests: measure alert and spread payload sizes, load the dashboard throttled to a slow mobile connection and fully offline, and add a "time to deliver on one bar" column per channel to the system simulation.
+
+## 22. The burn-call log from dispatch (from Shane's research)
+
+**Barber County already makes burners call dispatch.** Per a local-news repost of the March 24, 2025 county burn resolution, burners must notify Barber County Dispatch at least one hour before burning, and burning is banned on High or worse fire-danger days ([KCN](https://www.kcnonline.com/wp/?p=98329)). We read it through a page summary, so confirm the wording with the county clerk before quoting it. Clark and Comanche rules are not confirmed.
+
+What this changes: dispatch already holds the log we need to suppress false alarms. The team's text-in burn registry (section 4.2) can be fed from, or can mirror, that call instead of adding a new rule (this is the open assumption in section 17). Scoring subtracts points for a detection within 1.5 km of a logged burn during its window and shows the reason "matches a burn called in to dispatch at 10:40". If the log has no entry, the reason says "no burn logged here" so dispatch can dismiss it in one tap, and each dismissal is logged. Barber County also runs Everbridge public alerts, free to sign up for ([barber.ks.gov](https://barber.ks.gov/everbridge.html)), which is a possible landowner contact list.
+
+## 23. Low-data /lite page and dashboard low-data mode (from Shane's research)
+
+- **/lite:** a text-only page that links from an alert, under 50 KB with a static map image. It is the same page as the "text-only field page" in section 9, which is not yet built.
+- **Low-data mode on the dashboard:** a switch that stops live tile loading, uses a cached PMTiles district map and a service worker so the dashboard loads with no signal, and shows data age on every source. Test throttled and fully offline, and record the payload sizes on the slide.
+- If GOES or FIRMS is late, show a banner with the data age and a coverage gap, never "no fire".
+
+## 24. CAP export (from Shane's research)
+
+Export every alert as a **CAP 1.2** (OASIS) message, the open standard that alerting software and IPAWS understand. County dispatch and Everbridge are the targets; IPAWS is later. It is cheap, and it shows judges the output plugs into the systems counties already run ([RESEARCH.md](RESEARCH.md) section 4). Not yet built.
+
+## 25. Live-send safeguards (from Shane's research)
+
+Before any real message goes out from the demo or a pilot:
+
+- Real sending is off by default; sample mode uses the simulated outbox.
+- Send only to numbers on a named test roster, and never to the real county dispatch or the public.
+- A visible live-mode banner, and a hard daily send cap.
+- Every message, reply and dismissal is logged on the event.
+- Twilio pricing and 10DLC registration time are not confirmed ([RESEARCH.md](RESEARCH.md), Not confirmed), so allow time for it and keep the simulated outbox as the fallback.
+
+The team's Twilio sending and signature checks are written but not tried against a real number (section 9).
+
+## 26. Open security items (from Shane's research)
+
+- **No operator login on the write endpoints yet.** Anyone who can reach the server can post a burn, a line fault, a report or a dismissal. Before any live demo or pilot, put a login or a shared secret on every write endpoint, and rate limit them.
+- Inbound SMS needs the signature check turned on.
+- Fake or mistaken reports are already kept from paging alone (section 6); that does not replace a login.
+- A feed from the co-op needs its own credential and an audit log.
+
+## 27. Weather stations: Medicine Lodge K51, not Coldwater 3K8 (from Shane's research)
+
+IEM lists the Coldwater airport station (3K8) as **offline since 2022**. Use the **Medicine Lodge airport station (K51)** (37.266, -98.5481, Barber County) for observed wind and RH and for data-age labels, for example "Weather (Medicine Lodge airport): 6 min ago". Other stations: Pratt and Dodge City. Kansas Mesonet automated ingest needs written consent from the Weather Data Library, so ask first and use IEM ASOS until then. The district itself stays centered on Coldwater (section 17); only the weather source changes.
+
+## 28. Hardware prices and sources (from Shane's research)
+
+The team's [hardware pricing report](research/hardware-pricing.txt) is the source for node and radio prices on any slide. [RESEARCH.md](RESEARCH.md) section 5 lists other items seen on 2026-11-06 (Tempest $349, MLX90640 $74.95, FLIR Lepton 3.5 $172, DJI Matrice 4T $8,000) and what could not be priced. An earlier unsourced per-node price range in Shane's notes is dropped.
+
+## 29. Historical detection tests (from Shane's research)
+
+Test how soon satellites saw real fires, against when they were reported. The candidates, with verified facts from [RESEARCH.md](RESEARCH.md) section 3:
+
+- **Starbuck 2017:** ignition Mar 6, 2017, 11:51 AM CST, about 2 miles west of Gate, Oklahoma.
+- **Anderson Creek 2016:** first reported about 5:45 PM CDT, Mar 22, 2016, western Woods County, Oklahoma.
+- **Ranger Road 2026:** 283,283 acres; cause not identified.
+
+Pull first FIRMS detections (archive: VIIRS from 2012, MODIS from 2000) and the GOES-19 product, and compare. Exact ignition coordinates are not found for any of the three, so use a search box. No published study compares first detection with first report for these fires, so our result would be original evidence. The team's ML evidence (209 matched Kansas fires, section 8) is a larger set; this test adds named, well-known fires for the slide. A supporting fact: NWS's satellite notification work reports 83 percent of notifications arriving before local 911 calls, with a person in the loop ([Wildfire Today](https://wildfiretoday.com/?p=64611)); the sample size is not confirmed.
+
+## 30. Open questions for the team (from Shane's research)
+
+Where Shane's plan and the team's differ, the team's choice stands. These are listed so the team can confirm or change them.
+
+1. **Line fault on a red-flag day: minute 0 or T+9?** Michael's rule escalates a line fault on a red-flag day at minute 0. Andrew's chain pages at T+9, after a second source (the neighbor's "1"). The Cottonwood replay currently opts out (`confirm_red_flag: false`), but the packet replays (`cottonwood-creek-packet*.json`) still escalate at minute 0, and that conflicts with the "no page on one weak signal" principle. Pick one story for the pitch.
+2. **Who pays and cost to the district.** Shane says $0 for software, hosted once for the region. The team says about $300 to $500 a year if the district hosts it, $0 if the Kansas Forest Service hosts one instance. Team's figure stands.
+3. **Fault-only alert.** Shane: a fault alone is a quiet "watch" push, never a page. Team: a fault alone on a Red Flag Warning day escalates (section 4.2). Team's rule stands, but see question 1.
+4. **Alert channel.** Shane leads with ntfy push and Apprise; the team leads with SMS and plain texts with nothing to install. Team stands. Keep ntfy as an extra route only.
+5. **Whole-system simulation.** Shane wants a today-versus-Firewatch sweep with a range of minutes saved. The team has the replay but no sweep. Is the sweep in scope before Sunday 10 am?
+6. **Mesh nodes.** Shane has mesh as optional. The team has it built and as phase 1b. Team stands.
+7. **Weather source.** Section 27 changes the weather label to Medicine Lodge K51. Confirm the replay and the screens use it.
+8. **Scenario map.** The screens and decks in `design/` still show the old map (invented road grid and family names). They need a redraw on the canonical positions before the slides are due.
+9. **Automatic real texts are held for an operator.** With the live-send safeguard (section on safeguards), a real Twilio text that the background loop would send with no operator is held and shown in the console until someone releases it. Practice and replay texts are not affected. This is safer, but it slows the targeted texts on a real deployment. Keep holding, or allow automatic texts to landowners once two sources agree?

@@ -95,7 +95,9 @@ The **forecast** and the **playbook** sit beside the confirmation rules:
 
 ## Docs
 
-- [Build plan](docs/PLAN.md): the scenario in minutes, whole-chain design, constraints, failure modes, cost and who pays, evidence, weekend scope, next step.
+- [Build plan](docs/PLAN.md): the scenario in minutes, whole-chain design, constraints, failure modes, cost and who pays, evidence, weekend scope, next step, plus Shane's research additions and open questions.
+- [Concept screens and scenario art](design/SCENARIO.md): the story, the screens and decks (the map positions in them still need a redraw).
+- [Research](docs/RESEARCH.md): verified landscape and resource research (Lockheed, satellites, tools, prices, grants), each fact with its source, and a list of what is not confirmed.
 - [Design](docs/DESIGN.md): data model, pipeline, signals and confirmation rules, scoring, response planner and messaging, spread model, API, UI.
 - [How Firewatch recommends actions](docs/RECOMMENDATIONS.md): the decision model end to end (probability of fire, acres at stake, false-alarm costs, expected loss), every weight and why, worked example, limits.
 - [Spread forecast back-test v1](docs/research/spread-backtest-v1.md): the forecast started from the first satellite look of Anderson Creek 2016 and Starbuck 2017, scored against later looks (v2 55% vs v1 29% of later detections; Starbuck runs too slow overnight).

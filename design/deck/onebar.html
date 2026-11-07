@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>System One Bar</title>
+<meta name="viewport" content="width=1600">
+<link rel="stylesheet" href="../shared/fonts.css"><link rel="stylesheet" href="../shared/tokens.css">
+<style>
+html,body{background:#ECEFEC;width:1600px;height:900px;overflow:hidden}
+.screen{position:relative;width:1600px;height:900px;padding:34px 48px 0;background:var(--chalk)}
+h1{font:800 36px/1.1 var(--display);margin:0 0 6px;letter-spacing:-.2px}
+.sub{font-size:19px;color:var(--ink-2);margin:0;line-height:1.35}
+.foot{position:absolute;left:48px;bottom:16px;font-size:15px;color:var(--ink-2)}
+.chip{display:inline-block;font:600 15px/1 var(--sans);padding:6px 10px;border-radius:5px;border:2px solid}
+.chip.ok{color:#1d6e49;border-color:var(--ok)}
+.chip.watch{color:#8a5d00;border-color:var(--watch);border-style:dashed}
+
+.ladder{position:absolute;left:48px;top:134px;width:740px}
+.hd{font:800 22px/1.2 var(--display);margin:0 0 4px}.hs{font-size:16px;color:var(--ink-2);margin:0 0 12px}
+.rg{display:flex;align-items:center;gap:16px;background:#fff;border:1px solid var(--rule);height:92px;padding:0 18px;margin-bottom:10px}
+.rg .num{font:800 30px/1 var(--display);width:30px;color:var(--ink-2)}
+.rb{flex:1}.rb b{display:block;font:600 21px/1.2 var(--sans);margin-bottom:3px}.rb span{font-size:16px;color:var(--ink-2);line-height:1.3;display:block}
+.need{width:200px;flex:none;font:600 16px/1.2 var(--sans);display:flex;flex-direction:column;gap:6px}
+.bars{display:flex;gap:4px;align-items:flex-end;height:22px}
+.bars u{display:block;width:10px;background:#D9DEDC;text-decoration:none}
+.bars u:nth-child(1){height:9px}.bars u:nth-child(2){height:15px}.bars u:nth-child(3){height:22px}
+.bars u.on{background:var(--ok)}
+.rg.later{border-style:dashed;background:#F6F8F6}
+.pay{position:absolute;left:850px;top:134px;width:702px}
+.pr{margin-bottom:16px}
+.pr .lab{display:flex;justify-content:space-between;font-size:18px;margin-bottom:6px}.pr .lab b{font-weight:600}.pr .lab span{font-weight:600}
+.trk{height:30px;position:relative}
+.bar{height:30px;background:var(--ink);border-radius:2px}
+.bar.big{background:repeating-linear-gradient(90deg,var(--grass) 0 10px,var(--grass-2) 10px 20px);border:2px solid var(--ink);width:100%}
+.est{display:inline-block;font:600 15px/1 var(--sans);border:2px dashed var(--watch);background:#FBF3DF;padding:6px 10px;margin-bottom:12px}
+.grp{font:600 17px/1.3 var(--sans);color:var(--ink-2);margin:10px 0 10px}
+.principle{position:absolute;left:48px;right:48px;bottom:52px;background:var(--ink);color:#fff;padding:20px 28px;font:600 28px/1.3 var(--display)}
+</style></head><body><div class="screen"><h1>Built for one bar of signal</h1>
+<p class="sub">Every alert goes out every way at once. The ones lower down need less from the phone.</p>
+<div class="ladder"><p class="hd">The delivery ladder</p><p class="hs">All routes fire together. If one is not acknowledged, the next is tried.</p><div class="rg"><div class="num">1</div><div class="rb"><b>App push</b><span>A short alert with a link to the map</span></div><div class="need"><span class="bars"><u class='on'></u><u class='on'></u><u class='on'></u></span>Needs data</div></div><div class="rg"><div class="num">2</div><div class="rb"><b>Text message</b><span>Under 160 characters. Held until a bar comes back.</span></div><div class="need"><span class="bars"><u class='on'></u><u></u><u></u></span>Needs one bar</div></div><div class="rg"><div class="num">3</div><div class="rb"><b>Radio pager, through county dispatch</b><span>One line, sent by email-to-page. The backbone.</span></div><div class="need"><span class="bars"><u></u><u></u><u></u></span>Needs no cell at all</div></div><div class="rg"><div class="num">4</div><div class="rb"><b>LoRa mesh radio</b><span>Short text from the station to trucks and ranches. Optional.</span></div><div class="need"><span class="bars"><u></u><u></u><u></u></span>Needs no cell at all</div></div><div class="rg later"><div class="num">5</div><div class="rb"><b>Satellite text</b><span>Later. Next step, price not confirmed.</span></div><div class="need"><span class="bars"><u></u><u></u><u></u></span>Needs no cell at all</div></div></div>
+<div class="pay"><p class="hd">How big each message is</p><span class="est">Our estimates, to be measured</span>
+<div class="grp">In the field, over one bar</div>
+<div class="pr"><div class="lab"><b>Text alert</b><span>under 160 characters</span></div><div class="trk"><div class="bar" style="width:9px"></div></div></div>
+<div class="pr"><div class="lab"><b>Full alert</b><span>about 3 KB</span></div><div class="trk"><div class="bar" style="width:210px"></div></div></div>
+<div class="pr"><div class="lab"><b>Spread shape</b><span>about 8 KB</span></div><div class="trk"><div class="bar" style="width:560px"></div></div></div>
+<div class="grp" style="margin-top:26px">Ahead of time, over station WiFi, once</div>
+<div class="pr"><div class="lab"><b>Map cached ahead of time</b><span>about 20 MB</span></div><div class="trk"><div class="bar big"></div></div>
+<div style="font-size:16px;color:var(--ink-2);margin-top:8px">About 2,500 times the spread shape, which is why it is sent once, not on the day. The bars above use one scale.</div></div></div>
+<div class="principle">The heavy work happens where the bandwidth is. The field only has to receive small messages.</div>
+<div class="foot">Concept screen. Sample data from the Cottonwood Creek scenario.</div></div></body></html>
