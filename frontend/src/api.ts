@@ -175,7 +175,7 @@ export interface SimulationResult {
 }
 
 export interface SourceHealth {
-  status: 'ok' | 'stale' | 'down' | 'sample'
+  status: 'ok' | 'stale' | 'down' | 'sample' | 'skipped'
   age_min: number | null
   last_ok: string | null
   last_error: string | null
