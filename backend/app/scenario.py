@@ -13,6 +13,7 @@ from .redflag import replay_red_flag
 from .db import connect, iso, loads, parse_iso
 from .district import load_district, sync_roster
 from .fire_weather import default_curing, gfdi, gfdi_band
+from .ngfs_signal import add_ngfs_signals
 from .notify import handle_inbound, tick
 from .pipeline import process_detections
 from .signals import add_signal
@@ -62,6 +63,16 @@ def _apply(conn, sc: dict, step: dict, now: datetime) -> None:
     elif kind == "detections":
         dets = [{**d, "acq_time": iso(now)} for d in step["detections"]]
         process_detections(conn, dets, is_sample=True, weather=sc["weather"], now=now)
+    elif kind == "ngfs":
+        # Each ngfs step is one scan of one tracked feature; the snapshot is every scan so far.
+        pts = [
+            {"lat": s["lat"], "lon": s["lon"], "feature_tracking_id": s["feature_tracking_id"],
+             "type_description": s.get("type_description"),
+             "acq_date_time": iso(parse_iso(sc["t0"]) + timedelta(minutes=s["t"] - s.get("lag_min", 0)))}
+            for s in sc["timeline"] if s["type"] == "ngfs" and s["t"] <= step["t"]
+        ]
+        for eid in add_ngfs_signals(conn, pts, now, is_sample=True):
+            evaluate_event(conn, eid, sc["weather"], now)
     else:
         raise ValueError(f"unknown step type {kind!r}")
     conn.execute("UPDATE events SET sample_slug = ? WHERE is_sample = 1 AND sample_slug IS NULL", (sc["slug"],))

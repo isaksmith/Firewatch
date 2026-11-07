@@ -428,3 +428,82 @@ def test_momentary_trip_on_a_red_flag_day_does_not_escalate():
         _nws(conn)
         eid = add_signal(conn, "line_fault", *FIRE, iso(_at(0)), "coop:feeder-4", "momentary", is_sample=True)
         assert evaluate_event(conn, eid, WEATHER, _at(0))["level"] != "escalate"
+
+
+# --- NGFS as a confirmation signal ----------------------------------------------------------------------
+
+from app.ngfs_signal import add_ngfs_signals, qualifying  # noqa: E402
+
+
+def _pt(tid="f1", scan=0, label="Possible Wildland Fire", where=FIRE):
+    return {"feature_tracking_id": tid, "type_description": label, "lat": where[0], "lon": where[1],
+            "acq_date_time": iso(_at(scan))}
+
+
+def _ngfs(conn, points, now=10, where=FIRE):
+    eids = add_ngfs_signals(conn, points, _at(now), is_sample=True)
+    for e in eids:
+        evaluate_event(conn, e, CALM, _at(now))
+    return eids
+
+
+def test_ngfs_needs_the_wildland_label():
+    assert qualifying([_pt(scan=0), _pt(scan=5)])
+    assert not qualifying([_pt(label="Possible Industrial", scan=0), _pt(label="Possible Industrial", scan=5)])
+    assert not qualifying([_pt(label=None, scan=0), _pt(label=None, scan=5)])
+    bare = [_pt(scan=0), _pt(scan=5)]
+    for p in bare:
+        del p["type_description"]
+    assert not qualifying(bare)
+
+
+def test_ngfs_needs_two_separate_scans():
+    assert not qualifying([_pt(scan=0)])
+    assert not qualifying([_pt(scan=0), _pt(scan=0)])
+    assert qualifying([_pt(scan=0), _pt(scan=5)])[0]["scans"] == 2
+
+
+def test_ngfs_inside_a_registered_burn_adds_no_signal():
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
+        assert add_ngfs_signals(conn, [_pt(scan=0, where=BURN), _pt(scan=5, where=BURN)], _at(10), is_sample=True) == []
+        assert conn.execute("SELECT COUNT(*) FROM signals WHERE kind = 'ngfs'").fetchone()[0] == 0
+
+
+def test_ngfs_adds_one_signal_per_feature_across_repeated_polls():
+    with connect() as conn:
+        sync_roster(conn)
+        pts = [_pt(scan=0), _pt(scan=5)]
+        assert len(_ngfs(conn, pts)) == 1
+        assert _ngfs(conn, pts) == []
+        assert _ngfs(conn, pts + [_pt(scan=10)], now=15) == []
+        assert conn.execute("SELECT COUNT(*) FROM signals WHERE kind = 'ngfs'").fetchone()[0] == 1
+
+
+def test_ngfs_alone_investigates_with_a_beta_label_and_never_escalates():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = _ngfs(conn, [_pt(scan=0), _pt(scan=5)])[0]
+        ev = _event(conn, eid)
+        assert ev["recommendation"] == "investigate"
+        assert any("NOAA beta" in e["label"] for e in loads(ev["evidence_json"]))
+        assert len(_out(conn, "duty_fyi", eid)) == 1
+        assert "unconfirmed" in _out(conn, "duty_fyi", eid)[0]["body"].lower()
+
+
+def test_ngfs_and_a_satellite_pass_are_one_source_class():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = _ngfs(conn, [_pt(scan=0), _pt(scan=5)])[0]
+        assert _event(conn, eid)["recommendation"] == "investigate"
+        ev = loads(_event(conn, eid)["evidence_json"])
+        assert sum(1 for e in ev if e["label"].startswith("Unconfirmed NOAA")) == 1
+
+
+def test_ngfs_plus_a_line_fault_escalates():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = _ngfs(conn, [_pt(scan=0), _pt(scan=5)])[0]
+        add_signal(conn, "line_fault", *FIRE, iso(_at(11)), "coop:feeder-4", "lockout", is_sample=True)
+        assert evaluate_event(conn, eid, WEATHER, _at(11))["level"] == "escalate"

@@ -121,7 +121,7 @@ CREATE TABLE source_health (
 CREATE TABLE signals (
   id           INTEGER PRIMARY KEY,
   event_id     INTEGER REFERENCES events(id),
-  kind         TEXT NOT NULL,              -- line_fault | report | neighbor_reply | camera_smoke
+  kind         TEXT NOT NULL,              -- line_fault | report | neighbor_reply | camera_smoke | ngfs
   lat          REAL NOT NULL,
   lon          REAL NOT NULL,
   observed_at  TEXT NOT NULL,              -- when it happened (fault time, text received)
@@ -281,6 +281,7 @@ Satellite detections go through 4.1–4.4 and get an ML score (section 5). Every
 | `report` | Inbound SMS `FIRE <where>` (place text geocoded against roads and towns; the sender's roster location as fallback) | Always for Investigate; for Escalate only from a registered number |
 | `neighbor_reply` | Inbound SMS reply to an ask-the-neighbor text | Reply `1` (smoke). Reply `3` from the contact who registered a burn here today makes the event a registered burn. Reply `2` is recorded but doesn't lower the level, because the neighbor may not have a view. |
 | `camera_smoke` | Phase 3 camera node | Detector confidence above its threshold on two consecutive frames |
+| `ngfs` | `app/ngfs_signal.py`, after each NGFS poll (never `process_detections`) | Type is `Possible Wildland Fire` (null fails closed), at least two separate `acq_date_time` scans of the same `feature_tracking_id`, and no registered burn covers it. One signal per feature. Same source class as a satellite, never strong, so it cannot escalate alone |
 | Satellite | Section 4.1 | ML score ≥ 40 |
 
 **Level rules** (evaluated after every new detection, signal, or reply; each rule that fires becomes a reason):

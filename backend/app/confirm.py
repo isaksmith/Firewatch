@@ -177,6 +177,11 @@ def decide_level(
             item["label"] = f"Camera smoke: {s['source']}"
             item["counts"] = "yes"
             independent.setdefault(f"camera:{s['source']}", "camera smoke")
+        elif s["kind"] == "ngfs":
+            item["label"] = "Unconfirmed NOAA beta satellite detection (NGFS)"
+            item["counts"] = "yes"
+            item["note"] = "same source class as a satellite: never a second source with one, never strong"
+            independent.setdefault("satellite", item["label"])
         evidence.append(item)
 
     burn, escaped, late = _registered_burn(conn, ev, signals)
