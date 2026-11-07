@@ -44,6 +44,8 @@ That's fires per *day*, and on windy days line *faults* rise too. So the per-fau
 
 A lockout on an Extreme day therefore starts at 3% × 4.2 ≈ **13%**.
 
+**A fault the rules don't count** (a momentary trip that cleared itself, or one in town) still starts from the line-fault base rate, scaled down: ×0.2 for a momentary trip, ×0.3 in town. A low-danger day is already handled by the danger multiplier. These are assumptions (`momentary_trip_factor`, `in_town_factor`).
+
 ### Likelihood ratios
 
 | Evidence | LR | Why this size |
@@ -149,6 +151,33 @@ The two judgment calls most likely to be challenged:
 | `cost_false_page_acres` | 25 / **100** / 400 | Heads-up + wait at all three | Page at all three (flips below 28% / 33% / 48%) | Mutual aid now at all three |
 
 On this scenario the recommendations don't depend on these assumptions. What changes is the stated confidence and how close the call is.
+
+## How the model sets alert levels
+
+Michael's confirmation rules set the level from independent sources: none → Monitor, one → Investigate (duty officer FYI, ask the neighbors), two or a strong satellite hit → Escalate (duty officer asked to page). For fires inside the district, the model then gets one say (`confirm._stakes_promotion`):
+
+- If **"Page" has the lowest expected loss**, the alert becomes **Escalate**.
+- If an alert at Monitor has **asking or a heads-up** as its lowest-loss option, it becomes **Investigate**.
+- The reason line says so, e.g. "Investigate: high stakes. 'Heads-up downwind + recheck on the next pass' has the lowest expected loss (P(fire) 3%, ~25 ac-eq)".
+
+**It can raise a level, never lower one.** Two independent sources always escalate. The model counts only acres, so on a calm day it could talk itself out of paging for a small confirmed fire, and that call shouldn't be automated. Registered burns that haven't escaped and known industrial heat sources are never promoted.
+
+What this does in practice, at the default weights:
+
+| Case | Rules say | Model says | Result |
+|---|---|---|---|
+| Momentary trip on an Extreme red-flag day | Monitor (doesn't count) | Heads-up + recheck beats watching | **Investigate** |
+| Momentary trip on a moderate day | Monitor | Watch | Monitor |
+| One registered report on an Extreme day | Investigate | Heads-up + ask (P ≈ 34%; paging would need ≈ 73%) | Investigate |
+| Lockout + neighbor sees smoke | Escalate | Page | Escalate |
+
+So the model mostly adds **early, cheap warnings on dangerous days**. It rarely pages on its own: with the default false-alarm costs, paging on a single source needs P(fire) above roughly 70%.
+
+## Downwind warnings use the same forecast
+
+The response planner (`notify.plan_response`) picks who gets "could reach you in ~N min" from the same ensemble forecast the playbook and map show, rather than a separate constant-wind run:
+- everyone the **worst case** (1 run in 10) reaches within the hour gets a warning, with that **earliest plausible arrival** in the text
+- the page and mutual-aid draft quote the **median** acres at +60 min
 
 ## Tuning for a district
 

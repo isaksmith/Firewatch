@@ -28,6 +28,8 @@ DEFAULTS: dict[str, dict] = {
     "danger_multiplier": {"value": {"Low-Moderate": 0.3, "High": 1.0, "Very High": 1.5, "Severe": 2.0, "Extreme": 3.0},
                           "source": "Assumption: line faults on high-wind, dry days ignite more often (Plains megafires)"},
     "danger_exponent": {"value": 0.5, "source": "Assumption: the fire-day model measures fire starts per day; on windy days line faults rise too, so the per-fault multiplier is RR^0.5 (half the effect, in log terms). 0 = weather doesn't change per-fault odds, 1 = all of the increase is per fault"},
+    "momentary_trip_factor": {"value": 0.2, "source": "Assumption: a fault that cleared itself (momentary trip, not a lockout) rarely means a line is down"},
+    "in_town_factor": {"value": 0.3, "source": "Assumption: a fault in town is usually not a grass fire, and town fires come in by 911"},
     "satellite_prior": {"value": 0.15, "source": "Assumption: training set had 224 wildfires vs 490 burns (31%); most burns go unrecorded, so the real share is lower"},
     "other_prior": {"value": 0.05, "source": "Assumption: base rate when the first signal is a text or camera"},
     "lr_neighbor_smoke": {"value": 20.0, "source": "Assumption: a registered neighbor nearby saying they see smoke"},
@@ -131,15 +133,22 @@ def probability(evidence: list[dict], danger: str, w: dict, sat_score: int | Non
     if sat_score is not None and not any(e["kind"] == "satellite" for e in items):
         items.insert(0, {"kind": "satellite", "label": f"Satellite: score {sat_score}", "counts": "yes"})
     steps: list[dict] = []
-    first = next((e for e in items if e["kind"] in ("line_fault", "satellite") and e.get("counts") != "no"), None)
+    first = next((e for e in items if e["kind"] in ("line_fault", "satellite")), None)
     if first is not None and first["kind"] == "line_fault":
         mult = danger_factor(danger, w)
+        note = str(first.get("note", ""))
+        # A fault the confirmation rules don't count is still a fault: start lower instead of ignoring it.
+        weak = {"momentary trip": w["momentary_trip_factor"], "in town": w["in_town_factor"]}
+        discount = [(why, f) for why, f in weak.items() if why in note]
+        for _, f in discount:
+            mult *= f
         p0 = min(0.9, w["line_fault_base_rate"] * mult)
         if "danger_multiplier" in _fitted():
             rr = w["danger_multiplier"].get(danger, 1.0)
             how = f"fire-day model: {rr:g}x the fire starts of a High day, ^{w['danger_exponent']:g} per line fault"
         else:
             how = "assumed"
+        how += "".join(f"; x{f:g} for a {why}" for why, f in discount)
         steps.append({"text": f"{first['label']}: base rate {w['line_fault_base_rate']:.0%} x{mult:.2g} for {danger} danger ({how})",
                       "p": p0})
     elif first is not None:

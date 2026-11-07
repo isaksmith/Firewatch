@@ -755,7 +755,7 @@ def alert_forecast(event_id: int):
         except KeyError:
             pass
     horizon = int(math.ceil((span + MAP_AHEAD_MIN) / MAP_STEP_MIN) * MAP_STEP_MIN)
-    key = (ev["sample_slug"] or ev["id"], ev["last_seen"], horizon)
+    key = (ev["sample_slug"] or ev["id"], ev["lat"], ev["lon"], ev["first_seen"], ev["last_seen"], ev["weather_json"], horizon)
     if key not in _map_fc:
         if len(_map_fc) > 16:
             _map_fc.clear()

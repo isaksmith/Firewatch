@@ -17,14 +17,14 @@ from typing import Protocol
 from zoneinfo import ZoneInfo
 
 import httpx
+import numpy as np
 
 from . import mesh
 from .config import get_settings
 from .db import iso, loads, parse_iso
 from .district import LADDER_ROLES, NEIGHBOR_ROLES, VOLUNTEER_ROLES, load_district
-from .fire_weather import default_curing
 from .geo import KM_PER_MILE, bearing_deg, compass, haversine_km
-from .sim.spread import SpreadInput, simulate
+from .sim.spread import _arrival_many, interp_weather
 
 log = logging.getLogger(__name__)
 CENTRAL = ZoneInfo("America/Chicago")
@@ -409,39 +409,34 @@ def _draft_mutual_aid(conn, ev, state: dict, reason: str, now: datetime) -> None
 
 
 def plan_response(conn: sqlite3.Connection, ev, now: datetime) -> dict:
-    """Spread from the event over the next hour: footprint, downwind contacts with ETAs, nearby helpers."""
-    f = loads(ev["features_json"], {})
-    w = loads(ev["weather_json"], {})
-    elapsed = max(0, round((now - parse_iso(ev["first_seen"])).total_seconds() / 60))
-    horizon = elapsed + PLAN_MINUTES
+    """Who to warn and who can help over the next hour, from the same ensemble forecast the playbook and map use
+    (hourly wind, fuel map, terrain). Warnings go to everyone the worst case (1 in 10 forecast runs) reaches
+    within the hour, and the text's "could reach you in ~N min" is that earliest plausible arrival."""
+    from .playbook import Fire  # playbook imports this module
+
+    f = Fire(conn, ev, now)
+    elapsed = f.now_min
     contacts = [c for c in conn.execute("SELECT * FROM contacts WHERE lat IS NOT NULL AND opted_in = 1")]
-    wind = w.get("wind_kmh") or f.get("wind_kmh", 0.0)
-    wdir = w.get("wind_dir_deg") if w.get("wind_dir_deg") is not None else f.get("wind_dir_deg", 0.0)
-    sim = simulate(
-        SpreadInput(
-            lat=ev["lat"], lon=ev["lon"], wind_kmh=wind, wind_from_deg=wdir,
-            temp_c=f.get("temp_c", 15.0), rh_pct=f.get("rh_pct", 50.0),
-            curing_pct=f.get("curing_pct", default_curing(parse_iso(ev["first_seen"]).month)),
-            minutes=horizon, use_terrain=not ev["is_sample"],
-        ),
-        points=[(c["lat"], c["lon"]) for c in contacts],
-    )
-    area = next((iso_["properties"]["area_ha"] for iso_ in reversed(sim["isochrones"]["features"])), 0.0)
+    early = _arrival_many(f.t10, f.dom.lats, f.dom.lons, np.array([c["lat"] for c in contacts]),
+                          np.array([c["lon"] for c in contacts])) if contacts else []
     downwind, helpers = [], []
-    for c, t in zip(contacts, sim["point_minutes"]):
+    for c, t in zip(contacts, early):
         if c["role"] in HELPER_ROLES and haversine_km(ev["lat"], ev["lon"], c["lat"], c["lon"]) <= HELPER_RADIUS_KM:
             helpers.append({"contact_id": c["id"], "name": c["name"], "role": c["role"]})
-        elif c["role"] in NEIGHBOR_ROLES and t is not None:
-            eta = max(5, int(5 * round((t - elapsed) / 5)))
+        elif c["role"] in NEIGHBOR_ROLES and t <= elapsed + PLAN_MINUTES:
+            eta = max(5, int(5 * round((float(t) - elapsed) / 5)))
             downwind.append({"contact_id": c["id"], "name": c["name"], "eta_min": eta})
     downwind.sort(key=lambda x: x["eta_min"])
+    acres = f.acres_at(elapsed + PLAN_MINUTES)  # median forecast
+    w = interp_weather(f.sit.weather_steps(), elapsed)
     return {
-        "minutes": horizon,
-        "area_60_ha": round(area, 1),
-        "acres_60": int(round(area / HA_PER_ACRE, -1)),
-        "wind": {"from": compass(wdir), "mph": round(wind / KM_PER_MILE)},
+        "minutes": round(elapsed) + PLAN_MINUTES,
+        "area_60_ha": round(acres * HA_PER_ACRE, 1),
+        "acres_60": int(round(acres, -1)),
+        "wind": {"from": compass(w.wind_from_deg), "mph": round(w.wind_kmh / KM_PER_MILE)},
         "downwind": downwind,
         "helpers": helpers,
+        "eta_basis": "earliest plausible arrival (1 in 10 forecast runs)",
     }
 
 

@@ -131,3 +131,60 @@ def test_tower_smoke_sensor_counts_as_evidence():
     assert both["p"] > alone and both["steps"][-1]["factor"] == w["lr_sensor_smoke"]
     first = decision.probability([tower], "Extreme", w)  # a sensor as the first signal starts from the generic base rate
     assert first["steps"][0]["p"] == w["other_prior"]
+
+
+# --- levels: the model can raise a level, never lower one ---
+
+EXTREME = {"wind_kmh": 56, "gust_kmh": 90, "wind_dir_deg": 185, "rh_pct": 11, "temp_c": 25.6, "precip_72h_mm": 0, "thunder_24h": 0}
+
+
+def _signal(conn, kind, value, phone=None):
+    from app.confirm import evaluate_event
+    from app.db import iso, parse_iso
+    from app.district import sync_roster
+    from app.signals import add_signal
+
+    t0 = parse_iso("2026-03-17T18:50:00Z")
+    sync_roster(conn)
+    contact = conn.execute("SELECT id FROM contacts WHERE phone = ?", (phone,)).fetchone()["id"] if phone else None
+    eid = add_signal(conn, kind, 37.3821, -99.4681, iso(t0), f"sms:{phone}" if phone else "coop:feeder-4", value,
+                     contact_id=contact, is_sample=True)
+    evaluate_event(conn, eid, EXTREME, t0)
+    return conn.execute("SELECT recommendation, level_reason FROM events WHERE id = ?", (eid,)).fetchone()
+
+
+def test_weak_signal_on_an_extreme_day_is_raised_to_investigate():
+    """The rules ignore a momentary trip; on an Extreme red-flag day a no-cost heads-up beats watching."""
+    with TestClient(app):
+        with connect() as conn:
+            ev = _signal(conn, "line_fault", "momentary")
+            assert ev["recommendation"] == "investigate", ev["level_reason"]
+            assert "lowest expected loss" in ev["level_reason"]
+
+
+def test_one_report_on_an_extreme_day_is_not_raised_to_escalate():
+    """P(fire) ~34%: a heads-up and the neighbors' answers beat paging 18 volunteers on one report."""
+    with TestClient(app):
+        with connect() as conn:
+            ev = _signal(conn, "report", "fire", phone="+13165550133")
+            assert ev["recommendation"] == "investigate" and "second source" in ev["level_reason"]
+
+
+def test_two_sources_still_escalate_and_texts_use_the_forecast():
+    from app import playbook
+    from app.sim.spread import _arrival_many
+    import numpy as np
+
+    with TestClient(app):
+        eid = _fire_at(62)
+        with connect() as conn:
+            ev = conn.execute("SELECT * FROM events WHERE id = ?", (eid,)).fetchone()
+            assert ev["recommendation"] == "escalate"
+            state = __import__("json").loads(ev["response_json"])
+            plan = state["plan"]
+            assert plan["downwind"] and plan["eta_basis"].startswith("earliest plausible")
+            f = playbook.Fire(conn, ev, playbook.parse_iso(state["page_at"]))
+            for d in plan["downwind"]:
+                c = conn.execute("SELECT lat, lon FROM contacts WHERE id = ?", (d["contact_id"],)).fetchone()
+                t10 = float(_arrival_many(f.t10, f.dom.lats, f.dom.lons, np.array([c["lat"]]), np.array([c["lon"]]))[0])
+                assert abs(d["eta_min"] - max(5, 5 * round((t10 - f.now_min) / 5))) <= 5

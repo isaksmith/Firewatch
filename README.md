@@ -22,6 +22,7 @@ flowchart LR
     LF["Co-op line fault<br/>(lockout, High fire danger)"]
     SAT["Satellite hotspot<br/>VIIRS / MODIS / GOES"]
     TXT["Texted report<br/>FIRE"]
+    SEN["Tower smoke sensor<br/>(mesh node)"]
   end
 
   subgraph Confirm
@@ -29,16 +30,24 @@ flowchart LR
     ML["ML score + guardrails"]
     BURN{"Registered burn,<br/>not escaped?"}
     LVL{"Independent<br/>sources"}
+    PF["P(fire)<br/>base rate × evidence"]
+    STK{"Stakes:<br/>lowest expected loss"}
     ASK["Ask 3 nearest neighbors<br/>1 smoke · 2 no · 3 my burn"]
+  end
+
+  subgraph Forecast
+    FC["Ensemble spread forecast<br/>hourly wind · fuel map · terrain<br/>24 runs: likely + worst case"]
   end
 
   subgraph Respond
     MON["Monitor<br/>texts nobody"]
     FYI["Investigate<br/>duty officer FYI"]
     ESC["Escalate<br/>duty officer: Reply PAGE"]
+    PB["Playbook<br/>3 options, one recommended,<br/>preview + receipt"]
+    HU["Heads-up to stations<br/>in the worst-case path"]
     LAD["No answer:<br/>chief at 3 min, dispatch at 9 min"]
     PAGE["PAGE<br/>county dispatch + volunteers"]
-    DW["Downwind ranchers:<br/>arrival estimate"]
+    DW["Downwind ranchers:<br/>earliest plausible arrival"]
     EQ["Water truck / disc:<br/>can you help?"]
     MA["Mutual aid draft<br/>chief replies SEND"]
   end
@@ -46,6 +55,7 @@ flowchart LR
   LF --> EV
   SAT --> EV
   TXT --> EV
+  SEN --> EV
   SAT --> ML --> EV
   EV --> BURN
   BURN -- yes --> MON
@@ -55,14 +65,29 @@ flowchart LR
   FYI --> ASK
   ASK -- "reply 1" --> EV
   LVL -- "two, or strong satellite" --> ESC
+  EV --> PF --> STK
+  FC --> STK
+  STK -. "can raise, never lower" .-> FYI
+  STK -. "can raise, never lower" .-> ESC
+  STK --> PB
+  PB --> HU
+  PB --> PAGE
+  PB --> MA
   ESC -.-> LAD
   ESC -- "duty officer replies PAGE" --> PAGE
+  FC --> DW
   PAGE --> DW
   PAGE --> EQ
   PAGE -- "too big for 2 trucks,<br/>or under 2 responding" --> MA
 ```
 
-In the Cottonwood Creek replay this chain pages at T+9 instead of today's 911 call at T+31. The first truck arrives at T+40 to about 220 acres instead of 520 at T+62 (spread model estimate, not field data).
+In the Cottonwood Creek replay (the packet's red-flag Tuesday) this chain pages at T+9 instead of today's 911 call at T+31. The first truck arrives at T+38 to about 330 acres, instead of about 950 at T+62. Those sizes are the spread forecast's median, not field data; the forecast's [back-test](docs/research/spread-backtest-v1.md) is the evidence for it.
+
+The **forecast** and the **playbook** sit beside the confirmation rules:
+- P(fire) and the forecast's acres feed an expected-loss comparison of the options.
+- That comparison can raise a level (a weak signal on an Extreme day gets an Investigate and a heads-up) but never lower one; two sources always escalate.
+- The playbook shows the dispatcher three options, one recommended with the reason, and does what's chosen.
+- Downwind warnings use the forecast's earliest plausible arrival. See [How Firewatch recommends actions](docs/RECOMMENDATIONS.md).
 
 **Status:** the satellite path (ingest, clustering, enrichment, ML scoring, map, 3D spread, logged actions) is built and evaluated on real Kansas data. The whole chain also runs end to end in the **Cottonwood Creek replay**: line fault, neighbor texts, two-source confirmation, PAGE by text, downwind warnings with arrival estimates, mutual aid, and a registered burn that texts nobody. Texts go to a simulated outbox. Twilio sending is written but not yet tried on a real phone. The plan, honest cost numbers, and failure modes are in [docs/PLAN.md](docs/PLAN.md).
 

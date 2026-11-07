@@ -42,6 +42,41 @@ def fetch_weather(conn: sqlite3.Connection, event_id: int) -> dict:
         return {}
 
 
+NEVER_PROMOTE = ("registered_burn", "static_source")
+PROMOTE_TO = {"page": "escalate", "ask": "investigate", "heads_up_ask": "investigate", "heads_up_recheck": "investigate"}
+
+
+def _stakes_promotion(conn: sqlite3.Connection, event_id: int, level: str, reason: str, suppression: str | None,
+                      now: datetime) -> tuple[str, str]:
+    """Raise the level when the playbook's expected-loss model says the stakes call for it (docs/RECOMMENDATIONS.md).
+
+    Never lowers a level: two independent sources always escalate, whatever the model says, because the model
+    counts only acres and would otherwise talk itself out of paging for a small confirmed fire.
+    """
+    if level == "escalate" or suppression in NEVER_PROMOTE:
+        return level, reason
+    from . import playbook
+
+    ev = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+    try:
+        p = playbook.options(conn, ev, now)
+    except Exception:  # the forecast must never stop an alert from being leveled
+        log.exception("playbook unavailable for event %s; keeping the source-count level", event_id)
+        return level, reason
+    d = p["decision"]
+    if not d or d["id"] != "respond":
+        return level, reason
+    best = next(o for o in d["options"] if o["recommended"])
+    target = PROMOTE_TO.get(best["id"])
+    if target is None or LEVELS.index(target) <= LEVELS.index(level):
+        return level, reason
+    why = (f"{REC_LABEL[target]}: high stakes. \u201c{best['title']}\u201d has the lowest expected loss "
+           f"(P(fire) {p['probability']['p']:.0%}, ~{best['expected_loss']:,.0f} ac-eq)")
+    conn.execute("UPDATE events SET recommendation = ?, level_reason = ?, suppression = NULL WHERE id = ?",
+                 (target, why, event_id))
+    return target, why
+
+
 def _district() -> District | None:
     try:
         return load_district()
@@ -94,6 +129,8 @@ def evaluate_event(
         ),
     )
 
+    if district is not None and district.contains(ev["lat"], ev["lon"]):
+        level, reason = _stakes_promotion(conn, event_id, level, reason, suppression, now)
     rose = LEVELS.index(level) > (LEVELS.index(prev_level) if prev_level in LEVELS else -1)
     if rose and level != "monitor" and district is not None and district.contains(ev["lat"], ev["lon"]):
         from . import notify

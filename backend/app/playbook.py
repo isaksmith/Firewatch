@@ -47,7 +47,9 @@ def situation_for_event(ev) -> Situation:
                 wind_from_deg=(w.get("wind_dir_deg", f.get("wind_dir_deg", 0.0)) or 0.0) % 360,
                 temp_c=w.get("temp_c", f.get("temp_c", 15.0)), rh_pct=w.get("rh_pct", f.get("rh_pct", 50.0)),
                 gust_kmh=w.get("gust_kmh"))
-    hours, src = _hourly_weather(ev, t0)
+    # Live alerts and replayed historical fires get hourly weather; sample events made on the fly (tests,
+    # simulated signals) keep the weather they were given.
+    hours, src = _hourly_weather(ev, t0) if (not ev["is_sample"] or ev["sample_slug"]) else (None, None)
     if hours is None:  # no hourly data: hold the event's one reading constant
         src = Provenance(source="event weather, held constant" if w else "defaults", kind="observed" if w else "assumed")
         hours = [WeatherHour(time=t0 + timedelta(hours=h), **hour) for h in (-1, 6)]
@@ -94,7 +96,8 @@ _fc_cache: dict[tuple, dict] = {}
 
 
 def _forecast(ev, sit: Situation, horizon: int) -> dict:
-    key = (ev["sample_slug"] or ev["id"], ev["last_seen"], horizon)
+    # Keyed by what the forecast depends on, not the event id alone (ids restart when the database does).
+    key = (ev["sample_slug"] or ev["id"], ev["lat"], ev["lon"], ev["first_seen"], ev["last_seen"], ev["weather_json"], horizon)
     if key not in _fc_cache:
         if len(_fc_cache) > 32:
             _fc_cache.clear()
@@ -109,11 +112,11 @@ def _acres(grid: np.ndarray, dom: Domain, minute: float) -> int:
 class Fire:
     """What the options are computed from: the forecast, the clock, the district."""
 
-    def __init__(self, conn: sqlite3.Connection, ev):
+    def __init__(self, conn: sqlite3.Connection, ev, now: datetime | None = None):
         self.ev = ev
         self.sit = situation_for_event(ev)
         self.t0 = self.sit.ignition.time
-        self.now = now_for(ev)
+        self.now = now or now_for(ev)
         self.now_min = max(0.0, (self.now - self.t0).total_seconds() / 60)
         span = self.now_min
         if ev["sample_slug"]:
@@ -290,8 +293,8 @@ def _candidates(conn, f: Fire, decision_id: str) -> list[dict]:
     return out
 
 
-def options(conn: sqlite3.Connection, ev) -> dict:
-    f = Fire(conn, ev)
+def options(conn: sqlite3.Connection, ev, now: datetime | None = None) -> dict:
+    f = Fire(conn, ev, now)
     st = f.state
     paged = _page_min(f) is not None
     ma = st.get("mutual_aid") or {}
