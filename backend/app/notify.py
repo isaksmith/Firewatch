@@ -197,7 +197,7 @@ CHANNELS = ("sms", "mesh")
 
 def send(
     conn: sqlite3.Connection, contact, body: str, purpose: str, event_id: int | None, now: datetime, is_sample: bool,
-    channels: tuple[str, ...] = CHANNELS, post_id: int | None = None,
+    channels: tuple[str, ...] = CHANNELS, post_id: int | None = None, log_body: str | None = None,
 ) -> dict | None:
     """Text a contact by SMS and, when they carry a radio and the server's radio is up, over the mesh too.
 
@@ -225,7 +225,7 @@ def send(
         cur = conn.execute(
             "INSERT INTO messages(event_id, contact_id, phone, direction, purpose, body, status, gateway_id, is_sample, created_at, channel, post_id) "
             "VALUES (?, ?, ?, 'out', ?, ?, ?, ?, ?, ?, ?, ?)",
-            (event_id, contact["id"], to, purpose, body, status, gid, int(is_sample), iso(now), channel, post_id),
+            (event_id, contact["id"], to, purpose, log_body or body, status, gid, int(is_sample), iso(now), channel, post_id),
         )
         first = first or {"id": cur.lastrowid, "to": contact["name"], "purpose": purpose, "body": body, "status": status, "channel": channel}
     return first
@@ -435,7 +435,6 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
         conn.execute("UPDATE events SET status = 'escalated' WHERE id = ? AND status IN ('new', 'acknowledged')", (event_id,))
     elif action == "no":
         clear_hold(conn, event_id)
-        dismiss_posts(conn, event_id, now)
         state.update(decision="no", decision_by=by, decision_at=iso(now))
         conn.execute("UPDATE events SET status = 'dismissed' WHERE id = ?", (event_id,))
     elif action == "send":
@@ -489,9 +488,6 @@ def carry_hold(conn: sqlite3.Connection, post, event_id: int, now: datetime) -> 
         conn.execute(f"UPDATE posts SET {POST_HOLD_COLS}, event_id = COALESCE(event_id, ?), updated_at = ? WHERE id = ?",
                      (event_id, iso(now), r["id"]))
 
-
-def dismiss_posts(conn, event_id: int, now) -> None:
-    conn.execute("UPDATE posts SET status = 'dismissed', updated_at = ? WHERE event_id = ? AND status = 'open'", (iso(now), event_id))
 
 
 def clear_hold(conn, event_id: int) -> None:

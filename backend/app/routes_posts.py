@@ -124,6 +124,7 @@ def _item(conn, r, station: bool, now) -> dict:
            "author": author, "confirms": r["n_counted"], "notes": r["n_notes"], "badge": BADGE if held else None}
     if station:
         out["held"] = held
+        out["event_status"] = r["e_status"]
     return out
 
 
@@ -134,12 +135,14 @@ def list_posts(x_firewatch_device: str = Header(default="")):
         c = _device(conn, x_firewatch_device)
         station = c is not None and c["role"] in STATION_ROLES
         q = ("SELECT p.*, c.registered a_registered, c.name a_name, "
-             "(SELECT COUNT(*) FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 1) n_counted, "
+             "e.status e_status, (SELECT COUNT(*) FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 1) n_counted, "
              "(SELECT COUNT(*) FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 0) n_notes "
-             "FROM posts p LEFT JOIN contacts c ON c.id = p.contact_id WHERE p.created_at >= ? AND p.is_sample = ? ")
+             "FROM posts p LEFT JOIN contacts c ON c.id = p.contact_id "
+             "LEFT JOIN posts par ON par.id = p.parent_id LEFT JOIN events e ON e.id = COALESCE(p.event_id, par.event_id) WHERE p.created_at >= ? AND p.is_sample = ? ")
         if not station:
             q += ("AND p.status = 'open' AND (c.registered = 1 OR p.category = 'burn' OR "
-                  "EXISTS (SELECT 1 FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 1)) ")
+                  "EXISTS (SELECT 1 FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 1)) "
+                  "AND (e.id IS NULL OR e.status NOT IN ('dismissed', 'closed')) ")
         q += "ORDER BY " + ("p.flagged DESC, " if station else "") + "p.created_at DESC, p.id DESC LIMIT 200"
         rows = conn.execute(q, (iso(now - timedelta(hours=24)), int(is_sample))).fetchall()
         return [_item(conn, r, station, now) for r in rows]
@@ -172,14 +175,14 @@ class AdminStationIn(StationIn):
     operator: str = Field(min_length=1, max_length=80)
 
 
-def _open_for_alerts(conn, root, now, is_sample) -> tuple[int, bool]:
+def _open_for_alerts(conn, root, now, is_sample, by) -> tuple[int, bool]:
     """The event for a root post, opening and logging it when it has none. Returns (event_id, opened)."""
     if root["event_id"]:
         return root["event_id"], False
     eid = posts.open_event(conn, root, now, is_sample, "web")
     evaluate_event(conn, eid, None, now)
     conn.execute("INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?,?,?,?,?)",
-                 (eid, "escalate", "board", "Sent to alerts from the board", iso(now)))
+                 (eid, "escalate", by, "Sent to alerts from the board", iso(now)))
     return eid, True
 
 
@@ -204,9 +207,9 @@ def station_action(conn, post, action: str, by: str, role: str, now, is_sample: 
         if action == "send":
             if eid:
                 return {**ok, "repeat": True}
-            eid, _ = _open_for_alerts(conn, root, now, is_sample)
+            eid, _ = _open_for_alerts(conn, root, now, is_sample, by)
             return {**ok, "event_id": eid}
-        eid, _ = _open_for_alerts(conn, root, now, is_sample)
+        eid, _ = _open_for_alerts(conn, root, now, is_sample, by)
         notify.decide(conn, eid, "page", by, now)
         return {**ok, "event_id": eid}
     if action == "dismiss":
@@ -217,6 +220,8 @@ def station_action(conn, post, action: str, by: str, role: str, now, is_sample: 
         if eid:
             if not ladder:
                 raise HTTPException(403, "Not allowed")
+            if conn.execute("SELECT status FROM events WHERE id = ?", (eid,)).fetchone()["status"] in ("dismissed", "closed"):
+                return {**ok, "repeat": True}
             notify.decide(conn, eid, "no", by, now)
             return ok
         conn.execute(f"UPDATE posts SET status = 'dismissed', updated_at = ?, {notify.POST_HOLD_COLS} WHERE id = ? OR parent_id = ?",
@@ -266,7 +271,8 @@ def _issue_link(conn, contact, now, is_sample) -> dict:
     if link:
         body = f"{load_district().short_name} Firewatch: you are approved. Keep this link private: {link}"
         if len(body) <= notify.SMS_MAX:
-            texted = notify.send(conn, contact, body, "member_link", None, now, is_sample) is not None
+            texted = notify.send(conn, contact, body, "member_link", None, now, is_sample, channels=("sms",),
+                                        log_body=f"{load_district().short_name} Firewatch: approval link sent.") is not None
     return {"token": token, "link": link, "texted": texted}
 
 

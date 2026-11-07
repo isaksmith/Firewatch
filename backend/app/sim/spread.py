@@ -146,6 +146,8 @@ def arrival_grid(inp: SpreadInput) -> Grid:
             if elev is not None:
                 slope = math.degrees(math.atan2(elev[ni, nj] - elev[i, j], dist))
                 rate *= math.exp(0.069 * max(-MAX_SLOPE_DEG, min(MAX_SLOPE_DEG, slope)))
+            if rate <= 0:  # fire cannot spread at rate 0
+                continue
             nt = t + dist / rate
             if nt < arrival[ni, nj]:
                 arrival[ni, nj] = nt

@@ -377,7 +377,6 @@ def act_on_alert(event_id: int, body: ActionIn):
             conn.execute("UPDATE events SET status = ?, updated_at = ? WHERE id = ?", (new_status, iso(clock), event_id))
             if body.action == "dismiss":
                 notify.clear_hold(conn, event_id)
-                notify.dismiss_posts(conn, event_id, clock)
             else:
                 notify.release_hold(conn, event_id, clock)
     return get_alert(event_id)

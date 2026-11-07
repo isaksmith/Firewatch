@@ -229,24 +229,80 @@ def _status(pid):
         return conn.execute("SELECT status FROM posts WHERE id = ?", (pid,)).fetchone()["status"]
 
 
-def test_no_text_dismisses_the_post():
+def _station_view(c, pid):
+    duty = member("DutyView", "duty_officer")
+    return next(i for i in c.get("/api/board/posts", headers=hd(duty)).json() if i["id"] == pid)
+
+
+def _dismissed_everywhere(c, pid):
+    assert pid not in ids(pub(c))
+    item = _station_view(c, pid)
+    assert item["event_status"] == "dismissed" and item["status"] == "open"
+    assert _status(pid) == "open"
+
+
+def test_no_text_dismisses_the_event_not_the_post():
     from app import notify
     with TestClient(app) as c:
         pid, eid = _fire_with_event(c)
         assert pid in ids(pub(c))
         with connect() as conn:
             notify.decide(conn, eid, "no", "Duty", utcnow())
-        assert _status(pid) == "dismissed"
-        assert pid not in ids(pub(c))
+        _dismissed_everywhere(c, pid)
 
 
-def test_dashboard_dismiss_dismisses_the_post():
+def test_dashboard_dismiss_dismisses_the_event_not_the_post():
     with TestClient(app) as c:
         pid, eid = _fire_with_event(c)
         r = c.post(f"/api/alerts/{eid}/actions", json={"action": "dismiss", "operator": "Ops"})
         assert r.status_code == 200, r.text
-        assert _status(pid) == "dismissed"
+        _dismissed_everywhere(c, pid)
+
+
+def test_child_without_event_hidden_under_dismissed_parent_event():
+    with TestClient(app) as c:
+        pid, eid = _fire_with_event(c)
+        with connect() as conn:
+            cid = conn.execute("SELECT contact_id FROM posts WHERE id = ?", (pid,)).fetchone()[0]
+            kid = conn.execute("INSERT INTO posts(contact_id, category, body, status, parent_id, lat, lon, channel, is_sample, created_at, updated_at) VALUES (?,'fire','kid','open',?,?,?,'web',1,?,?)",
+                               (cid, pid, *PT, iso(utcnow()), iso(utcnow()))).lastrowid
+        assert kid in ids(pub(c))
+        c.post(f"/api/alerts/{eid}/actions", json={"action": "dismiss", "operator": "Ops"})
+        assert kid not in ids(pub(c))
+
+
+def test_reraise_brings_a_dismissed_post_back():
+    from app import notify, posts
+    with TestClient(app) as c:
+        pid = post(c, device(c), "fire", "Smoke over the field east of town")
+        m1, m2 = member("M1"), member("M2")
+        with connect() as conn:
+            cid = lambda n: conn.execute("SELECT * FROM contacts WHERE name = ?", (n,)).fetchone()
+            r1 = posts.confirm(conn, pid, cid("M1"), "see", utcnow(), True, "web", 37.77, -96.66)
+            assert r1["ok"] and r1["counted"] and r1["event_id"]
+            eid = r1["event_id"]
+            before = conn.execute("SELECT recommendation FROM events WHERE id = ?", (eid,)).fetchone()[0]
+            notify.decide(conn, eid, "no", "Duty", utcnow())
+            assert conn.execute("SELECT status FROM events WHERE id = ?", (eid,)).fetchone()[0] == "dismissed"
         assert pid not in ids(pub(c))
+        with connect() as conn:
+            r2 = posts.confirm(conn, pid, cid("M2"), "see", utcnow(), True, "web", 37.77, -96.66)
+            ev = conn.execute("SELECT status, recommendation FROM events WHERE id = ?", (eid,)).fetchone()
+            n = conn.execute("SELECT COUNT(*) FROM signals WHERE event_id = ?", (eid,)).fetchone()[0]
+        assert r2["ok"] and r2["counted"], r2
+        assert n >= 3
+        assert notify.LEVELS.index(ev["recommendation"]) > notify.LEVELS.index(before) if hasattr(notify, "LEVELS") else ev["recommendation"] != before
+        assert ev["status"] == "new"
+        assert pid in ids(pub(c))
+
+
+def test_dashboard_reopen_brings_the_post_back():
+    with TestClient(app) as c:
+        pid, eid = _fire_with_event(c)
+        c.post(f"/api/alerts/{eid}/actions", json={"action": "dismiss", "operator": "Ops"})
+        assert pid not in ids(pub(c))
+        assert c.post(f"/api/alerts/{eid}/actions", json={"action": "reopen", "operator": "Ops"}).status_code == 200
+        assert pid in ids(pub(c))
 
 
 @pytest.fixture(autouse=True)
@@ -382,8 +438,9 @@ def test_child_ack_holds_parent():
     with TestClient(app) as c:
         pid, vol, duty = _pair(c)
         with connect() as conn:
-            kid = conn.execute("INSERT INTO posts(category, body, status, parent_id, lat, lon, channel, is_sample, created_at, updated_at) VALUES ('fire','kid','open',?,?,?,'web',1,?,?)",
-                               (pid, *PT, iso(utcnow()), iso(utcnow()))).lastrowid
+            cid = conn.execute("SELECT contact_id FROM posts WHERE id = ?", (pid,)).fetchone()[0]
+            kid = conn.execute("INSERT INTO posts(contact_id, category, body, status, parent_id, lat, lon, channel, is_sample, created_at, updated_at) VALUES (?,'fire','kid','open',?,?,?,'web',1,?,?)",
+                               (cid, pid, *PT, iso(utcnow()), iso(utcnow()))).lastrowid
         r = sh(c, vol, kid, "ack")
         assert r.status_code == 200 and r.json()["level"] == "crowd"
         with connect() as conn:
@@ -469,14 +526,22 @@ def _with_base(monkeypatch, base):
 
 def test_token_never_stored_and_link_texted(monkeypatch):
     _with_base(monkeypatch, "https://fw.example.org")
+    sent = []
+    monkeypatch.setattr(notify, "gateway_for", lambda is_sample: SimpleNamespace(send=lambda to, body: sent.append((to, body)) or "g1"))
     with TestClient(app) as c:
         cid = _join(c)
+        with connect() as conn:
+            conn.execute("UPDATE contacts SET mesh_id = '!abc12345' WHERE id = ?", (cid,))
         r = c.post(f"/api/members/{cid}/approve", json={"lat": 37.7, "lon": -96.6}).json()
         assert r["texted"] is True and r["link"] == f"https://fw.example.org/board#d={r['token']}"
+        link = [b for _, b in sent if r["token"] in b]
+        assert len(link) == 1 and len(link[0]) <= notify.SMS_MAX
         with connect() as conn:
-            assert _hash(r["token"]) in "\n".join(conn.iterdump())
-            body = conn.execute("SELECT body FROM messages WHERE purpose = 'member_link'").fetchone()["body"]
-        assert r["token"] in body and len(body) <= notify.SMS_MAX
+            dump = "\n".join(conn.iterdump())
+            assert _hash(r["token"]) in dump and r["token"] not in dump
+            rows = conn.execute("SELECT channel, body FROM messages WHERE purpose = 'member_link'").fetchall()
+        assert [x["channel"] for x in rows] == ["sms"] and "approval link sent" in rows[0]["body"]
+        assert r["token"] not in c.get("/api/messages").text
 
 
 def test_approve_dump_has_no_raw_token():
@@ -500,3 +565,27 @@ def test_long_base_url_not_texted(monkeypatch):
 def test_public_router_has_no_admin_paths():
     paths = [r.path for r in routes_posts.public_router.routes]
     assert not any(p.startswith("/members") or p.startswith("/board/admin") for p in paths)
+
+
+def test_send_logs_the_acting_volunteer_and_admin_operator():
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        eid = sh(c, vol, pid, "send").json()["event_id"]
+        pid2 = post(c, device(c), "fire", "Another column of smoke", lat=PT[0] + 0.3)
+        r = c.post(f"/api/board/admin/posts/{pid2}/station", json={"action": "send", "operator": "Ops"})
+        assert r.status_code == 200, r.text
+        with connect() as conn:
+            who = lambda e: conn.execute("SELECT operator FROM actions WHERE event_id = ? AND action = 'escalate'", (e,)).fetchone()["operator"]
+            assert who(eid) == "Vol" and who(r.json()["event_id"]) == "Ops"
+
+
+def test_repeat_ladder_dismiss_writes_one_action():
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        assert sh(c, vol, pid, "send").json()["event_id"]
+        r1, r2 = sh(c, duty, pid, "dismiss"), sh(c, duty, pid, "dismiss")
+        assert r1.status_code == r2.status_code == 200, (r1.text, r2.text)
+        assert not r1.json().get("repeat") and r2.json()["repeat"] is True
+        with connect() as conn:
+            n = conn.execute("SELECT COUNT(*) n FROM actions WHERE action = 'dismiss'").fetchone()["n"]
+        assert n == 1
