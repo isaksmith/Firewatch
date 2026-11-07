@@ -274,6 +274,24 @@ export interface FeedResponse {
   data: any
 }
 
+export interface WindField {
+  /** Top of the first hour (ISO). Each cell has one value per hour from here. */
+  start: string
+  hours: number
+  cells: { lat: number; lon: number; wind_kmh: (number | null)[]; from_deg: (number | null)[]; gust_kmh: (number | null)[] }[]
+  source: string
+  kind: 'forecast' | 'archive' | 'simulated'
+}
+
+export interface AlertForecast {
+  event_id: number
+  /** The fire's "now": the scenario clock, a historical fire's last detection, or the wall clock. */
+  now: string
+  steps: { ahead_min: number; at: string; likely: GeoJSON.MultiPolygon; worst: GeoJSON.MultiPolygon }[]
+  members: number
+  assumptions: Record<string, string | number>
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
@@ -312,6 +330,8 @@ export const api = {
   meshNodes: () => request<MeshNode[]>('/mesh/nodes'),
   scenario: (slug: string) => request<ScenarioStatus>(`/scenario/${slug}`),
   runScenario: (slug: string) => request<{ status: string }>(`/scenario/${slug}/run`, { method: 'POST' }),
+  wind: (eventId?: number) => request<WindField>(`/wind${eventId != null ? `?event_id=${eventId}` : ''}`),
+  alertForecast: (id: number) => request<AlertForecast>(`/alerts/${id}/forecast`),
   options: (id: number) => request<Playbook>(`/alerts/${id}/options`),
   chooseOption: (id: number, optionId: string, operator: string) =>
     request<Playbook>(`/alerts/${id}/options/${optionId}`, { method: 'POST', body: JSON.stringify({ operator }) }),

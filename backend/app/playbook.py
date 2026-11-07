@@ -11,6 +11,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import httpx
 import numpy as np
 
 from . import decision, notify, scenario
@@ -32,7 +33,8 @@ STATION_AREA_KM = 15.0  # a station's first-due area, for "could reach your area
 # ---------- the fire, as the forecast sees it ----------
 
 def situation_for_event(ev) -> Situation:
-    """Scenario events use the scenario; others are established fires at the event's weather, held constant."""
+    """Scenario events use the scenario; others are established fires with Open-Meteo's hourly weather (archive for
+    past fires, forecast for live ones), or the event's one reading held constant if that can't be fetched."""
     if ev["sample_slug"]:
         try:
             return scenario_situation(ev["sample_slug"])
@@ -45,14 +47,32 @@ def situation_for_event(ev) -> Situation:
                 wind_from_deg=(w.get("wind_dir_deg", f.get("wind_dir_deg", 0.0)) or 0.0) % 360,
                 temp_c=w.get("temp_c", f.get("temp_c", 15.0)), rh_pct=w.get("rh_pct", f.get("rh_pct", 50.0)),
                 gust_kmh=w.get("gust_kmh"))
-    src = Provenance(source="event weather" if w else "defaults", kind="observed" if w else "assumed")
+    hours, src = _hourly_weather(ev, t0)
+    if hours is None:  # no hourly data: hold the event's one reading constant
+        src = Provenance(source="event weather, held constant" if w else "defaults", kind="observed" if w else "assumed")
+        hours = [WeatherHour(time=t0 + timedelta(hours=h), **hour) for h in (-1, 6)]
     return Situation(
         ignition=Ignition(lat=ev["lat"], lon=ev["lon"], time=t0, fire_age_min=None,
                           provenance=Provenance(source="first detection", kind="observed")),
-        weather=Weather(hours=[WeatherHour(time=t0 + timedelta(hours=h), **hour) for h in (-1, 6)], provenance=src),
+        weather=Weather(hours=hours, provenance=src),
         curing=Curing(pct=f["curing_pct"], provenance=Provenance(source="seasonal table", kind="assumed"))
         if "curing_pct" in f else None,
     )
+
+
+def _hourly_weather(ev, t0: datetime) -> tuple[list[WeatherHour] | None, Provenance | None]:
+    from .ingest.weather import weather_series
+
+    end = parse_iso(ev["last_seen"]) if ev["is_sample"] else utcnow()
+    hours = math.ceil((end - t0).total_seconds() / 3600) + 9  # an hour before the start to 7 h past now
+    try:
+        series, kind = weather_series(ev["lat"], ev["lon"], t0 - timedelta(hours=1), min(hours, 48))
+    except httpx.HTTPError:
+        return None, None
+    if len(series) < 2:
+        return None, None
+    return [WeatherHour(**h) for h in series], Provenance(
+        source=f"Open-Meteo {kind} (hourly, at the fire)", kind="observed" if kind == "archive" else "forecast")
 
 
 def now_for(ev) -> datetime:

@@ -592,6 +592,17 @@ Sanity tests: zero wind on flat ground produces near-circular isochrones; doubli
 
 `backend/ml/backtest.py` starts the forecast from a real fire's first FIRMS look, with the archive's hourly weather, and scores it against later looks. v1 results are in [Spread forecast back-test v1](research/spread-backtest-v1.md): on Anderson Creek 2016, 70–81% of the detections 15 h later fell inside the forecast (median / worst case), against 25% for the original constant-wind model. Starbuck 2017 was under-predicted by about 2× overnight.
 
+### 6.6c Wind and fire forecast on the 2D map
+
+The console map's **Wind + fire forecast** layer (on by default) draws wind arrows on a grid, colored and lengthened by speed, and a time slider from now to +6 h in 15-minute steps.
+
+- **Wind** (`GET /api/wind[?event_id=]`, `backend/app/wind.py`):
+  - No alert selected: the live Open-Meteo HRRR forecast on a 0.6° grid over Kansas.
+  - An alert selected: the wind around its fire on a 0.25° grid. For historical samples that's the Open-Meteo archive from the fire's last detection, i.e. what the wind actually did (Starbuck's cold front swings through). For the scenario it's the scenario's hourly weather, drawn the same everywhere and labeled simulated.
+  - Every field carries `source` and `kind`, and the slider shows which one it is.
+- **Fire** (`GET /api/alerts/{id}/forecast`): the ensemble's likely (median, filled) and worst-case (10th-percentile, dashed) outline at each slider step, from the fire's own "now" (the scenario clock, a sample's last detection, or the wall clock). It uses 12 runs rather than the playbook's 24, because a 6-hour run costs ~10 s cold; results are cached per alert.
+- Non-scenario alerts now forecast with Open-Meteo's **hourly** weather at the fire (archive for past fires, forecast for live ones) instead of one reading held constant, so the fire outline turns when the arrows do. If the fetch fails, the one reading is held constant and the provenance says so.
+
 ### 6.7 Situation contract (`backend/app/situation.py`)
 
 The forecast and the recommendation layer read only a `Situation`, a pydantic model that ingestion fills in. Every block carries a `Provenance {source, kind, as_of}`.

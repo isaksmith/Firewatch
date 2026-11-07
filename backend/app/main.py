@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 from urllib.parse import parse_qsl
 
+import httpx
 import numpy as np
 from fastapi import (
     APIRouter,
@@ -22,7 +23,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import mesh, notify, playbook, sample, scenario
+from . import mesh, notify, playbook, sample, scenario, wind
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
@@ -33,7 +34,7 @@ from .layers import LAYER_NAMES, load_layer, nearest_assets, segment_index
 from .pipeline import poll_firms_once
 from .signals import add_signal
 from .sim.ensemble import forecast
-from .sim.spread import SpreadInput, simulate
+from .sim.spread import SpreadInput, _contours, _rings, simulate
 from .situation import Situation, scenario_situation
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -726,6 +727,68 @@ def choose_option(event_id: int, option_id: str, body: OptionIn):
             return playbook.execute(conn, _get_event(conn, event_id), option_id, body.operator)
         except ValueError as e:
             raise HTTPException(409, str(e)) from None
+
+
+_map_fc: dict[tuple, dict] = {}
+MAP_AHEAD_MIN = 360
+MAP_STEP_MIN = 15
+MAP_MEMBERS = 12  # fewer runs than the playbook's 24: this is a picture, and a 6-hour run costs ~10 s cold
+
+
+def _alert_now(ev) -> tuple:
+    sit = playbook.situation_for_event(ev)
+    now_min = max(0.0, (playbook.now_for(ev) - sit.ignition.time).total_seconds() / 60)
+    return sit, now_min
+
+
+@api.get("/alerts/{event_id}/forecast")
+def alert_forecast(event_id: int):
+    """The fire's likely and worst-case outline every 15 min from now to +6 h, for the map's time slider."""
+    with connect() as conn:
+        ev = _get_event(conn, event_id)
+    sit, now_min = _alert_now(ev)
+    span = now_min
+    if ev["sample_slug"]:
+        try:  # a replay keeps one forecast for its whole run
+            span = max(span, float(scenario.load_scenario(ev["sample_slug"])["duration_min"]))
+        except KeyError:
+            pass
+    horizon = int(math.ceil((span + MAP_AHEAD_MIN) / MAP_STEP_MIN) * MAP_STEP_MIN)
+    key = (ev["sample_slug"] or ev["id"], ev["last_seen"], horizon)
+    if key not in _map_fc:
+        if len(_map_fc) > 16:
+            _map_fc.clear()
+        _map_fc[key] = forecast(sit, horizon, MAP_MEMBERS)
+    fc = _map_fc[key]
+    a = fc["_arrival"]
+    dom = a["domain"]
+    t50, t10 = _contours(a["t50"], dom), _contours(a["t10"], dom)
+    steps = []
+    for ahead in range(0, MAP_AHEAD_MIN + 1, MAP_STEP_MIN):
+        m = now_min + ahead
+        if m > horizon:
+            break
+        at = sit.ignition.time + timedelta(minutes=m)
+        steps.append({"ahead_min": ahead, "at": at.isoformat(),
+                      "likely": {"type": "MultiPolygon", "coordinates": _rings(t50, m) if m > 0 else []},
+                      "worst": {"type": "MultiPolygon", "coordinates": _rings(t10, m) if m > 0 else []}})
+    return {"event_id": event_id, "now": (sit.ignition.time + timedelta(minutes=now_min)).isoformat(),
+            "steps": steps, "members": MAP_MEMBERS, "assumptions": fc["assumptions"], "provenance": fc["provenance"]}
+
+
+@api.get("/wind")
+def wind_field(event_id: int | None = None):
+    """Hourly wind for the map: live forecast for Kansas, or the wind around an alert's fire (archive for
+    historical samples, the scenario's weather for the scenario)."""
+    try:
+        if event_id is None:
+            return wind.live_field()
+        with connect() as conn:
+            ev = _get_event(conn, event_id)
+        sit, now_min = _alert_now(ev)
+        return wind.event_field(ev, sit, now_min)
+    except httpx.HTTPError as e:
+        raise HTTPException(503, f"wind data unavailable: {e}") from None
 
 
 @api.get("/scenarios")
