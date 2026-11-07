@@ -207,8 +207,10 @@ def _duty(conn):
 
 
 def _tell_duty_hazard(conn, post, now: datetime, is_sample: bool) -> None:
-    from .notify import send, t_post_duty
+    from .notify import post_held, send, t_post_duty
 
+    if post_held(conn, post, now):
+        return
     if _sent_today(conn, "post_hazard", now, is_sample) >= _setting("post_hazard_max_day", 5):
         return
     if post["duty_told_at"]:
@@ -244,7 +246,7 @@ def high_danger(lat: float, lon: float, now: datetime, is_sample: bool) -> bool:
 
 def tick(conn: sqlite3.Connection, now: datetime, is_sample: bool) -> list[int]:
     """Text the duty officer once about an open fire or smoke post nobody has confirmed, on a high-danger day."""
-    from .notify import send, t_post_duty
+    from .notify import post_held, send, t_post_duty
 
     told = []
     wait = timedelta(minutes=_setting("post_timer_minutes", 5))
@@ -255,6 +257,8 @@ def tick(conn: sqlite3.Connection, now: datetime, is_sample: bool) -> list[int]:
     ).fetchall()
     for p in rows:
         if now - parse_iso(p["created_at"]) < wait or now - parse_iso(p["created_at"]) > timedelta(hours=EXPIRE_HOURS["fire"]):
+            continue
+        if post_held(conn, p, now):
             continue
         if _sent_today(conn, "post_timer", now, is_sample) >= _setting("post_timer_max_day", 10):
             break
@@ -273,8 +277,10 @@ def tick(conn: sqlite3.Connection, now: datetime, is_sample: bool) -> list[int]:
 
 def ask_ring(conn: sqlite3.Connection, post, now: datetime) -> list[dict]:
     """Text nearby opted-in members once each about an unconfirmed post. Nearest first, capped per member per day."""
-    from .notify import _contacts, send, t_ask_post
+    from .notify import _contacts, post_held, send, t_ask_post
 
+    if post_held(conn, post, now):
+        return []
     d = load_district()
     sample = bool(post["is_sample"])
     radius_km = d.settings.get("ask_neighbor_radius_mi", 3) * KM_PER_MILE

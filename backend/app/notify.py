@@ -35,7 +35,7 @@ HELPER_ROLES = ("water_truck", "disc")
 HELPER_RADIUS_KM = 10.0
 PLAN_MINUTES = 60
 OUTSIDE_FYI_WINDOW_MIN = 60
-DECIDERS = ("duty_fyi", "duty_escalate", "ladder", "mutual_aid_draft")
+DECIDERS = ("duty_fyi", "duty_escalate", "ladder", "mutual_aid_draft", "hold_expired", "hold_broken")
 
 
 # --- gateways -------------------------------------------------------------------------------------------
@@ -154,6 +154,18 @@ def t_mutual_aid(ev, short_name: str, plan: dict, n_resp: int) -> str:
     )
 
 
+def t_hold_expired(ev) -> str:
+    return f"FIREWATCH: hold on {_short_place(ev)[:40]} ended. Still rated {ev['recommendation']}. Reply PAGE to alert, NO to dismiss."
+
+
+def t_hold_broken(ev, why: str) -> str:
+    return f"FIREWATCH: NEW info {_short_place(ev)[:30]}: {why[:40]}. Hold lifted. PAGE to alert, NO to dismiss."
+
+
+def t_ack_reply(place: str, minutes: int) -> str:
+    return f"Noted {place[:40]}. Quiet for {minutes} min unless it grows. Reply PAGE to alert, NO to dismiss."
+
+
 # --- sending ---------------------------------------------------------------------------------------------
 
 
@@ -260,14 +272,40 @@ def _why(ev) -> str:
 # --- level changes ---------------------------------------------------------------------------------------
 
 
+def held(row, now: datetime) -> str | None:
+    """The live hold level on an event or post row ('ladder' or 'crowd'), None once it lapses."""
+    if row is not None and row["ack_until"] and now < parse_iso(row["ack_until"]):
+        return row["ack_level"]
+    return None
+
+
+def post_held(conn, post, now: datetime) -> str | None:
+    """A hold on the post, its parent, or the event it belongs to. Ladder outranks crowd."""
+    rows = [post]
+    if post["parent_id"]:
+        rows.append(conn.execute("SELECT * FROM posts WHERE id = ?", (post["parent_id"],)).fetchone())
+    for r in list(rows):
+        if r is not None and r["event_id"]:
+            rows.append(_event(conn, r["event_id"]))
+    levels = {held(r, now) for r in rows if r is not None}
+    return "ladder" if "ladder" in levels else "crowd" if "crowd" in levels else None
+
+
 def on_level(conn: sqlite3.Connection, event_id: int, level: str, now: datetime) -> None:
     ev = _event(conn, event_id)
+    hold = held(ev, now)
+    if hold == "ladder":
+        return  # nothing written, so hold_tick can replay this level when the hold ends
     state = _state(ev)
     sample = bool(ev["is_sample"])
     if level in ("investigate", "escalate") and "investigate_at" not in state:
         state["investigate_at"] = iso(now)
         if level == "investigate":
-            asked = ask_neighbors(conn, ev, now)
+            if hold:
+                asked = []
+                state["asks_skipped"] = True
+            else:
+                asked = ask_neighbors(conn, ev, now)
             state["asked"] = [a["contact_id"] for a in asked]
             duty = _ladder(conn)[:1]
             if duty:
@@ -339,7 +377,7 @@ def tick(conn: sqlite3.Connection, now: datetime, is_sample: bool | None = None)
         args = (int(is_sample),)
     for ev in conn.execute(q, args).fetchall():
         state = _state(ev)
-        if state.get("escalate_at") and not state.get("decision"):
+        if state.get("escalate_at") and not state.get("decision") and held(ev, now) != "ladder":
             step = state.get("ladder_step", 0)
             if 1 <= step <= len(waits):
                 due = parse_iso(state["escalate_at"]) + timedelta(minutes=sum(waits[:step]))
@@ -369,6 +407,7 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
         if state.get("decision") == "page":
             return state
         state.update(decision="page", decision_by=by, decision_at=iso(now), page_at=iso(now))
+        _clear_hold(conn, event_id)
         plan = plan_response(conn, ev, now)
         state["plan"] = plan
         dispatch = _one(conn, "dispatch")
@@ -390,6 +429,7 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
             )
         conn.execute("UPDATE events SET status = 'escalated' WHERE id = ? AND status IN ('new', 'acknowledged')", (event_id,))
     elif action == "no":
+        _clear_hold(conn, event_id)
         state.update(decision="no", decision_by=by, decision_at=iso(now))
         conn.execute("UPDATE events SET status = 'dismissed' WHERE id = ?", (event_id,))
     elif action == "send":
@@ -410,6 +450,57 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
     )
     _save(conn, event_id, state)
     return state
+
+
+HOLD_COLS = "ack_level = NULL, ack_by = NULL, ack_at = NULL, ack_until = NULL, ack_mark_det = NULL, ack_mark_sig = NULL"
+
+
+def _clear_hold(conn, event_id: int) -> None:
+    conn.execute(f"UPDATE events SET {HOLD_COLS} WHERE id = ?", (event_id,))
+
+
+def acknowledge(conn: sqlite3.Connection, *, event_id: int | None = None, post_id: int | None = None, by: str, role: str,
+                now: datetime) -> dict:
+    """Mark an item known: stop repeat texts, expire on its own. Refusals: not_allowed, no_target, not_found, closed."""
+    level = "ladder" if role in LADDER_ROLES or role == "operator" else "crowd" if role == "volunteer" else None
+    if level is None:
+        return {"ok": False, "refused": "not_allowed"}
+    post = None
+    if post_id is not None and event_id is None:
+        post = conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
+        if post is None:
+            return {"ok": False, "refused": "not_found"}
+        root = post
+        if post["parent_id"]:
+            root = conn.execute("SELECT * FROM posts WHERE id = ?", (post["parent_id"],)).fetchone() or post
+        event_id = post["event_id"] or root["event_id"]
+        post = root
+    if event_id is None and post is None:
+        return {"ok": False, "refused": "no_target"}
+    row = _event(conn, event_id) if event_id is not None else post
+    if row is None:
+        return {"ok": False, "refused": "not_found"}
+    if (row["status"] in ("closed", "dismissed") if event_id is not None else row["status"] != "open"):
+        return {"ok": False, "refused": "closed"}
+    minutes = load_district().settings.get("ack_minutes", 30)
+    cur = held(row, now)
+    if cur and not (cur == "crowd" and level == "ladder"):
+        return {"ok": True, "level": cur, "until": row["ack_until"], "by": row["ack_by"], "repeat": True}
+    until = iso(now + timedelta(minutes=minutes))
+    if event_id is None:
+        conn.execute("UPDATE posts SET ack_level = ?, ack_by = ?, ack_at = ?, ack_until = ? WHERE id = ?",
+                     (level, by, iso(now), until, post["id"]))
+        return {"ok": True, "level": level, "until": until, "by": by, "repeat": False}
+    det = conn.execute("SELECT COALESCE(MAX(id), 0) m FROM detections").fetchone()["m"]
+    sig = conn.execute("SELECT COALESCE(MAX(id), 0) m FROM signals").fetchone()["m"]
+    conn.execute(
+        "UPDATE events SET ack_level = ?, ack_by = ?, ack_at = ?, ack_until = ?, ack_mark_det = ?, ack_mark_sig = ?, "
+        "status = CASE WHEN status = 'new' THEN 'acknowledged' ELSE status END WHERE id = ?",
+        (level, by, iso(now), until, det, sig, event_id),
+    )
+    conn.execute("INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, 'acknowledge', ?, ?, ?)",
+                 (event_id, by, f"{level} hold {minutes} min", iso(now)))
+    return {"ok": True, "level": level, "until": until, "by": by, "repeat": False, "event_id": event_id}
 
 
 def _draft_mutual_aid(conn, ev, state: dict, reason: str, now: datetime) -> None:
