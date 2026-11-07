@@ -22,7 +22,7 @@ export function AlertList(p: Props) {
     ['suppressed', 'Suppressed'],
   ]
   return (
-    <aside className="flex w-[360px] shrink-0 flex-col border-r border-line bg-panel">
+    <aside className="flex max-h-[42%] w-full shrink-0 flex-col border-b border-line bg-panel md:max-h-none md:w-[360px] md:border-r md:border-b-0">
       <div className="flex h-9 items-center justify-between border-b border-line px-4">
         <span className="label !text-muted">Alert queue</span>
         <span className="num text-[10px] text-dim">SORT: LEVEL ▸ SCORE</span>
