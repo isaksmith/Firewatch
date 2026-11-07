@@ -1,10 +1,12 @@
 """Pull Kansas transmission lines, substations, and towns from OpenStreetMap (Overpass) into data/layers/.
 
     .venv/bin/python -m scripts.fetch_osm_layers
+    .venv/bin/python -m scripts.fetch_osm_layers --distribution-only   # only distribution_lines.geojson
 """
 
 import json
 import logging
+import sys
 import time
 
 import httpx
@@ -30,6 +32,12 @@ out tags geom;
   node["place"~"^(city|town|village)$"](area.ks);
 );
 out tags center;
+"""
+DIST_QUERY = """
+[out:json][timeout:300];
+area["ISO3166-2"="US-KS"]["admin_level"="4"]->.ks;
+way["power"="minor_line"](area.ks);
+out tags geom;
 """
 HEADERS = {"User-Agent": "firewatch-hackathon/0.1 (https://github.com/isaksmith/Firewatch)"}
 
@@ -94,8 +102,30 @@ def point(lon: float, lat: float, props: dict) -> dict:
     return {"type": "Feature", "properties": props, "geometry": {"type": "Point", "coordinates": [round(lon, 5), round(lat, 5)]}}
 
 
+def distribution_only() -> None:
+    """Write only distribution_lines.geojson. Kept separate from power_lines so dist_line_km is unchanged."""
+    elements = overpass(DIST_QUERY)["elements"]
+    feats = []
+    for el in elements:
+        tags = el.get("tags", {})
+        if tags.get("power") != "minor_line" or "geometry" not in el:
+            continue
+        operator = tags.get("operator")
+        feats.append({
+            "type": "Feature",
+            "properties": {"id": f"way/{el['id']}", "name": tags.get("name") or "Distribution line (OSM, partial coverage)", "operator": operator},
+            "geometry": {"type": "LineString", "coordinates": [[round(p["lon"], 5), round(p["lat"], 5)] for p in el["geometry"]]},
+        })
+    path = LAYERS / "distribution_lines.geojson"
+    path.write_text(json.dumps(fc(feats), separators=(",", ":")))
+    log.info("distribution_lines: %d features -> %s (%.0f KB)", len(feats), path.name, path.stat().st_size / 1024)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    if "--distribution-only" in sys.argv:
+        distribution_only()
+        return
     counties = load_counties()
     log.info("loaded %d Kansas counties", len(counties))
     elements = overpass(QUERY)["elements"]

@@ -6,31 +6,31 @@
    "properties": {
     "name": "Cottonwood Creek Fire District (stand-in)",
     "area_sq_mi": 450,
-    "note": "Stand-in boundary: a 450 sq mi square in Butler County. Replace with the real district polygon."
+    "note": "Stand-in boundary: a 450 sq mi square centered on Coldwater, KS (Comanche County). Replace with the real district polygon."
    },
    "geometry": {
     "type": "Polygon",
     "coordinates": [
      [
       [
-       -96.814,
-       37.6256
+       -99.5195,
+       37.1145
       ],
       [
-       -96.426,
-       37.6256
+       -99.1341,
+       37.1145
       ],
       [
-       -96.426,
-       37.9344
+       -99.1341,
+       37.4233
       ],
       [
-       -96.814,
-       37.9344
+       -99.5195,
+       37.4233
       ],
       [
-       -96.814,
-       37.6256
+       -99.5195,
+       37.1145
       ]
      ]
     ]

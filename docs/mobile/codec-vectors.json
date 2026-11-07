@@ -1,0 +1,116 @@
+{
+  "origin": {
+    "pack": "cwc",
+    "lat": 37.2689,
+    "lon": -99.3268
+  },
+  "vectors": [
+    {
+      "input": {
+        "pack": "cwc",
+        "kind": "alert",
+        "level": "investigate",
+        "id": 12,
+        "score": 45,
+        "lat": 37.3821,
+        "lon": -99.4681,
+        "time": "2026-03-17T18:51:00Z",
+        "toward_deg": null,
+        "mph": null,
+        "flags": [
+          "red_flag",
+          "exercise"
+        ]
+      },
+      "code": "FW1.cwc.ai.c.19.vg.-139.2c7f...5.5by",
+      "decoded_time_iso": "2026-03-17T18:51:00Z"
+    },
+    {
+      "input": {
+        "pack": "cwc",
+        "kind": "alert",
+        "level": "escalate",
+        "id": 12,
+        "score": 88,
+        "lat": 37.3821,
+        "lon": -99.4681,
+        "time": "2026-03-17T19:05:00Z",
+        "toward_deg": 0,
+        "mph": 3.0,
+        "flags": [
+          "red_flag",
+          "homes_in_path",
+          "exercise",
+          "two_sources"
+        ]
+      },
+      "code": "FW1.cwc.ae.c.2g.vg.-139.2c7t.0.6.n.c0n",
+      "decoded_time_iso": "2026-03-17T19:05:00Z"
+    },
+    {
+      "input": {
+        "pack": "cwc",
+        "kind": "alert",
+        "level": "escalate",
+        "id": 12,
+        "score": 91,
+        "lat": 37.3902,
+        "lon": -99.4655,
+        "time": "2026-03-17T19:20:00Z",
+        "toward_deg": 10,
+        "mph": 7.5,
+        "flags": [
+          "red_flag",
+          "homes_in_path",
+          "exercise",
+          "mutual_aid",
+          "two_sources"
+        ]
+      },
+      "code": "FW1.cwc.ae.c.2j.xp.-12j.2c88.2.f.v.rfs",
+      "decoded_time_iso": "2026-03-17T19:20:00Z"
+    },
+    {
+      "input": {
+        "pack": "cwc",
+        "kind": "clear",
+        "level": "monitor",
+        "id": 12,
+        "score": 20,
+        "lat": 37.3902,
+        "lon": -99.4655,
+        "time": "2026-03-17T23:40:00Z",
+        "toward_deg": null,
+        "mph": null,
+        "flags": [
+          "exercise"
+        ]
+      },
+      "code": "FW1.cwc.cm.c.k.xp.-12j.2cfg...4.2rs",
+      "decoded_time_iso": "2026-03-17T23:40:00Z"
+    },
+    {
+      "input": {
+        "pack": "cwc",
+        "kind": "notfire",
+        "level": "monitor",
+        "id": 1295,
+        "score": 0,
+        "lat": 37.15,
+        "lon": -99.2001,
+        "time": "2026-03-17T17:10:00Z",
+        "toward_deg": 355,
+        "mph": 0.5,
+        "flags": []
+      },
+      "code": "FW1.cwc.xm.zz.0.-x1.z7.2c4m.1z.1.0.r3n",
+      "decoded_time_iso": "2026-03-17T17:10:00Z"
+    }
+  ],
+  "must_reject": [
+    "FW1.cwc.ae.c.2g.vg.-139.2c7t.0.6.n.c00",
+    "FW1.cwc.ae.c",
+    "FW2.cwc.ae.c.2g.vg.-139.2c7t.0.6.n.c0n",
+    ""
+  ]
+}

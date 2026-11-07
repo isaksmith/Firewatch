@@ -133,7 +133,7 @@ export function ScenarioStrip({ s, onClose, onReplay, replaying }: {
       <div className="flex w-[260px] shrink-0 flex-col justify-between border-l border-line px-4 py-2.5">
         <div className="flex items-start justify-between">
           <div>
-            <div className="label !text-[9px]">Fire now</div>
+            <div className="label !text-[9px]">Fire now, worst case</div>
             <div className="num text-[15px] font-semibold text-text">
               {size?.acres ?? 0} AC <span className="text-[11px] font-normal text-muted">· {size?.head_mi.toFixed(1) ?? '0.0'} MI RUN</span>
             </div>
@@ -148,7 +148,7 @@ export function ScenarioStrip({ s, onClose, onReplay, replaying }: {
           </div>
         </div>
         <div className="num text-[10.5px] text-muted">
-          <div className="label mb-0.5 !text-[9px]">At first truck on scene</div>
+          <div className="label mb-0.5 !text-[9px]">At first truck on scene, worst case</div>
           {fwOn && baseOn ? (
             <span>
               <span className="text-escalate">{fwOn.acres} AC</span> with Firewatch · <span className="text-text">{baseOn.acres} AC</span> today

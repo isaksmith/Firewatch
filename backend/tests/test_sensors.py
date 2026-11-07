@@ -8,8 +8,8 @@ from app.district import sync_roster
 from app.signals import add_signal
 
 WEATHER = {"wind_kmh": 26, "gust_kmh": 45, "wind_dir_deg": 200, "rh_pct": 18, "temp_c": 24, "precip_72h_mm": 0, "thunder_24h": 0}
-TOWER = (37.80, -96.66)
-FAR_A, FAR_B = (38.05, -96.66), (37.80, -96.30)
+TOWER = (37.4121, -99.4681)
+FAR_A, FAR_B = (37.6621, -99.4681), (37.4121, -99.11)
 SMOKE = {"airQualityMetrics": {"pm25Environmental": 160, "pm100Environmental": 190}}
 
 

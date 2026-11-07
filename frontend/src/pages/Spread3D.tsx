@@ -1,4 +1,5 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { Attribution } from '../components/Attribution'
 import { ArrowUp, ChevronLeft, Pause, Play, RotateCcw } from 'lucide-react'
 import type { GeoJSONSource } from 'maplibre-gl'
 import { useEffect, useRef, useState } from 'react'
@@ -7,7 +8,8 @@ import { Link, useParams } from 'react-router-dom'
 import { api, type SimulationResult } from '../api'
 import { KV, RecTag, ScoreReadout } from '../components/ui'
 import { compass, pad3, trackId } from '../lib/format'
-import { IMAGERY_TERRAIN_STYLE } from '../lib/map'
+import { useLowData } from '../lib/lowData'
+import { BLANK_STYLE, IMAGERY_TERRAIN_STYLE } from '../lib/map'
 
 const DURATION = 60
 const PLAY_SECONDS_AT_1X = 15
@@ -23,6 +25,7 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export function Spread3D() {
+  const { on: lowData } = useLowData()
   const id = Number(useParams().id)
   const alert = useQuery({ queryKey: ['alert', id], queryFn: () => api.alert(id) })
   const [override, setOverride] = useState(false)
@@ -82,23 +85,25 @@ export function Spread3D() {
 
   return (
     <div className="flex h-full flex-col bg-void">
-      <header className="flex h-10 shrink-0 items-center gap-4 border-b border-line bg-void px-3">
+      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-void px-3 sm:gap-4">
         <Link to={`/alerts/${id}`} className="btn !h-6 !px-2">
-          <ChevronLeft size={12} /> Back
+          <ChevronLeft size={12} /> Back to map
         </Link>
-        <span className="label !text-muted">
+        <span className="num border border-investigate/60 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-investigate">3D VIEW</span>
+        <span className="label hidden !text-muted sm:inline">
           Spread preview · <span className="text-text">{trackId(id)}</span>
         </span>
-        <span className="h-4 w-px bg-line-2" />
+        <span className="hidden h-4 w-px bg-line-2 sm:block" />
         <ScoreReadout score={a.score} rec={a.recommendation} size="sm" />
-        <span className="text-[13px] font-medium">{a.place_label}</span>
+        <span className="hidden text-[13px] font-medium sm:inline">{a.place_label}</span>
         <RecTag rec={a.recommendation} />
         <span
-          className="num ml-auto border border-investigate/40 px-1.5 py-[1px] text-[10px] tracking-[0.12em] text-investigate"
+          className="num ml-auto min-w-0 border border-investigate/40 px-1.5 py-[1px] text-[10px] tracking-[0.12em] text-investigate"
           title="Simplified grass-fire estimate for planning. Not an operational fire behavior prediction."
         >
           ESTIMATE · NOT AN OPERATIONAL PREDICTION
         </span>
+        <Attribution placement="header" />
       </header>
 
       <div className="relative min-h-0 flex-1">
@@ -110,10 +115,10 @@ export function Spread3D() {
             pitch: 62,
             bearing: ((a.weather.wind_dir_deg ?? 0) + 180) % 360,
           }}
-          mapStyle={IMAGERY_TERRAIN_STYLE}
+          mapStyle={lowData ? BLANK_STYLE : IMAGERY_TERRAIN_STYLE}
           maxPitch={80}
           style={{ width: '100%', height: '100%' }}
-          attributionControl={{ compact: true }}
+          attributionControl={false}
         >
           {s && (
             <Source id="iso" type="geojson" data={s.isochrones}>
@@ -302,7 +307,7 @@ function SidePanel({ s, t, override, setOverride, shownWind, setWind, fetching }
 
       <div className="flex h-8 items-center justify-between border-t border-b border-line px-4">
         <span className="label">Impacts · 60 min</span>
-        <span className="num text-[10px] text-dim">ETA</span>
+        <span className="num text-[10px] text-dim">SOONEST, WORST CASE</span>
       </div>
       <ul className="space-y-1.5 px-4 py-3">
         {(s?.impacts ?? []).map((i) => {

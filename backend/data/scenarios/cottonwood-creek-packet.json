@@ -1,0 +1,115 @@
+{
+  "slug": "cottonwood-creek-packet",
+  "title": "Cottonwood Creek (packet): Tuesday line-down grass fire, co-op fault",
+  "story": "Packet weather and date: Tuesday Mar 17 2026, ignition 1:50 pm, south wind 35 mph gusting past 55, RH 11%, 78 F, fully dormant grass. Nobody within four miles. The co-op feeder locks out at minute 0; a propane driver sees smoke at 27 and has no signal until 31. Ignition is the ring scenarios' point, 4.1 mi from the nearest contact.",
+  "district": "cottonwood-creek",
+  "synthetic": true,
+  "red_flag": true,
+  "t0": "2026-03-17T18:50:00Z",
+  "t0_local": "1:50 pm CDT, Tue Mar 17 2026",
+  "duration_min": 62,
+  "ignition": {
+    "lat": 37.3277,
+    "lon": -99.4171,
+    "cause": "downed distribution line (lease service)"
+  },
+  "weather": {
+    "wind_kmh": 56,
+    "gust_kmh": 90,
+    "wind_dir_deg": 180,
+    "rh_pct": 11,
+    "temp_c": 25.6,
+    "precip_72h_mm": 0,
+    "thunder_24h": 0
+  },
+  "baseline": {
+    "source": "Challenge packet (today's chain, no Firewatch): propane driver sees smoke at 27, 911 at 31, district paged at 33",
+    "milestones": [
+      {
+        "key": "visual",
+        "t": 27,
+        "label": "First visual (rancher)"
+      },
+      {
+        "key": "call",
+        "t": 31,
+        "label": "911 call"
+      },
+      {
+        "key": "roll",
+        "t": 44,
+        "label": "Trucks roll"
+      },
+      {
+        "key": "on_scene",
+        "t": 62,
+        "label": "On scene"
+      }
+    ]
+  },
+  "timeline": [
+    {
+      "t": 0,
+      "type": "signal",
+      "kind": "line_fault",
+      "lat": 37.3277,
+      "lon": -99.4171,
+      "source": "coop:feeder-4",
+      "value": "lockout",
+      "note": "Co-op SCADA: feeder 4 recloser locks out"
+    },
+    {
+      "t": 31,
+      "type": "signal",
+      "kind": "report",
+      "lat": 37.3277,
+      "lon": -99.4171,
+      "source": "sms:+13165550199",
+      "value": "smoke",
+      "note": "Propane driver (4+ mi away, unregistered) saw smoke at 27 with no signal and reaches a phone at 31 (packet 2:21); located at the fire for matching"
+    },
+    {
+      "t": 38,
+      "type": "detections",
+      "note": "VIIRS NOAA-20 afternoon pass sees the fire",
+      "detections": [
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.3353,
+          "lon": -99.4136,
+          "brightness_k": 352.1,
+          "frp_mw": 28.4,
+          "confidence": "nominal",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        },
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.3421,
+          "lon": -99.4105,
+          "brightness_k": 367.0,
+          "frp_mw": 61.7,
+          "confidence": "high",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        },
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.3489,
+          "lon": -99.4074,
+          "brightness_k": 359.8,
+          "frp_mw": 44.2,
+          "confidence": "high",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        }
+      ]
+    }
+  ]
+}

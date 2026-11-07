@@ -1,4 +1,7 @@
+import json
 from datetime import timedelta
+
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -6,11 +9,12 @@ from app import notify, scenario
 from app.confirm import evaluate_event
 from app.db import connect, iso, loads, parse_iso
 from app.district import load_district, sync_roster
+from app.geo import haversine_km
 from app.main import app
 from app.signals import add_signal
 
-T0 = parse_iso("2026-03-14T18:50:00Z")
-FIRE = (37.77, -96.66)
+T0 = parse_iso("2026-03-17T18:50:00Z")
+FIRE = (37.3821, -99.4681)
 WEATHER = {"wind_kmh": 26, "gust_kmh": 45, "wind_dir_deg": 200, "rh_pct": 18, "temp_c": 24, "precip_72h_mm": 0, "thunder_24h": 0}
 CALM = {**WEATHER, "wind_kmh": 8, "rh_pct": 45}
 BLOWING = {**WEATHER, "wind_kmh": 45}
@@ -45,20 +49,18 @@ def test_scenario_beats_baseline():
     fw = {m["key"]: m["t"] for m in st["firewatch"]}
     assert fw["signal"] == 0 and fw["investigate"] == 0
     assert fw["escalate"] == 8 and fw["page"] == 9
-    assert fw["on_scene"] == 40 and fw["mutual_aid"] == 12
-    assert st["weather"]["gfdi_band"] == "High"
+    assert fw["on_scene"] == 38 and fw["mutual_aid"] == 12  # page 9 + packet turnout 11 + drive 18
+    assert st["weather"]["gfdi_band"] == "Extreme"
     assert st["size_on_scene"]["firewatch"]["acres"] < st["size_on_scene"]["baseline"]["acres"] / 2
 
-    fire, burn = st["events"]
+    (fire,) = st["events"]  # the packet's pasture burns were over the weekend; the replay has only the fire
     assert fire["recommendation"] == "escalate"
-    assert burn["recommendation"] == "monitor" and burn["suppression"] == "registered_burn"
-    assert burn["texts_sent"] == 0, "a registered burn that has not escaped texts nobody"
 
     with connect() as conn:
-        assert len(_out(conn, "ask_neighbor", fire["id"])) == 3
+        assert len(_out(conn, "ask_neighbor", fire["id"])) == 6  # district default is now 8 mi, 6 asks
         assert len(_out(conn, "page", fire["id"])) == 18
         downwind = [m["body"] for m in _out(conn, "downwind", fire["id"])]
-        assert downwind and all("Could reach you in ~" in b for b in downwind)
+        assert downwind and all("Could reach you in as little as " in b for b in downwind)
         assert len(_out(conn, "mutual_aid", fire["id"])) == 1
         assert not _out(conn, "ladder"), "the duty officer answered, so the ladder never moved"
 
@@ -70,7 +72,7 @@ def test_line_fault_alone_investigates_and_asks_nearest_neighbors():
         ev = _event(conn, eid)
         assert ev["recommendation"] == "investigate" and ev["score"] is None
         asked = [m["contact_id"] for m in _out(conn, "ask_neighbor", eid)]
-        assert len(asked) == 3
+        assert len(asked) == 6  # district default is now 8 mi, 6 asks
         names = [conn.execute("SELECT name FROM contacts WHERE id = ?", (c,)).fetchone()["name"] for c in asked]
         assert names[0] == "Wes Kittle", "nearest first"
         assert len(_out(conn, "duty_fyi", eid)) == 1
@@ -97,7 +99,7 @@ def test_unregistered_reports_stop_at_investigate():
     with connect() as conn:
         sync_roster(conn)
         eid = add_signal(conn, "report", *FIRE, iso(_at(0)), "sms:+13165559991", "smoke", is_sample=True)
-        add_signal(conn, "report", 37.771, -96.661, iso(_at(1)), "sms:+13165559992", "fire", is_sample=True)
+        add_signal(conn, "report", 37.3831, -99.4691, iso(_at(1)), "sms:+13165559992", "fire", is_sample=True)
         evaluate_event(conn, eid, WEATHER, _at(1))
         assert _event(conn, eid)["recommendation"] == "investigate"
 
@@ -163,14 +165,107 @@ def test_mutual_aid_drafted_when_too_few_respond():
 
 
 def test_registered_burn_stays_quiet_until_it_escapes():
-    burn = (37.75, -96.545)
+    burn = (37.3621, -99.3537)
     with connect() as conn:
         sync_roster(conn)
         notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
         eid = _line_fault(conn, where=burn)
         assert _event(conn, eid)["suppression"] == "registered_burn"
         assert not _out(conn, "duty_fyi")
-        evaluate_event(conn, eid, BLOWING, _at(5))
+        add_signal(conn, "report", *burn, iso(_at(5)), "sms:+13165559991", "fire spreading", is_sample=True)
+        evaluate_event(conn, eid, WEATHER, _at(5))
+        ev = _event(conn, eid)
+        assert ev["recommendation"] != "monitor"
+        assert any("escaped" in e.get("note", "") for e in loads(ev["evidence_json"]))
+
+
+EXTREME = {**WEATHER, "wind_kmh": 56, "gust_kmh": 90, "rh_pct": 11}
+BURN = (37.3621, -99.3537)
+
+
+def _gary(conn):
+    return conn.execute("SELECT id FROM contacts WHERE phone = ?", (GARY,)).fetchone()["id"]
+
+
+def test_extreme_day_burn_without_escape_evidence_investigates_with_one_fyi_never_escalates():
+    # Root cause of the packet bug: fire danger alone (GFDI >= 25) used to mark every burn escaped.
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
+        eid = _line_fault(conn, weather=EXTREME, where=BURN)
+        ev = _event(conn, eid)
+        assert ev["recommendation"] == "investigate"
+        assert not any("escaped" in e.get("note", "") for e in loads(ev["evidence_json"]))
+        assert len(_out(conn, "duty_fyi", eid)) == 1
+        assert not _out(conn, "duty_escalate", eid)
+        evaluate_event(conn, eid, EXTREME, _at(4))
+        ev = _event(conn, eid)
+        assert ev["recommendation"] != "escalate"
+        assert not any("escaped" in e.get("note", "") for e in loads(ev["evidence_json"]))
+        assert len(_out(conn, "duty_fyi", eid)) == 1
+
+
+def test_normal_day_burn_stays_monitor():
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
+        eid = _line_fault(conn, weather=CALM, where=BURN)
+        ev = _event(conn, eid)
+        assert ev["suppression"] == "registered_burn" and ev["recommendation"] == "monitor"
+        assert not _out(conn, "duty_fyi")
+
+
+def test_burners_own_fire_report_escapes():
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
+        eid = _line_fault(conn, weather=CALM, where=BURN)
+        assert _event(conn, eid)["recommendation"] == "monitor"
+        notify.handle_inbound(conn, GARY, "FIRE", _at(5), is_sample=True)
+        ev = _event(conn, eid)
+        assert ev["recommendation"] != "monitor"
+        assert any("escaped" in e.get("note", "") for e in loads(ev["evidence_json"]))
+        assert ev["recommendation"] == "investigate"
+        assert len(_out(conn, "duty_fyi", eid)) == 1
+
+
+def test_neighbor_one_from_someone_else_escapes_the_burn():
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
+        eid = _line_fault(conn, weather=EXTREME, where=BURN)
+        wes = conn.execute("SELECT id FROM contacts WHERE phone = ?", (WES,)).fetchone()["id"]
+        conn.execute(  # Wes was asked about this event (the nearest-first ask only reached Gary)
+            "INSERT INTO messages(event_id, contact_id, phone, direction, purpose, body, status, is_sample, created_at) "
+            "VALUES (?, ?, ?, 'out', 'ask_neighbor', 'ask', 'sent', 1, ?)", (eid, wes, WES, iso(_at(1))))
+        notify.handle_inbound(conn, WES, "1", _at(6), is_sample=True)
+        ev = _event(conn, eid)
+        assert any("neighbor sees smoke" in e.get("note", "") for e in loads(ev["evidence_json"]))
+        assert ev["suppression"] != "registered_burn"
+
+
+def test_late_burn_notice_cannot_suppress_an_event():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = _line_fault(conn, where=BURN)
+        assert _event(conn, eid)["recommendation"] == "investigate"
+        notify.handle_inbound(conn, GARY, "BURN", _at(10), is_sample=True)
+        evaluate_event(conn, eid, WEATHER, _at(11))
+        ev = _event(conn, eid)
+        assert ev["recommendation"] != "monitor" and ev["suppression"] != "registered_burn"
+
+
+def test_burn_that_left_its_notice_escalates_on_an_extreme_day():
+    extreme = {**WEATHER, "wind_kmh": 56, "gust_kmh": 90, "rh_pct": 11}
+    burn = (37.3621, -99.3537)
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
+        eid = _line_fault(conn, weather=extreme, where=burn)
+        gary = conn.execute("SELECT id FROM contacts WHERE phone = ?", (GARY,)).fetchone()["id"]
+        # The burner's own report 2.7 km out, past the 1.5 km notice plus 1 km: the "outside the notice" path alone.
+        add_signal(conn, "report", 37.3866, -99.3537, iso(_at(3)), f"sms:{GARY}", "fire", contact_id=gary, is_sample=True)
+        evaluate_event(conn, eid, extreme, _at(3))
         ev = _event(conn, eid)
         assert ev["recommendation"] != "monitor"
         assert any("escaped" in e.get("note", "") for e in loads(ev["evidence_json"]))
@@ -240,7 +335,6 @@ def test_scenario_and_decision_api():
         listed = {a["id"]: a for a in alerts["alerts"]}
         assert listed[fire["id"]]["recommendation"] == "escalate"
         assert listed[fire["id"]]["response"]["texts_sent"] > 20
-        assert alerts["suppressed"]["registered_burn"] == 1
 
         r = client.post(f"/api/alerts/{fire['id']}/decision", json={"action": "send", "operator": "Console"})
         assert r.status_code == 200
@@ -250,3 +344,192 @@ def test_scenario_and_decision_api():
         r = client.post("/api/sms/simulate", json={"from": "+13165559999", "body": "hello"})
         assert r.status_code == 200 and "FIRE" in r.json()["reply"]
         assert client.get("/api/district").json()["settings"]["capacity_ha_60min"] == 150
+
+
+def _first_out_minute(conn, slug: str, purpose: str, t0: str):
+    row = conn.execute(
+        "SELECT MIN(m.created_at) AS t FROM messages m JOIN events e ON e.id = m.event_id "
+        "WHERE e.sample_slug = ? AND m.direction = 'out' AND m.purpose = ?",
+        (slug, purpose),
+    ).fetchone()
+    return None if row["t"] is None else round((parse_iso(row["t"]) - parse_iso(t0)).total_seconds() / 60)
+
+
+@pytest.mark.parametrize(
+    "slug,fyi,escalate,dispatch",
+    [("cottonwood-creek-packet", None, 0, 9), ("cottonwood-creek-packet-no-fault", 31, 38, 47), ("cottonwood-creek-packet-ngfs", 19, 38, 47)],
+)
+def test_packet_scenarios_report_the_worse_number(slug, fyi, escalate, dispatch):
+    # Measured, not tuned. With the line fault on a Red Flag day Firewatch escalates at minute 0 (no FYI
+    # first, and no FYI at all now that the same-day registered burn is gone from the packet replays); the no-fault packet has no fault to lean on and escalates at 38. Neither asks to page.
+    t0 = "2026-03-17T18:50:00Z"
+    scenario.run_now(slug)
+    with connect() as conn:
+        assert _first_out_minute(conn, slug, "duty_fyi", t0) == fyi
+        assert _first_out_minute(conn, slug, "duty_escalate", t0) == escalate
+        assert _first_out_minute(conn, slug, "ladder_dispatch", t0) == dispatch
+    fw = {m["key"]: m["t"] for m in scenario.status(slug)["firewatch"]}
+    assert fw["escalate"] == escalate and fw["page"] is None
+
+
+def test_a_second_replay_in_the_same_db_keeps_its_own_timeline():
+    # The packet replays share a place and a clock: a leftover open event used to swallow the next replay's signals.
+    t0 = "2026-03-17T18:50:00Z"
+    scenario.run_now("cottonwood-creek-packet-no-fault")
+    scenario.run_now("cottonwood-creek-packet-ngfs")
+    with connect() as conn:
+        assert _first_out_minute(conn, "cottonwood-creek-packet-ngfs", "duty_fyi", t0) == 19
+    assert scenario.status("cottonwood-creek-packet-no-fault")["events"] == []
+    assert {m["key"]: m["t"] for m in scenario.status("cottonwood-creek-packet-ngfs")["firewatch"]}["investigate"] == 19
+
+
+@pytest.mark.parametrize("slug", ["cottonwood-creek-packet", "cottonwood-creek-packet-no-fault", "cottonwood-creek-packet-ngfs"])
+def test_packet_replays_match_the_packet(slug):
+    sc = scenario.load_scenario(slug)
+    ig = sc["ignition"]
+    with connect() as conn:
+        sync_roster(conn, sc["district"])
+        located = conn.execute("SELECT lat, lon FROM contacts WHERE lat IS NOT NULL").fetchall()
+    assert located and min(haversine_km(ig["lat"], ig["lon"], c["lat"], c["lon"]) for c in located) >= 4 * 1.609344
+    reports = [s for s in sc["timeline"] if s.get("kind") == "report"]
+    assert [s["t"] for s in reports] == [31]  # the driver sees smoke at 27 but has no signal until 31
+
+
+# --- line fault on a Red Flag day -----------------------------------------------------------------------
+
+def _nws(conn, fetched_min=0, onset_min=-60, expires_min=600, geometry="box", event="Red Flag Warning"):
+    box = {"type": "Polygon", "coordinates": [[[-99.81, 37.11], [-99.11, 37.11], [-99.11, 37.61], [-99.81, 37.61], [-99.81, 37.11]]]}
+    alert = {"id": "x", "event": event, "onset": iso(_at(onset_min)), "expires": iso(_at(expires_min)),
+             "geometry": box if geometry == "box" else geometry}
+    conn.execute(
+        "INSERT OR REPLACE INTO feed_snapshots(source, fetched_at, payload) VALUES ('nws_alerts', ?, ?)",
+        (iso(_at(fetched_min)), json.dumps({"count": 1, "alerts": [alert]})),
+    )
+
+
+def _fault_level(**nws):
+    with connect() as conn:
+        sync_roster(conn)
+        if nws is not None:
+            _nws(conn, **nws)
+        eid = add_signal(conn, "line_fault", *FIRE, iso(_at(0)), "coop:feeder-4", "lockout", is_sample=True)
+        # No red_flag passed: the live path reads the stored NWS feed.
+        return evaluate_event(conn, eid, WEATHER, _at(0))
+
+
+def test_line_fault_on_a_red_flag_day_escalates_alone():
+    out = _fault_level()
+    assert out["level"] == "escalate" and "Line fault on a Red Flag day" in out["reason"]
+
+
+def test_line_fault_without_a_warning_stays_at_investigate():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = add_signal(conn, "line_fault", *FIRE, iso(_at(0)), "coop:feeder-4", "lockout", is_sample=True)
+        assert evaluate_event(conn, eid, WEATHER, _at(0))["level"] == "investigate"
+
+
+@pytest.mark.parametrize(
+    "nws",
+    [
+        {"event": "Wind Advisory"},
+        {"expires_min": -5},
+        {"onset_min": 30},
+        {"geometry": {"type": "Polygon", "coordinates": [[[-99, 37], [-98, 37], [-98, 38], [-99, 38], [-99, 37]]]}},
+    ],
+)
+def test_other_nws_alerts_and_expired_or_distant_warnings_do_not_count(nws):
+    # One case per test: repeated lockouts in one event compound P(fire) and the stakes rule would escalate.
+    assert _fault_level(**nws)["level"] == "investigate"
+
+
+def test_stale_or_geometry_less_nws_feed_does_not_count():
+    assert _fault_level(fetched_min=-30)["level"] == "investigate"  # 30 min old, polled every minute
+    assert _fault_level(geometry=None)["level"] == "investigate"
+
+
+def test_momentary_trip_on_a_red_flag_day_does_not_escalate():
+    with connect() as conn:
+        sync_roster(conn)
+        _nws(conn)
+        eid = add_signal(conn, "line_fault", *FIRE, iso(_at(0)), "coop:feeder-4", "momentary", is_sample=True)
+        assert evaluate_event(conn, eid, WEATHER, _at(0))["level"] != "escalate"
+
+
+# --- NGFS as a confirmation signal ----------------------------------------------------------------------
+
+from app.ngfs_signal import add_ngfs_signals, qualifying  # noqa: E402
+
+
+def _pt(tid="f1", scan=0, label="Possible Wildland Fire", where=FIRE):
+    return {"feature_tracking_id": tid, "type_description": label, "lat": where[0], "lon": where[1],
+            "acq_date_time": iso(_at(scan))}
+
+
+def _ngfs(conn, points, now=10, where=FIRE):
+    eids = add_ngfs_signals(conn, points, _at(now), is_sample=True)
+    for e in eids:
+        evaluate_event(conn, e, CALM, _at(now))
+    return eids
+
+
+def test_ngfs_needs_the_wildland_label():
+    assert qualifying([_pt(scan=0), _pt(scan=5)])
+    assert not qualifying([_pt(label="Possible Industrial", scan=0), _pt(label="Possible Industrial", scan=5)])
+    assert not qualifying([_pt(label=None, scan=0), _pt(label=None, scan=5)])
+    bare = [_pt(scan=0), _pt(scan=5)]
+    for p in bare:
+        del p["type_description"]
+    assert not qualifying(bare)
+
+
+def test_ngfs_needs_two_separate_scans():
+    assert not qualifying([_pt(scan=0)])
+    assert not qualifying([_pt(scan=0), _pt(scan=0)])
+    assert qualifying([_pt(scan=0), _pt(scan=5)])[0]["scans"] == 2
+
+
+def test_ngfs_inside_a_registered_burn_adds_no_signal():
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
+        assert add_ngfs_signals(conn, [_pt(scan=0, where=BURN), _pt(scan=5, where=BURN)], _at(10), is_sample=True) == []
+        assert conn.execute("SELECT COUNT(*) FROM signals WHERE kind = 'ngfs'").fetchone()[0] == 0
+
+
+def test_ngfs_adds_one_signal_per_feature_across_repeated_polls():
+    with connect() as conn:
+        sync_roster(conn)
+        pts = [_pt(scan=0), _pt(scan=5)]
+        assert len(_ngfs(conn, pts)) == 1
+        assert _ngfs(conn, pts) == []
+        assert _ngfs(conn, pts + [_pt(scan=10)], now=15) == []
+        assert conn.execute("SELECT COUNT(*) FROM signals WHERE kind = 'ngfs'").fetchone()[0] == 1
+
+
+def test_ngfs_alone_investigates_with_a_beta_label_and_never_escalates():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = _ngfs(conn, [_pt(scan=0), _pt(scan=5)])[0]
+        ev = _event(conn, eid)
+        assert ev["recommendation"] == "investigate"
+        assert any("NOAA beta" in e["label"] for e in loads(ev["evidence_json"]))
+        assert len(_out(conn, "duty_fyi", eid)) == 1
+        assert "unconfirmed" in _out(conn, "duty_fyi", eid)[0]["body"].lower()
+
+
+def test_ngfs_and_a_satellite_pass_are_one_source_class():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = _ngfs(conn, [_pt(scan=0), _pt(scan=5)])[0]
+        assert _event(conn, eid)["recommendation"] == "investigate"
+        ev = loads(_event(conn, eid)["evidence_json"])
+        assert sum(1 for e in ev if e["label"].startswith("Unconfirmed NOAA")) == 1
+
+
+def test_ngfs_plus_a_line_fault_escalates():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = _ngfs(conn, [_pt(scan=0), _pt(scan=5)])[0]
+        add_signal(conn, "line_fault", *FIRE, iso(_at(11)), "coop:feeder-4", "lockout", is_sample=True)
+        assert evaluate_event(conn, eid, WEATHER, _at(11))["level"] == "escalate"

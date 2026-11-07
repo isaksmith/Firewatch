@@ -1,0 +1,38 @@
+/* Firewatch concept screens: shared tokens. Link after fonts.css. */
+:root {
+  /* daylight (phones, deck, system views) */
+  --chalk: #ECEFEC;      /* page */
+  --paper: #FFFFFF;      /* raised surface */
+  --ink: #16222C;        /* text */
+  --ink-2: #4A5863;      /* secondary text */
+  --rule: #C9D1CF;       /* hairlines, section grid */
+  --grass: #C8B27A;      /* prairie / CRP fill */
+  --grass-2: #E3D7B4;    /* wheat / lighter fill */
+  --road: #8A949B;       /* gravel road lines */
+  --fire: #E8461E;       /* fire, escalate. Fire only. */
+  --fire-soft: #F9D3C7;  /* 60-min spread area */
+  --redflag: #D6157A;    /* fire-weather danger only (NWS Red Flag colour family) */
+  --watch: #C98A00;      /* investigate / possible ignition */
+  --ok: #2E9E6B;         /* acknowledged, matches burn log, healthy */
+  --gap: #6D5BD0;        /* degraded / data gap */
+
+  /* console (dispatch room, existing app look) */
+  --c-bg: #08090b;
+  --c-panel: #0c0e11;
+  --c-raised: #181c21;
+  --c-line: #2a3038;
+  --c-text: #e6e8eb;
+  --c-muted: #8b939d;
+  --c-escalate: #ff4b2b;
+  --c-investigate: #ffb21a;
+  --c-ok: #3ddc97;
+  --c-degraded: #b18cff;
+
+  --display: 'Overpass', 'IBM Plex Sans', system-ui, sans-serif;  /* headlines, road names */
+  --sans: 'IBM Plex Sans', system-ui, sans-serif;                 /* body */
+  --clock: 'IBM Plex Mono', ui-monospace, monospace;              /* clock times ONLY */
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { font-family: var(--sans); color: var(--ink); background: var(--chalk); -webkit-font-smoothing: antialiased; }
+.t { font-family: var(--clock); font-variant-numeric: tabular-nums; }

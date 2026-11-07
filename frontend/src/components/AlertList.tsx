@@ -1,5 +1,5 @@
 import { AlertTriangle, RotateCcw } from 'lucide-react'
-import type { AlertSummary } from '../api'
+import type { AlertSummary, AlertsResponse } from '../api'
 import { REC_META, SUPPRESSION_LABEL, seenLabel, sourcesLabel, trackId } from '../lib/format'
 import { filterQueue, type QueueTab } from '../lib/queue'
 import { ScoreReadout, Sparkline, StatusTag, TrackGlyph } from './ui'
@@ -8,6 +8,9 @@ interface Props {
   alerts: AlertSummary[]
   tab: QueueTab
   setTab: (t: QueueTab) => void
+  suppressed?: AlertsResponse['suppressed']
+  lowData?: boolean
+  loading?: boolean
   selectedId: number | null
   hoveredId: number | null
   onSelect: (id: number) => void
@@ -22,14 +25,14 @@ export function AlertList(p: Props) {
     ['suppressed', 'Suppressed'],
   ]
   return (
-    <aside className="flex w-[360px] shrink-0 flex-col border-r border-line bg-panel">
+    <aside className="flex max-h-[42%] w-full shrink-0 flex-col border-b border-line bg-panel md:max-h-none md:w-[360px] md:border-r md:border-b-0">
       <div className="flex h-9 items-center justify-between border-b border-line px-4">
         <span className="label !text-muted">Alert queue</span>
         <span className="num text-[10px] text-dim">SORT: LEVEL ▸ SCORE</span>
       </div>
       <div className="grid grid-cols-3 border-b border-line">
         {tabs.map(([k, label]) => {
-          const n = filterQueue(p.alerts, k).length
+          const n = k === 'suppressed' && p.lowData && p.suppressed ? p.suppressed.total : filterQueue(p.alerts, k).length
           const on = p.tab === k
           return (
             <button
@@ -47,7 +50,18 @@ export function AlertList(p: Props) {
         })}
       </div>
       <ul className="flex-1 overflow-y-auto">
-        {visible.map((a) => (
+        {p.tab === 'suppressed' && p.lowData && p.suppressed && (
+          <li className="px-4 py-3">
+            {(Object.keys(SUPPRESSION_LABEL) as (keyof typeof SUPPRESSION_LABEL)[]).map((k) => (
+              <div key={k} className="flex justify-between border-b border-line py-2 text-[12.5px]">
+                <span className="capitalize">{SUPPRESSION_LABEL[k]}</span>
+                <span className="num text-muted">{p.suppressed![k]}</span>
+              </div>
+            ))}
+            <p className="mt-3 text-[12px] text-dim">The details load when you turn Low data off.</p>
+          </li>
+        )}
+        {!(p.tab === 'suppressed' && p.lowData) && visible.map((a) => (
           <AlertRow
             key={a.id}
             a={a}
@@ -57,7 +71,12 @@ export function AlertList(p: Props) {
             onHover={p.onHover}
           />
         ))}
-        {visible.length === 0 && (
+        {p.loading && (
+          <li className="flex flex-col items-center gap-2 px-6 py-12 text-center">
+            <span className="label">Loading…</span>
+          </li>
+        )}
+        {!p.loading && visible.length === 0 && !(p.tab === 'suppressed' && p.lowData) && (
           <li className="flex flex-col items-center gap-2 px-6 py-12 text-center">
             <span className="label">No tracks</span>
             <span className="text-[12px] text-dim">Nothing in this queue right now.</span>

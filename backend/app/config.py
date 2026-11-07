@@ -17,13 +17,33 @@ class Settings(BaseSettings):
     firms_map_key: str = ""
     mode: str = "sample"  # sample | live
     bbox: str = "-102.05,36.99,-94.59,40.00"
-    poll_minutes: int = 5
+    poll_minutes: int | None = None  # legacy: if set, overrides the FIRMS interval only (minutes)
+    # Per-source poll intervals in seconds, about as fast as each source really updates.
+    poll_firms_s: int = 60
+    poll_nws_s: int = 60
+    poll_lsr_s: int = 300
+    poll_wfigs_incidents_s: int = 300
+    poll_wfigs_perimeters_s: int = 900
+    poll_metar_s: int = 300
+    poll_open_meteo_s: int = 3600
+    poll_spc_s: int = 1800
+    poll_hms_s: int = 1800
+    poll_goes_fire_s: int = 60
+    poll_ngfs_s: int = 60
+    poll_goes_lightning_s: int = 60
+    poll_goes_smoke_s: int = 300
+    poll_rtma_ru_s: int = 900
+    poll_landsat_nrt_s: int = 300  # only polled when a FIRMS key is set
     firms_sources: str = "VIIRS_SNPP_NRT,VIIRS_NOAA20_NRT,VIIRS_NOAA21_NRT,MODIS_NRT"
+    # FIRMS counts days by UTC date, so 1 is empty after 6 pm Central until the next pass. dedupe_key absorbs the overlap.
+    firms_days: int = 2
     scorer: str = "auto"  # auto (model if present, else rules) | model | rules
     threshold_escalate: int = 70
     threshold_investigate: int = 40
     curing_pct_override: float | None = None
-    nws_user_agent: str = "firewatch-demo (contact@example.com)"
+    # Gust threshold for the lines-under-wind flag. An assumed value, not a utility standard.
+    wind_gust_flag_kmh: float = 80.0
+    nws_user_agent: str = "firewatch-hackathon"
     db_path: str = str(DATA_DIR / "firewatch.sqlite")
     district: str = "cottonwood-creek"  # data/districts/<slug>/
     sms_gateway: str = "outbox"  # outbox (records only) | twilio
@@ -36,13 +56,40 @@ class Settings(BaseSettings):
     mesh_channel_index: int = 0
     mesh_channel_feed: bool = True  # copy every mesh text to the district channel as well as the person's radio
     scenario_seconds_per_minute: float = 2.0
+    forwarded_ip_header: str = ""  # e.g. cf-connecting-ip; trusted only from a loopback peer
     api_token: str = ""  # when set, required (X-Firewatch-Token) on endpoints that can text people
+    # FIREWATCH_SECRET signs the /lite form tokens (a random per-process key when unset).
+    # FIREWATCH_OPERATOR_TOKEN unlocks real SMS (X-Firewatch-Operator-Token); unset means live texting is off.
+    firewatch_secret: str = ""
+    firewatch_operator_token: str = ""
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @property
     def bbox_tuple(self) -> tuple[float, float, float, float]:
         w, s, e, n = (float(x) for x in self.bbox.split(","))
         return w, s, e, n
+
+    @property
+    def source_intervals(self) -> dict[str, int]:
+        """Poll interval in seconds per source name (the names used in source_health)."""
+        firms = self.poll_minutes * 60 if self.poll_minutes else self.poll_firms_s
+        return {
+            "firms": firms,
+            "nws_alerts": self.poll_nws_s,
+            "lsr": self.poll_lsr_s,
+            "wfigs_incidents": self.poll_wfigs_incidents_s,
+            "wfigs_perimeters": self.poll_wfigs_perimeters_s,
+            "metar": self.poll_metar_s,
+            "open_meteo": self.poll_open_meteo_s,
+            "spc": self.poll_spc_s,
+            "hms": self.poll_hms_s,
+            "goes_fire": self.poll_goes_fire_s,
+            "ngfs": self.poll_ngfs_s,
+            "goes_lightning": self.poll_goes_lightning_s,
+            "goes_smoke": self.poll_goes_smoke_s,
+            "rtma_ru": self.poll_rtma_ru_s,
+            "landsat_nrt": self.poll_landsat_nrt_s,
+        }
 
     @property
     def firms_source_list(self) -> list[str]:

@@ -1,5 +1,6 @@
 """Group detections into events: one fire should produce one alert."""
 
+import json
 import sqlite3
 from datetime import timedelta
 
@@ -12,7 +13,7 @@ BASE_RADIUS_KM = 2.0
 # Line faults and texted reports are located to a feeder section or a road, not a pixel.
 SIGNAL_RADIUS_KM = 3.0
 SIGNAL_WINDOW = timedelta(hours=6)
-LOCATING_SIGNALS = ("line_fault", "report", "camera_smoke", "sensor_smoke")
+LOCATING_SIGNALS = ("line_fault", "report", "camera_smoke", "ngfs", "sensor_smoke")
 # A smoke sensor sits downwind of the fire, not on it: it joins events farther out and only places an event
 # when nothing else does.
 SENSOR_SIGNALS = ("sensor_smoke",)
@@ -83,15 +84,62 @@ def join_or_create(conn: sqlite3.Connection, matched: list[int], lat: float, lon
             (lat, lon, at, at, is_sample, iso(utcnow())),
         )
         return cur.lastrowid
-    keep = matched[0]
-    for other in matched[1:]:
-        _merge(conn, keep=keep, drop=other)
+    # A dismissed event is never merged into a live one: drop it from the merge unless nothing else matched.
+    rows = {r["id"]: r for r in conn.execute(
+        f"SELECT * FROM events WHERE id IN ({','.join('?' * len(matched))})", matched)}
+    live = [i for i in matched if i in rows and rows[i]["status"] != "dismissed"]
+    ids = live or matched
+    keep = max(ids, key=lambda i: (_advanced(rows[i]["response_json"]), -i))
+    for other in ids:
+        if other != keep:
+            _merge(conn, keep=keep, drop=other)
     return keep
 
 
+STATUS_RANK = {"escalated": 2, "acknowledged": 1, "new": 0}
+
+
+def _advanced(raw: str | None) -> tuple:
+    """How far a response got: page, decision, escalate_at, investigate_at. Bigger is more advanced."""
+    r = json.loads(raw) if raw else {}
+    return (int(bool(r.get("page_at"))), int(bool(r.get("decision"))), int(bool(r.get("escalate_at"))),
+            int(bool(r.get("investigate_at"))))
+
+
+def _merge_response(a: str | None, b: str | None) -> str | None:
+    """Combine two response states (a is keep's). NULL stays NULL: a flag would make the event a page target."""
+    if a is None or b is None:
+        return a if b is None else b
+    x, y = json.loads(a), json.loads(b)
+    base, rest = (y, x) if _advanced(b) > _advanced(a) else (x, y)
+    for k in ("asked", "responders"):
+        seen, out = set(), []
+        for v in (base.get(k) or []) + (rest.get(k) or []):
+            key = v.get("contact_id") if isinstance(v, dict) else v
+            if key not in seen:
+                seen.add(key)
+                out.append(v)
+        if out or k in base or k in rest:
+            base[k] = out
+    for k in ("escalate_at", "investigate_at"):
+        times = [t for t in (x.get(k), y.get(k)) if t]
+        if times:
+            base[k] = min(times)
+    return json.dumps(base)
+
+
 def _merge(conn: sqlite3.Connection, keep: int, drop: int) -> None:
-    for table in ("detections", "signals", "messages", "scores", "actions"):
+    for table in ("detections", "signals", "messages", "scores", "actions", "posts"):
         conn.execute(f"UPDATE {table} SET event_id = ? WHERE event_id = ?", (keep, drop))
+    k, d = (conn.execute("SELECT * FROM events WHERE id = ?", (i,)).fetchone() for i in (keep, drop))
+    if k and d:
+        ack = ("ack_level", "ack_by", "ack_at", "ack_until", "ack_mark_det", "ack_mark_sig")
+        src = d if (d["ack_until"] or "") > (k["ack_until"] or "") else k
+        status = max(k["status"], d["status"], key=lambda s: STATUS_RANK.get(s, -1))
+        conn.execute(
+            f"UPDATE events SET response_json = ?, status = ?, {', '.join(c + ' = ?' for c in ack)} WHERE id = ?",
+            (_merge_response(k["response_json"], d["response_json"]), status, *(src[c] for c in ack), keep),
+        )
     conn.execute("DELETE FROM events WHERE id = ?", (drop,))
 
 

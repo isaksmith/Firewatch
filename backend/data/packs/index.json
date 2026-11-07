@@ -1,0 +1,46 @@
+[
+  {
+    "code": "cwc",
+    "name": "Cottonwood Creek Fire District",
+    "state": "KS",
+    "counties": [
+      "Comanche"
+    ],
+    "version": "2026-11-07.1",
+    "bytes": 449558,
+    "sha256": "18f92406ba8fe4968dd8afd575476c723a423e7c142c16105fa040c0b65a1911"
+  },
+  {
+    "code": "ks-barber",
+    "name": "Barber County, KS",
+    "state": "KS",
+    "counties": [
+      "Barber"
+    ],
+    "version": "2026-11-07.1",
+    "bytes": 442451,
+    "sha256": "1c3e46f11be5a02f852a030a285fa981bc94b575fd6850715087c50fa15ff9ce"
+  },
+  {
+    "code": "ks-clark",
+    "name": "Clark County, KS",
+    "state": "KS",
+    "counties": [
+      "Clark"
+    ],
+    "version": "2026-11-07.1",
+    "bytes": 360324,
+    "sha256": "69138e391509b348ef0c7014f2adacb37e3b553b54fa628e27bea6a03aa7a671"
+  },
+  {
+    "code": "ks-comanche",
+    "name": "Comanche County, KS",
+    "state": "KS",
+    "counties": [
+      "Comanche"
+    ],
+    "version": "2026-11-07.1",
+    "bytes": 406761,
+    "sha256": "1cfbeb45341b6b458f7740aa7e6fb68735295a44b85a7be01b5c4f0f20428e0c"
+  }
+]

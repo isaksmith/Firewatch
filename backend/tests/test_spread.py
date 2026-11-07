@@ -45,3 +45,27 @@ def test_runs_fast_enough():
     start = time.perf_counter()
     _run(45.0)
     assert time.perf_counter() - start < 1.0
+
+
+ZERO_RATE = dict(wind_kmh=0.0, temp_c=10, rh_pct=100, curing_pct=95)
+
+
+def test_zero_spread_rate_does_not_crash():
+    r = simulate(SpreadInput(lat=38.8, lon=-99.45, wind_from_deg=180.0, minutes=60, use_terrain=False, **ZERO_RATE))
+    assert r["head_ros_kmh"] == 0
+    assert {f["properties"]["area_ha"] for f in r["isochrones"]["features"]} == {0.4}  # the ignition cell only, no growth
+
+
+def test_page_with_zero_spread_rate_still_pages():
+    from fastapi.testclient import TestClient
+    from app import notify
+    from app.db import connect, utcnow
+    from app.main import app
+    from tests.test_routes_posts import _fire_with_event
+    with TestClient(app) as c:
+        pid, eid = _fire_with_event(c)
+        with connect() as conn:
+            conn.execute("UPDATE events SET features_json = ?, weather_json = ? WHERE id = ?",
+                         ('{"temp_c": 10, "rh_pct": 100, "curing_pct": 95}', '{"wind_kmh": 0}', eid))
+            notify.decide(conn, eid, "page", "Duty", utcnow())
+            assert conn.execute("SELECT response_json FROM events WHERE id = ?", (eid,)).fetchone()[0]

@@ -22,6 +22,7 @@ flowchart LR
     LF["Co-op line fault<br/>(lockout, High fire danger)"]
     SAT["Satellite hotspot<br/>VIIRS / MODIS / GOES"]
     TXT["Texted report<br/>FIRE"]
+    SEN["Tower smoke sensor<br/>(mesh node)"]
   end
 
   subgraph Confirm
@@ -29,16 +30,24 @@ flowchart LR
     ML["ML score + guardrails"]
     BURN{"Registered burn,<br/>not escaped?"}
     LVL{"Independent<br/>sources"}
+    PF["P(fire)<br/>base rate × evidence"]
+    STK{"Stakes:<br/>lowest expected loss"}
     ASK["Ask 3 nearest neighbors<br/>1 smoke · 2 no · 3 my burn"]
+  end
+
+  subgraph Forecast
+    FC["Ensemble spread forecast<br/>hourly wind · fuel map · terrain<br/>24 runs: likely + worst case"]
   end
 
   subgraph Respond
     MON["Monitor<br/>texts nobody"]
     FYI["Investigate<br/>duty officer FYI"]
     ESC["Escalate<br/>duty officer: Reply PAGE"]
+    PB["Playbook<br/>3 options, one recommended,<br/>preview + receipt"]
+    HU["Heads-up to stations<br/>in the worst-case path"]
     LAD["No answer:<br/>chief at 3 min, dispatch at 9 min"]
     PAGE["PAGE<br/>county dispatch + volunteers"]
-    DW["Downwind ranchers:<br/>arrival estimate"]
+    DW["Downwind ranchers:<br/>earliest plausible arrival"]
     EQ["Water truck / disc:<br/>can you help?"]
     MA["Mutual aid draft<br/>chief replies SEND"]
   end
@@ -46,6 +55,7 @@ flowchart LR
   LF --> EV
   SAT --> EV
   TXT --> EV
+  SEN --> EV
   SAT --> ML --> EV
   EV --> BURN
   BURN -- yes --> MON
@@ -55,21 +65,58 @@ flowchart LR
   FYI --> ASK
   ASK -- "reply 1" --> EV
   LVL -- "two, or strong satellite" --> ESC
+  EV --> PF --> STK
+  FC --> STK
+  STK -. "can raise, never lower" .-> FYI
+  STK -. "can raise, never lower" .-> ESC
+  STK --> PB
+  PB --> HU
+  PB --> PAGE
+  PB --> MA
   ESC -.-> LAD
   ESC -- "duty officer replies PAGE" --> PAGE
+  FC --> DW
   PAGE --> DW
   PAGE --> EQ
   PAGE -- "too big for 2 trucks,<br/>or under 2 responding" --> MA
 ```
 
-In the Cottonwood Creek replay this chain pages at T+9 instead of today's 911 call at T+31. The first truck arrives at T+40 to about 220 acres instead of 520 at T+62 (spread model estimate, not field data).
+For the whole system, open the [system map](docs/system-map.html) or read the [system flows](docs/SYSTEM-FLOWS.md).
+
+In the Cottonwood Creek replay (the packet's red-flag Tuesday) this chain pages at T+9 instead of today's 911 call at T+31. The first truck arrives at T+38 to about 330 acres, instead of about 950 at T+62. Those sizes are the spread forecast's median, not field data; the forecast's [back-test](docs/research/spread-backtest-v1.md) is the evidence for it.
+
+The **forecast** and the **playbook** sit beside the confirmation rules:
+- P(fire) and the forecast's acres feed an expected-loss comparison of the options.
+- That comparison can raise a level (a weak signal on an Extreme day gets an Investigate and a heads-up) but never lower one; two sources always escalate.
+- The playbook shows the dispatcher three options, one recommended with the reason, and does what's chosen.
+- Downwind warnings use the forecast's earliest plausible arrival. See [How Firewatch recommends actions](docs/RECOMMENDATIONS.md).
 
 **Status:** the satellite path (ingest, clustering, enrichment, ML scoring, map, 3D spread, logged actions) is built and evaluated on real Kansas data. The whole chain also runs end to end in the **Cottonwood Creek replay**: line fault, neighbor texts, two-source confirmation, PAGE by text, downwind warnings with arrival estimates, mutual aid, and a registered burn that texts nobody. Texts go to a simulated outbox. Twilio sending is written but not yet tried on a real phone. The plan, honest cost numbers, and failure modes are in [docs/PLAN.md](docs/PLAN.md).
 
+## Community board
+
+Built and tested on the backend (499 tests pass). Evidence, commands and gaps are in [docs/board-evidence.md](docs/board-evidence.md).
+
+| Piece | State |
+|---|---|
+| Member and anonymous posts, confirms, ladder, acknowledge | Built, tested |
+| Abuse limits (100 anonymous posts send 0 pages, no self-confirm, no far confirm) | Built, tested |
+| Public location rounding, photo limits and EXIF strip | Built, tested |
+| Offline posting and compass | Built, server-tested only |
+| Replay A/B (`python -m scripts.replay_board_ab`) | Run; board minutes are ASSUMED |
+| Keyword spot check, outdoor compass, real Twilio phone | Not tested yet |
+
 ## Docs
 
-- [Build plan](docs/PLAN.md): the scenario in minutes, whole-chain design, constraints, failure modes, cost and who pays, evidence, weekend scope, next step.
+- [Build plan](docs/PLAN.md): the scenario in minutes, whole-chain design, constraints, failure modes, cost and who pays, evidence, weekend scope, next step, plus Shane's research additions and open questions.
+- [Concept screens and scenario art](design/SCENARIO.md): the story, the screens and decks (the map positions in them still need a redraw).
+- [Research](docs/RESEARCH.md): verified landscape and resource research (Lockheed, satellites, tools, prices, grants), each fact with its source, and a list of what is not confirmed.
 - [Design](docs/DESIGN.md): data model, pipeline, signals and confirmation rules, scoring, response planner and messaging, spread model, API, UI.
+- [How Firewatch recommends actions](docs/RECOMMENDATIONS.md): the decision model end to end (probability of fire, acres at stake, false-alarm costs, expected loss), every weight and why, worked example, limits.
+- [Spread forecast back-test v1](docs/research/spread-backtest-v1.md): the forecast started from the first satellite look of Anderson Creek 2016 and Starbuck 2017, scored against later looks (v2 55% vs v1 29% of later detections; Starbuck runs too slow overnight).
+- [Fire-day model v1](docs/research/fire-day-model-v1.md): Kansas wildfire starts and large-fire share by fire-danger level, 2016–2025, which sets the danger multiplier.
+- [Competitor packet](docs/COMPETITOR_PACKET.md): official brief, Cottonwood Creek scenario (canonical), judging criteria, schedule.
+- [Faultline research brief](docs/FAULTLINE_RESEARCH.md): power-line faults on high-danger days as the ignition trigger; evidence, data sources, and build plan.
 
 ## Stack
 
@@ -80,7 +127,7 @@ In the Cottonwood Creek replay this chain pages at T+9 instead of today's 911 ca
 | 3D | MapLibre terrain (AWS Terrain Tiles) + deck.gl overlays |
 | Data | NASA FIRMS, Open-Meteo, NWS, NIFC WFIGS, OpenStreetMap |
 
-No paid services or map tokens are required. The only key is a free [FIRMS MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/).
+Every data source is free and needs no map token. The only data key is a free [FIRMS MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/). Twilio is the one paid service (about 1 cent per text), used only for live texting; sample mode and the scenario use a simulated outbox.
 
 ## Repository layout
 
@@ -102,6 +149,15 @@ cp .env.example .env            # add FIRMS_MAP_KEY for MODE=live; MODE=sample w
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/uvicorn app.main:app --reload --port 8000
+```
+
+Public board (the only thing a tunnel may point at). The tunnel points at port 8012 and never at the main API or Vite. The main server must also run for timers and alerts. Set `FORWARDED_IP_HEADER` (for example `cf-connecting-ip`) so rate limits see the visitor, not the tunnel. Run `npm run build` in frontend first.
+
+```
+.venv/bin/uvicorn app.public_app:app --host 127.0.0.1 --port 8012
+```
+
+```
 .venv/bin/pytest                 # tests
 
 # frontend (http://localhost:5173)
@@ -113,7 +169,9 @@ The Vite dev server proxies `/api` to `http://127.0.0.1:8000` (override with `AP
 
 `MODE=sample` replays historical and synthetic Kansas events through the full pipeline offline, so it's the default for development and demos. On first start the backend loads all fixtures from `backend/data/samples/`; **Replay sample** in the top bar re-feeds them pass by pass over 60 seconds. Fixture weather was backfilled from the Open-Meteo archive with `.venv/bin/python -m scripts.backfill_sample_weather`.
 
-**Run scenario** in the top bar replays the Cottonwood Creek incident (1:50 pm line fault on a High fire-danger Saturday) at 2 seconds per scenario minute. A strip under the top bar compares today's timeline (on scene at T+62) with Firewatch's as it happens, and the drawer shows the evidence, the response, and every text. The district (a 450 sq mi stand-in boundary in Butler County, its settings, and a fictional roster) lives in `backend/data/districts/cottonwood-creek/`, and the script in `backend/data/scenarios/cottonwood-creek.json`.
+**Run scenario** in the top bar, in sample and live mode, replays the scenario picked beside it: the Cottonwood Creek incident (1:50 pm line fault on the packet's red-flag Tuesday: south wind 30-40 mph, gusts past 55, RH 11%) or one of the three packet replays, at 2 seconds per scenario minute. A strip under the top bar compares today's timeline (on scene at T+62) with Firewatch's as it happens, and the drawer shows the evidence, the response, and every text. The district (a 450 sq mi stand-in boundary centered on Coldwater in Comanche County, per the packet's Clark/Comanche/Barber model, its settings, and a fictional roster) lives in `backend/data/districts/cottonwood-creek/`, and the scripts in `backend/data/scenarios/` (`cottonwood-creek.json` and the `cottonwood-creek-packet*.json` replays).
+
+Replays record SMS in the outbox and never send a real text, in any mode. A radio linked in the roster still gets its mesh message, so a demo can show one. The packet replays use the packet's facts: nobody answers, the driver has no signal until minute 31, and nobody is within 4 miles.
 
 On macOS, XGBoost needs OpenMP: `brew install libomp`.
 
@@ -168,7 +226,7 @@ It's built from the region's geography and climate:
 - ten years of hourly fire-weather winds, so sensors sit downwind of what they watch;
 - winter and fire-season sun, to check the solar budget.
 
-Change the plot count or switch to a budget, the nodes per plot, and the assumed detection ranges, and the plan updates. Each plot lists why it was chosen and what to check on site. The method and its limits are in [DESIGN.md section 5.9](docs/DESIGN.md#59-region-planner).
+Change the plot count or switch to a budget, the nodes per plot, and the assumed detection ranges, and the plan updates. Each plot lists why it was chosen and what to check on site. The method and its limits are in [DESIGN.md section 5.10](docs/DESIGN.md#510-region-planner).
 
 Climate summaries are cached per 0.25° cell in `backend/data/climate/`. A county that isn't cached yet is fetched once from the Open-Meteo archive, which takes a few seconds. Terrain tiles are fetched once and cached. The planner's history layers (`wildfire_history.geojson`, `burn_activity.json`, `counties.geojson`) are rebuilt from the ML downloads with `.venv/bin/python -m ml.planner_layers`.
 
@@ -186,6 +244,8 @@ cd backend
 .venv/bin/python -m ml.analyze                         # deeper analyses + figures for the research report (~2 min)
 ```
 
+Spread forecasts use NLCD land cover, downloaded on first use. To cache the scenario areas ahead of a demo (and the slower USDA CDL cropland detail), run `.venv/bin/python -m scripts.fetch_fuels`.
+
 Results are in [backend/ml/report.md](backend/ml/report.md); the full analysis of the v1 training run is in [docs/research/scorer-v1-training-run.md](docs/research/scorer-v1-training-run.md). `SCORER=auto` (default) uses the model when it's present and weather is available, and falls back to the rules scorer otherwise.
 
 | Path | What it is |
@@ -194,7 +254,12 @@ Results are in [backend/ml/report.md](backend/ml/report.md); the full analysis o
 | `backend/app/features/` | Event clustering (2 km / 12 h) and feature enrichment |
 | `backend/app/scoring/` | XGBoost scorer v1 with per-alert reasons, rules fallback, guardrails, suppression reasons |
 | `backend/ml/` | Training pipeline and evaluation report |
-| `backend/app/sim/` | Grass-fire spread estimate (arrival-time grid → isochrones, impacts) |
+| `backend/app/sim/` | Grass-fire spread: fuel map (NLCD/CDL), changing weather, 24-member ensemble forecast |
+| `backend/app/decision.py`, `playbook.py` | Expected-loss recommendation model and the playbook it drives (options, previews, receipts) |
+| `backend/ml/backtest.py` | Spread back-test against FIRMS archive detections of real fires |
+| `backend/ml/fire_day.py` | Fire-day model: ignition rate and large-fire share by fire danger, from WFIGS + archive weather |
+| `frontend/src/components/FireForecast.tsx` | The selected fire's forecast outline, its wind, and the time slider on the console map |
+| `backend/app/situation.py` | `Situation` contract between ingestion and forecast/recommendations; builds one from a scenario |
 | `backend/app/signals.py`, `confirm.py` | Line faults and texted reports on events; the two-source level rules and burn registry |
 | `backend/app/notify.py` | SMS gateway (outbox / Twilio), templates, neighbor asks, no-answer ladder, PAGE / NO / SEND, downwind warnings, mutual aid, inbound keywords |
 | `backend/app/mesh.py` | Meshtastic bridge: texts out as acknowledged direct messages, replies in, radio positions and crew distances |
@@ -206,6 +271,62 @@ Results are in [backend/ml/report.md](backend/ml/report.md); the full analysis o
 | `frontend/src/pages/Spread3D.tsx` | 3D terrain spread preview with wind override |
 | `frontend/src/pages/Planner.tsx` | Region planner page: controls, climate, power, plots, relays, bill of materials, map |
 
+## Data sources and APIs
+
+Every data source is free with no paid tier. "Fresh" figures are single readings taken on 2026-11-07 unless noted, not guarantees. Twilio is the one paid service, but it is a texting service, not a data source (see the last row).
+
+Status values:
+- `on map`: fetched and shown behind a toggle in the Layers panel.
+- `background`: used by the app, no toggle.
+- `needs key`: built but off until a free FIRMS MAP_KEY is set.
+- `script`: fetched once by a script in `backend/scripts`, not polled.
+- `training only`: used by `backend/ml` or build scripts.
+- `planned`: not wired yet.
+
+| API | What it provides | Why we use it | How fresh | Key needed | Cost and license | Status |
+|---|---|---|---|---|---|---|
+| NASA FIRMS Area API | VIIRS and MODIS fire detections (plus `LANDSAT_NRT` and the real-time `*_RT` feeds) | Core detection stream | Real time, under 60 seconds after overpass (NASA figure) | Yes (free MAP_KEY) | Free, NASA open data | needs key |
+| NASA FIRMS yearly CSVs | US detections back to 2016 | Model training history | Yearly | No | Free, NASA open data | training only |
+| Open-Meteo forecast | Hourly wind, humidity, temperature, gusts, dew point, pressure, VPD | Fire weather for alerts and the dry-air grid | Hourly model run, about 2 hours behind | No | Free tier is non-commercial only, CC BY 4.0. A sold product would self-host it (AGPLv3) | on map |
+| Open-Meteo archive | Historical hourly weather | Model training features | Days behind | No | Same as above | training only |
+| AWS Terrain Tiles | Terrarium elevation tiles | Terrain, slope, 3D view | Static | No | Free, open data (USGS and other sources) | background |
+| OSM Overpass (`overpass-api.de` and `overpass.kumi.systems`) | Power lines, substations, towns, distribution lines | Line exposure and context layers | Fetched once by script | No | Free, ODbL, (c) OpenStreetMap contributors | script |
+| Plotly counties GeoJSON | US county boundaries (Census) | County names | Static | No | Free, public domain Census data | script |
+| NIFC WFIGS incident locations (training copy) | Historical reported wildfires and prescribed burns | Training labels | Static download | No | Free, public domain | training only |
+| OpenFreeMap | Dark vector basemap | Base map | Continuous | No | Free, no limits, OpenStreetMap data (ODbL) | background |
+| USGS Imagery Only (The National Map) | Aerial imagery tiles | 3D view imagery | Imagery 2017 to 2021, zoom 16 max | No | Free, public domain | background |
+| NASA FIRMS Landsat NRT (`LANDSAT_NRT`) | 30 m fire detections from Landsat overpasses | Fine-resolution cross-check | A few hours after overpass | Yes (same free MAP_KEY) | Free, NASA open data | needs key |
+| OSM distribution lines (`power=minor_line`) | Lower-voltage lines, partial coverage in Kansas | Context layer only, never used for the model's line distance | Fetched once by script | No | Free, ODbL, (c) OpenStreetMap contributors | script |
+| NWS alerts (`api.weather.gov`) | Fire, wind, smoke and dust warnings for Kansas | Official hazard alerts | Real time | No (User-Agent required) | Free, US government | on map |
+| Iowa Mesonet storm reports (LSR) | Human reports of fires and downed lines or poles | Ground truth hints | As issued | No | Free | on map |
+| NIFC WFIGS incidents, current | Currently known incident points | New known incidents | Last edit 14 min old when sampled | No | Free, public domain | on map |
+| NIFC WFIGS perimeters, current | Known fire footprints | Avoid re-alerting on known fires | Last edit 38 min old when sampled | No | Free, public domain | on map |
+| METAR via aviationweather.gov (backup: Iowa Mesonet ASOS) | Temperature, dew point, pressure, wind at 54 Kansas stations | Measured humidity | Hourly plus specials, about 6 min old when sampled | No | Free, US government | on map |
+| NOAA SPC fire weather outlooks | Official dry thunderstorm and wind/RH risk areas | Official risk areas | A few issues a day | No | Free, NOAA does not endorse this app | on map |
+| NOAA HMS fire points | Analyst-checked fire detections | Most sensitive free fire source found: most of its points come from NOAA's NGFS system, which we also pull directly (see the NGFS row). Slower than raw GOES | Last update 80 min old when sampled | No | Free, NOAA open data | on map |
+| GOES-19 and GOES-18 fire detection (`ABI-L2-FDCC`, `noaa-goes19`, `noaa-goes18` on S3) | Geostationary fire pixels | Fast signal for large, hot fires. Less sensitive than NGFS: on 2026-11-06 it showed 0 Kansas pixels in about 24 sampled afternoon scans while HMS logged 7 Kansas sites, mostly from NGFS. Locations matched HMS within 0.1 km (median) | Every 5 min, 3.5 min after scan start when sampled (fetch about 1 s) | No | Free, NOAA open data | on map |
+| NOAA NGFS detections (`fire.data.nesdis.noaa.gov/api/ogc/detections`, six `ngfs_schema.ngfs_detections_scene_*` collections) | GOES East and West fire detections with type (`Possible Wildland Fire`, `Industrial`, Oil/Gas and others), county and FRP | Off by default on the map. Never fed to the model, the 27 features, gfdi or scoring (the model trained on VIIRS and MODIS only). It can add one signal to the confirmation rule: a tracked feature labeled `Possible Wildland Fire`, seen in two separate scans and not covered by a registered burn. That signal counts as a satellite, so NGFS alone reaches Investigate (an FYI text to the duty officer) and never escalates alone; a person decides every page. It catches fires GOES FDC misses. NOAA beta, informational only. Data may be delayed or unavailable. Not for operational decisions. | NOAA states every 5 minutes. Newest GOES East row nationwide was 5.2 and 8.9 minutes behind the clock (2 samples, 2026-11-07). Kansas rows appear only when Kansas has a detection | No | Free NOAA service, no key. The portal states the data is provided as is, for information only; no license is asserted here | on map (off by default) |
+| GOES lightning (`GLM-L2-LCFA`, `noaa-goes19`) | Lightning flashes | Near-instant ignition clue | 20-second files, 15 newest (5 min window) polled every 60 s; cold fetch about 5 s, cached 0.4 s | No | Free, NOAA open data | on map |
+| GOES smoke (`ABI-L2-ADPC`, `noaa-goes19`) | Smoke mask | Smoke detection, daytime only | Every 5 min, polled every 300 s; scan start about 4.4 min old at fetch, fetch about 1 s; night returns 0 points with a notice | No | Free, NOAA open data | on map |
+| RTMA-RU 2.5 km (`noaa-rtma-pds`) | Gridded near-surface analysis | Freshest dry-air map, blends real observations | `2dvaranl` file read by `.idx` byte range (3 messages, about 19 MB); polled every 900 s; file valid 01:45 UTC was listed by about 02:03 (about 18 min lag), fetch about 3 s; feeds `/api/risk/grid` when under 2 h old, else Open-Meteo | No | Free, NOAA open data | on map |
+| NOAA HMS smoke polygons (`satepsanone.nesdis.noaa.gov/pub/FIRE/web/HMS/Smoke_Polygons/`) | Analyst-drawn smoke, KML or shapefile | Smoke context | 1 to 2 updates a day | No | Free, NOAA open data | planned |
+| gridMET | ERC and fuel moisture, daily NetCDF | Fire danger and fuel state | Daily | No | Free, CC0 | planned |
+| US Drought Monitor | Weekly drought GeoJSON | Long-term dryness | Weekly | No | Free, credit required: "courtesy of NDMC, via https://droughtmonitor.unl.edu" | planned |
+| MRLC NLCD 2021 land cover (WCS) | 30 m land cover | Fuel map for spread (grass vs. cropland vs. town vs. water) | Static (2021) | No | Free, public domain | live |
+| USDA CropScape Cropland Data Layer | 30 m crop types | Splits cropland into green wheat, residue and fallow for spread; could also tell pasture from stubble for false alarms | Yearly | No | Free, public domain | live (spread, prefetched by script; service is slow) |
+| LANDFIRE fuels | Fuel type | Fuel type for spread | Versioned releases | No | Free, public domain | planned |
+| NOAA Storm Events | Reported storm and fire events, monthly CSV | Validation | 2 to 3 month lag | No | Free, US government | planned |
+| Iowa Mesonet ASOS history | Historical station CSV | Wind history for validation | Archive | No | Free | planned |
+| Twilio SMS (service, not a data source) | Sends texts to contacts | Neighbor asks, PAGE, downwind warnings | On send | Yes (account SID, token, number) | Paid, about 1 cent per message. Only used when `MODE=live` and `SMS_GATEWAY=twilio`; otherwise simulated outbox (`backend/app/notify.py` `gateway_for`) | background |
+
+NGFS vs GOES, measured: NGFS GOES East CONUS, 24 hours ending 2026-11-07 02:28 UTC, returned 84 Kansas rows in 3 tracked features (Sumner County 35, Sedgwick County 34, Riley County 15); 50 were `Possible Wildland Fire` and 34 `Industrial`. The HMS file for 2026-11-06 in a Kansas box had 56 rows: 50 with the NGFS method and 6 VIIRS. The two windows differ by a few hours, so read this as scale, not an exact match. Field note: the NGFS rows carry `feature_detection_duration`; earlier notes called it `feature_tracking_duration`.
+
+The free Open-Meteo tier is for non-commercial use only; a commercial product would self-host Open-Meteo (AGPLv3) instead.
+
+Later (all free): NEXRAD radar, HRRR-Smoke, AirNow, OpenAQ, Copernicus.
+
+Not used, on purpose: Kansas Mesonet, Synoptic, restricted MADIS and PurpleAir (each needs a key, a paid tier, or terms that block this use).
+
 ## Data attribution
 
-NASA FIRMS (LANCE) · Open-Meteo (CC BY 4.0), including ERA5 reanalysis (Copernicus Climate Change Service) · NOAA / National Weather Service · NIFC WFIGS / IRWIN · © OpenStreetMap contributors (ODbL) · AWS Terrain Tiles · US Census TIGER · EPA ecoregions.
+NASA FIRMS (LANCE) · Open-Meteo (CC BY 4.0), including ERA5 reanalysis (Copernicus Climate Change Service) · NOAA / National Weather Service · NIFC WFIGS / IRWIN · © OpenStreetMap contributors (ODbL) · AWS Terrain Tiles · US Census TIGER · MRLC NLCD · USDA NASS Cropland Data Layer · EPA ecoregions.

@@ -1,0 +1,17 @@
+{
+ "count": 1,
+ "provider": "fixture",
+ "stations": [
+  {
+   "id": "KRSL",
+   "lat": 38.87,
+   "lon": -98.82,
+   "time": "2021-12-15T22:00:00Z",
+   "temp_c": 14,
+   "rh_pct": 18,
+   "wind_kmh": 48,
+   "gust_kmh": 70,
+   "pressure_hpa": 1004
+  }
+ ]
+}

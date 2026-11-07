@@ -8,6 +8,7 @@ import httpx
 
 from .config import get_settings
 from .confirm import evaluate_event, fetch_weather
+from . import fw1_feed
 from .db import connect, iso, mark_source, utcnow
 from .features.cluster import assign_detection
 from .ingest import firms
@@ -19,10 +20,47 @@ def dedupe_key(d: dict) -> str:
     return f"{d['source']}|{d['lat']:.4f}|{d['lon']:.4f}|{d['acq_time']}"
 
 
+_SUFFIXES = ("_URT", "_RT", "_NRT", "_SP")
+_RT_SUFFIXES = ("_URT", "_RT")
+MATCH_DEG = 0.003  # about 300 m: a processed row re-locates the same pixel by less than this
+
+
+def base_source(source: str) -> str:
+    for suf in _SUFFIXES:
+        if source.endswith(suf):
+            return source[: -len(suf)]
+    return source
+
+
+def _same_pixel_other_product(conn: sqlite3.Connection, d: dict):
+    """Existing row for the same sensor and overpass time under a different product suffix
+    (real-time vs near-real-time vs standard) at nearly the same location."""
+    base = base_source(d["source"])
+    rows = conn.execute(
+        "SELECT id, source FROM detections WHERE acq_time = ? AND source != ? "
+        "AND abs(lat - ?) <= ? AND abs(lon - ?) <= ?",
+        (d["acq_time"], d["source"], d["lat"], MATCH_DEG, d["lon"], MATCH_DEG),
+    ).fetchall()
+    return [r for r in rows if base_source(r["source"]) == base]
+
+
 def insert_detections(conn: sqlite3.Connection, dets: list[dict], is_sample: bool = False) -> list[int]:
     now = iso(utcnow())
     new_ids = []
     for d in dets:
+        twins = _same_pixel_other_product(conn, d)
+        if twins:
+            # Same detection seen under another product. A processed row replaces a real-time one
+            # in place (keeps its event); anything else is a duplicate and is dropped.
+            rt = [r for r in twins if r["source"].endswith(_RT_SUFFIXES)]
+            if rt and not d["source"].endswith(_RT_SUFFIXES):
+                conn.execute(
+                    "UPDATE detections SET dedupe_key = ?, source = ?, lat = ?, lon = ?, brightness_k = ?, "
+                    "frp_mw = ?, confidence = ?, scan_km = ?, track_km = ?, daynight = ? WHERE id = ?",
+                    (dedupe_key(d), d["source"], d["lat"], d["lon"], d.get("brightness_k"), d.get("frp_mw"),
+                     d.get("confidence"), d.get("scan_km"), d.get("track_km"), d.get("daynight"), rt[0]["id"]),
+                )
+            continue
         cur = conn.execute(
             "INSERT OR IGNORE INTO detections(dedupe_key, source, satellite, lat, lon, acq_time, brightness_k, "
             "frp_mw, confidence, scan_km, track_km, daynight, is_sample, ingested_at) "
@@ -75,7 +113,7 @@ def poll_firms_once() -> dict:
         all_dets = []
         for source in s.firms_source_list:
             try:
-                dets = firms.fetch_area(s.firms_map_key, source, s.bbox_tuple, days=1)
+                dets = firms.fetch_area(s.firms_map_key, source, s.bbox_tuple, days=s.firms_days)
                 mark_source(conn, "firms", ok=True)
                 summary["sources"][source] = len(dets)
                 all_dets.extend(dets)
@@ -91,7 +129,11 @@ def poll_firms_once() -> dict:
 
 def close_stale_events(conn: sqlite3.Connection, hours: int = 24) -> None:
     cutoff = iso(utcnow() - timedelta(hours=hours))
+    stale = [r["id"] for r in conn.execute(
+        "SELECT id FROM events WHERE is_sample = 0 AND status != 'closed' AND last_seen < ?", (cutoff,))]
     conn.execute(
         "UPDATE events SET status = 'closed' WHERE is_sample = 0 AND status != 'closed' AND last_seen < ?",
         (cutoff,),
     )
+    for eid in stale:
+        fw1_feed.sync_event(conn, eid, utcnow())

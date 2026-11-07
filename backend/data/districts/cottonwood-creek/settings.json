@@ -1,22 +1,102 @@
 {
   "name": "Cottonwood Creek Fire District",
   "short_name": "Cottonwood Creek FD",
-  "station": {"name": "Rosalia fire station", "lat": 37.8153, "lon": -96.6197},
   "neighbor_district": "neighboring district",
   "capacity_ha_60min": 150,
-  "ask_neighbor_radius_mi": 3,
-  "ask_neighbor_max": 3,
+  "ask_neighbor_radius_mi": 8,
+  "ask_neighbor_max": 6,
   "ladder_minutes": [3, 6],
   "mutual_aid_after_min": 5,
   "min_responding": 2,
   "line_fault_min_gfdi": 12,
   "burn_escape_gfdi": 25,
   "burn_radius_km": 1.5,
-  "turnout_min": 13,
+  "turnout_min": 11,
   "drive_min": 18,
   "false_page_budget_per_month": 2,
+  "station": {
+    "name": "Station 1",
+    "lat": 37.2689,
+    "lon": -99.3268,
+    "town": "Coldwater (stand-in)"
+  },
+  "apparatus": [
+    {
+      "id": "brush-1",
+      "name": "Brush 1",
+      "kind": "brush",
+      "crew": 2,
+      "ready_min": 11,
+      "available": true
+    },
+    {
+      "id": "brush-2",
+      "name": "Brush 2 (military surplus)",
+      "kind": "brush",
+      "crew": 2,
+      "ready_min": 25,
+      "available": true
+    },
+    {
+      "id": "tanker-1",
+      "name": "Tanker 1",
+      "kind": "tanker",
+      "crew": 1,
+      "ready_min": 25,
+      "available": true
+    },
+    {
+      "id": "engine-1",
+      "name": "Engine 1 (structure)",
+      "kind": "engine",
+      "crew": 2,
+      "ready_min": 20,
+      "available": true
+    }
+  ],
+  "mutual_aid": [
+    {
+      "id": "ma-protection",
+      "name": "Mutual aid: Protection FD",
+      "kind": "brush",
+      "lat": 37.2006,
+      "lon": -99.4838,
+      "crew": 2,
+      "ready_min": 15,
+      "available": true
+    },
+    {
+      "id": "ma-ashland",
+      "name": "Mutual aid: Ashland FD",
+      "kind": "brush",
+      "lat": 37.1886,
+      "lon": -99.7657,
+      "crew": 2,
+      "ready_min": 15,
+      "available": false
+    },
+    {
+      "id": "state-air",
+      "name": "State single-engine air tanker",
+      "kind": "aircraft",
+      "lat": 38.0656,
+      "lon": -97.8606,
+      "crew": 2,
+      "ready_min": 60,
+      "available": true
+    }
+  ],
   "smoke_pm25_rise": 50,
   "smoke_fine_ratio": 0.6,
   "smoke_regional_share": 0.5,
-  "smoke_repeat_min": 60
+  "smoke_repeat_min": 60,
+  "confirm_radius_mi": 15,
+  "post_timer_minutes": 5,
+  "post_timer_min_gfdi": 12,
+  "post_timer_max_day": 10,
+  "post_hazard_max_day": 5,
+  "ask_member_max_day": 3,
+  "ack_minutes": 30,
+  "post_join_km": 3,
+  "demo_gfdi": 20
 }

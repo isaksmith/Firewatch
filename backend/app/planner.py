@@ -422,7 +422,11 @@ def choose_sites(g: Grid, clim: dict, p: dict, n: int) -> tuple[list[dict], list
         for c in cands:
             if c[0] in taken:
                 continue
-            close = [k for k, s in enumerate(chosen) if math.hypot(c[1] - s["x"], c[2] - s["y"]) < p["site_min_sep_km"]]
+            # Great-circle distance: the local plane stretches east-west north of its center, which let plots sit
+            # a few meters under the minimum in the larger-latitude half of a region.
+            clon, clat = g.plane.lonlat(c[1], c[2])
+            close = [k for k, s in enumerate(chosen)
+                     if haversine_km(float(clat), float(clon), *map(float, g.plane.lonlat(s["x"], s["y"])[::-1])) < p["site_min_sep_km"]]
             if close:
                 blocked[c[0]] = close
                 continue

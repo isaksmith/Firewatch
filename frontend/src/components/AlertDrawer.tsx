@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api, type ActionName, type AlertDetail, type Message } from '../api'
 import { REC_META, centralTime, compass, kmhToMph, latLon, pad3, seenLabel, trackId } from '../lib/format'
 import { useOperator } from '../lib/operator'
+import { DecisionPanel } from './DecisionPanel'
 import { EvidenceGlyph, KV, RecTag, ScoreReadout, SectionHeader, StatusTag } from './ui'
 
 const QUICK_NOTES = ['Paged VFD', 'Known Rx burn', 'Industrial site', 'Called landowner']
@@ -34,7 +35,7 @@ export function AlertDrawer({ id, onClose }: { id: number; onClose: () => void }
   }, [onClose])
 
   return (
-    <aside className="flex w-[400px] shrink-0 flex-col border-l border-line bg-panel">
+    <aside className="absolute inset-0 z-20 flex w-full flex-col bg-panel md:static md:inset-auto md:z-auto md:w-[400px] md:shrink-0 md:border-l md:border-line">
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-line pr-2 pl-4">
         <span className="label !text-muted">
           Track <span className="text-text">{trackId(id)}</span>
@@ -105,6 +106,8 @@ function DrawerBody({ a }: { a: AlertDetail }) {
           )}
         </div>
 
+        <DecisionPanel eventId={a.id} />
+
         {a.evidence.length > 0 && (
           <Section
             title="Evidence"
@@ -171,6 +174,9 @@ function DrawerBody({ a }: { a: AlertDetail }) {
                 <KV k="Gust" v={`${Math.round(kmhToMph(w.gust_kmh ?? 0))} MPH`} />
                 <KV k="RH" v={`${Math.round(w.rh_pct ?? 0)}%`} accent={(w.rh_pct ?? 100) < 25 ? '#ffb21a' : undefined} />
                 <KV k="Temp" v={`${Math.round(w.temp_c ?? 0)}°C`} />
+                {w.dew_point_c != null && <KV k="Dew pt" v={`${Math.round(w.dew_point_c)}°C`} />}
+                {w.pressure_hpa != null && <KV k="Pressure" v={`${Math.round(w.pressure_hpa)} HPA`} />}
+                {w.vpd_kpa != null && <KV k="VPD" v={`${w.vpd_kpa.toFixed(1)} KPA`} />}
                 <KV k="Rain 72H" v={`${w.precip_72h_mm ?? 0} MM`} />
               </div>
             </>
@@ -294,7 +300,7 @@ function ResponseSection({ a }: { a: AlertDetail }) {
           <div className="flex justify-between">
             <span className="label">Next hour</span>
             <span className="num text-text">
-              ~{r.plan.acres_60} AC · WIND {r.plan.wind.from} {r.plan.wind.mph} MPH
+              UP TO {r.plan.acres_60} AC · WIND {r.plan.wind.from} {r.plan.wind.mph} MPH
             </span>
           </div>
           {r.plan.downwind.length > 0 && (
@@ -302,7 +308,7 @@ function ResponseSection({ a }: { a: AlertDetail }) {
               {r.plan.downwind.map((d) => (
                 <li key={d.contact_id} className="flex justify-between">
                   <span>{d.name}</span>
-                  <span className="num text-investigate">~{d.eta_min} MIN</span>
+                  <span className="num text-investigate">AS SOON AS {d.eta_min} MIN</span>
                 </li>
               ))}
             </ul>
@@ -426,44 +432,6 @@ function TextsSection({ messages }: { messages: Message[] }) {
   )
 }
 
-function DecisionBar({ a }: { a: AlertDetail }) {
-  const qc = useQueryClient()
-  const operator = useOperator()
-  const decide = useMutation({
-    mutationFn: (action: 'page' | 'no' | 'send') => api.decide(a.id, action, operator),
-    onSuccess: (data) => {
-      qc.setQueryData(['alert', a.id], data)
-      qc.invalidateQueries({ queryKey: ['alerts'] })
-      qc.invalidateQueries({ queryKey: ['scenario'] })
-    },
-  })
-  const r = a.response
-  if (!r) return null
-  const canPage = !r.decision
-  const canSend = r.decision === 'page' && !r.mutual_aid?.sent_at
-  if (!canPage && !canSend) return null
-  return (
-    <div className="space-y-1.5 border-b border-line p-3">
-      {canPage && (
-        <div className="grid grid-cols-[1.6fr_1fr] gap-1.5">
-          <button disabled={decide.isPending} onClick={() => decide.mutate('page')} className="btn btn-danger !h-9">
-            Page district
-          </button>
-          <button disabled={decide.isPending} onClick={() => decide.mutate('no')} className="btn !h-9 !text-muted">
-            Stand down
-          </button>
-        </div>
-      )}
-      {canSend && (
-        <button disabled={decide.isPending} onClick={() => decide.mutate('send')} className="btn !h-8 w-full">
-          {r.mutual_aid ? 'Send mutual-aid request' : 'Request mutual aid'}
-        </button>
-      )}
-      {decide.isError && <p className="num text-[10.5px] text-escalate">{(decide.error as Error).message}</p>}
-    </div>
-  )
-}
-
 function ActionBar({ a }: { a: AlertDetail }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -478,19 +446,14 @@ function ActionBar({ a }: { a: AlertDetail }) {
     },
   })
   const open = ['new', 'acknowledged', 'escalated'].includes(a.status)
-  const can = {
-    acknowledge: open && a.status === 'new',
-    escalate: open && a.status !== 'escalated',
-    dismiss: open,
-    reopen: !open,
-  }
+  const can = { dismiss: open, reopen: !open }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey || act.isPending) return
       const key = e.key.toLowerCase()
       if (key === 'v') navigate(`/alerts/${a.id}/3d`)
-      const map: Record<string, ActionName> = { a: 'acknowledge', e: 'escalate', d: 'dismiss', r: 'reopen' }
+      const map: Record<string, 'dismiss' | 'reopen'> = { d: 'dismiss', r: 'reopen' }
       const action = map[key]
       if (action && can[action]) act.mutate(action)
     }
@@ -500,7 +463,6 @@ function ActionBar({ a }: { a: AlertDetail }) {
 
   return (
     <div className="shrink-0 border-t border-line-2 bg-void">
-      <DecisionBar a={a} />
       <Link to={`/alerts/${a.id}/3d`} className="btn !h-9 w-full !border-x-0 !border-t-0 !border-b-line">
         <Box size={13} /> 3D spread preview <span className="kbd ml-1">V</span>
       </Link>
@@ -518,17 +480,9 @@ function ActionBar({ a }: { a: AlertDetail }) {
           ))}
         </div>
         {open ? (
-          <div className="grid grid-cols-[1fr_1.3fr_1fr] gap-1.5">
-            <button disabled={!can.acknowledge || act.isPending} onClick={() => act.mutate('acknowledge')} className="btn !h-9">
-              Ack <span className="kbd">A</span>
-            </button>
-            <button disabled={!can.escalate || act.isPending} onClick={() => act.mutate('escalate')} className="btn btn-danger !h-9">
-              Escalate <span className="kbd">E</span>
-            </button>
-            <button disabled={act.isPending} onClick={() => act.mutate('dismiss')} className="btn !h-9 !text-muted">
-              Dismiss <span className="kbd">D</span>
-            </button>
-          </div>
+          <button disabled={act.isPending} onClick={() => act.mutate('dismiss')} className="btn !h-9 w-full !text-muted" title="Close this alert: not a fire, or a known burn">
+            Not a fire: dismiss <span className="kbd">D</span>
+          </button>
         ) : (
           <button onClick={() => act.mutate('reopen')} disabled={act.isPending} className="btn !h-9 w-full">
             Reopen <span className="kbd">R</span>

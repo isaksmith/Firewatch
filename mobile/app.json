@@ -1,0 +1,73 @@
+{
+  "expo": {
+    "name": "Firewatch",
+    "slug": "firewatch",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "firewatch",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#08090b",
+    "ios": {
+      "bundleIdentifier": "org.firewatch.app",
+      "supportsTablet": false,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSBluetoothAlwaysUsageDescription": "Firewatch uses Bluetooth to talk to your Meshtastic radio, so fire alerts reach you with no cell signal.",
+        "NSLocationWhenInUseUsageDescription": "Firewatch uses your location only while the app is open, to show how far fires and neighbor reports are from you, and to add your spot to a report you send.",
+        "UIBackgroundModes": [
+          "bluetooth-central"
+        ]
+      }
+    },
+    "android": {
+      "package": "org.firewatch.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#08090b",
+        "foregroundImage": "./assets/images/android-icon-foreground.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#08090b",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 120
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Firewatch uses your location only while the app is open, to show how far fires and neighbor reports are from you, and to add your spot to a report you send.",
+          "locationAlwaysAndWhenInUsePermission": "Firewatch uses your location only while the app is open, to show how far fires and neighbor reports are from you, and to add your spot to a report you send.",
+          "locationAlwaysPermission": "Firewatch uses your location only while the app is open, to show how far fires and neighbor reports are from you, and to add your spot to a report you send.",
+          "motionPermission": "Firewatch does not use motion data."
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": [
+            "central"
+          ],
+          "bluetoothAlwaysPermission": "Firewatch uses Bluetooth to talk to your Meshtastic radio, so fire alerts reach you with no cell signal."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false,
+      "reactCompiler": true
+    }
+  }
+}
