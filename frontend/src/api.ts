@@ -102,6 +102,66 @@ export interface MeshNode {
   sensors: SensorReadings | null
 }
 
+export type SensorStatus = 'ok' | 'watch' | 'service' | 'replace' | 'stale' | 'offline'
+
+export interface SensorLatest {
+  temp_c?: number
+  rh_pct?: number
+  pressure_hpa?: number
+  gas_kohm?: number
+  pm25?: number
+  pm10?: number
+  pack_v?: number
+  pack_ma?: number
+  solar_v?: number
+  solar_ma?: number
+  reading_at?: string
+}
+
+export interface SensorNode {
+  node_id: string
+  kind: 'sensor' | 'relay' | 'bridge'
+  tier: 'bare' | 'rich' | null
+  site: number | null
+  label: string
+  lat: number
+  lon: number
+  via: string | null
+  installed_at: string
+  simulated: boolean
+  last_heard: string | null
+  snr: number | null
+  battery_pct: number | null
+  status: SensorStatus
+  radio: 'ok' | 'down'
+  sensors: 'ok' | 'stale' | 'unknown' | 'n/a'
+  actions: string[]
+  latest: SensorLatest
+}
+
+export interface SensorNetwork {
+  simulated: boolean
+  counts: Record<SensorStatus, number>
+  nodes: SensorNode[]
+  links: GeoJSON.FeatureCollection<GeoJSON.LineString, { kind: 'backbone' | 'gateway' }>
+}
+
+export interface SensorCheck {
+  key: string
+  part: string
+  status: SensorStatus
+  value: string
+  detail: string
+  action: string | null
+}
+
+export interface SensorDetail extends SensorNode {
+  checks: SensorCheck[]
+  series: Record<'pm25' | 'gas_kohm' | 'pack_v' | 'temp_c' | 'rh_pct' | 'solar_w', [string, number][]>
+  via_label: string | null
+  baseline: { gas_kohm?: number }
+}
+
 export interface SensorReadings {
   temp_c?: number
   rh_pct?: number
@@ -251,6 +311,7 @@ export interface SourceHealth {
 export interface Health {
   mode: 'sample' | 'live'
   firms_key_configured: boolean
+  llm_configured?: boolean
   replay_running: boolean
   sources: Record<string, SourceHealth>
 }
@@ -604,6 +665,8 @@ export const api = {
     request<AlertDetail>(`/alerts/${id}/decision`, { method: 'POST', body: JSON.stringify({ action, operator }) }),
   district: () => request<District>('/district'),
   meshNodes: () => request<MeshNode[]>('/mesh/nodes'),
+  sensors: () => request<SensorNetwork>('/sensors'),
+  sensor: (id: string) => request<SensorDetail>(`/sensors/${encodeURIComponent(id)}`),
   boardAdminPosts: () => request<AdminPost[]>('/board/admin/posts'),
   boardAdminBurns: () => request<AdminBurn[]>('/board/admin/burns'),
   boardStation: (id: number, action: StationAction, operator: string) =>

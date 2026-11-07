@@ -5,6 +5,7 @@ import { Link, NavLink } from 'react-router-dom'
 import { api, type ScenarioSummary, type SourceHealth } from '../api'
 import { setLowData, useLowData } from '../lib/lowData'
 import { setOperator, useOperator } from '../lib/operator'
+import { TIERS, setTier, useTier, type Tier } from '../lib/tier'
 import { Mark } from './ui'
 
 const SOURCE_LABELS: Record<string, string> = { firms: 'FIRMS', open_meteo: 'WX', mesh: 'MESH' }
@@ -113,6 +114,7 @@ export function TopBar({
   })
   const ingest = useMutation({ mutationFn: api.ingest, onSuccess: () => qc.invalidateQueries() })
   const mode = health.data?.mode
+  const { tier, online } = useTier()
 
   return (
     <header className="flex h-10 shrink-0 items-center gap-4 overflow-hidden border-b border-line bg-void px-4 whitespace-nowrap">
@@ -126,8 +128,8 @@ export function TopBar({
         {(
           [
             ['/', 'Console'],
-            ['/planner', 'Planner'],
-            ['/board', 'Board'],
+            ['/planner', 'FireNode planner'],
+            ...(online ? ([['/board', 'Board']] as const) : []),
           ] as const
         ).map(([to, label]) => (
           <NavLink
@@ -142,6 +144,7 @@ export function TopBar({
           </NavLink>
         ))}
       </nav>
+      <TierSwitch tier={tier} />
       <Divider />
       {threeDId != null && (
         <Link
@@ -166,7 +169,8 @@ export function TopBar({
       )}
       <div className="hidden items-center gap-5 min-[1400px]:flex">
         <Divider />
-        {health.data && <SourceChips sources={health.data.sources} />}
+        {health.data && online && <SourceChips sources={health.data.sources} />}
+        {!online && <span className="num text-[10px] tracking-[0.12em] text-degraded">INTERNET DOWN · FIRENODE ONLY</span>}
         {health.isError && <span className="num text-[10px] tracking-[0.12em] text-escalate">Can't reach the Firewatch server. Showing the last update.</span>}
       </div>
       </div>
@@ -253,12 +257,33 @@ export function TopBar({
             <Play size={14} /> {health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}
           </button>
         )}
-        {mode === 'live' && (
+        {mode === 'live' && online && (
           <button onClick={() => ingest.mutate()} disabled={ingest.isPending} className="btn hidden !h-6 md:inline-flex">
             <RefreshCw size={11} className={ingest.isPending ? 'animate-spin' : ''} /> Ingest
           </button>
         )}
       </div>
     </header>
+  )
+}
+
+function TierSwitch({ tier }: { tier: Tier }) {
+  return (
+    <div role="radiogroup" aria-label="Tier to show" className="flex shrink-0 items-center border border-line">
+      {TIERS.map((t) => (
+        <button
+          key={t.key}
+          role="radio"
+          aria-checked={tier === t.key}
+          title={t.title}
+          onClick={() => setTier(t.key)}
+          className={`num px-2 py-[2px] text-[10px] tracking-[0.14em] uppercase ${
+            tier === t.key ? (t.key === 'offline' ? 'bg-degraded/20 text-degraded' : 'bg-raised text-text') : 'text-dim hover:text-muted'
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
   )
 }

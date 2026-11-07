@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     openrouter_timeout_s: float = 12.0
     mesh_channel_updates: bool = True  # with a key and a radio: post a situation update while a paged fire is open
     channel_update_min: int = 15  # minutes between updates, sooner on a wind shift or the fire doubling
+    sensor_sim: bool = False  # lay a simulated sensor network over the district (sensor_sim.py); never texts anyone
     scenario_seconds_per_minute: float = 2.0
     forwarded_ip_header: str = ""  # e.g. cf-connecting-ip; trusted only from a loopback peer
     api_token: str = ""  # when set, required (X-Firewatch-Token) on endpoints that can text people

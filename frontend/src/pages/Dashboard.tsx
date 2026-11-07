@@ -13,6 +13,7 @@ import { TopBar } from '../components/TopBar'
 import { SUPPRESSION_LABEL, clock12 } from '../lib/format'
 import { dismissAutoBanner, noteFetchFailure, noteFetchTime, setLowData, useLowData } from '../lib/lowData'
 import { filterQueue, type QueueTab } from '../lib/queue'
+import { LOCAL_SIGNALS, useTier } from '../lib/tier'
 
 const subscribeOnline = (cb: () => void) => {
   window.addEventListener('online', cb)
@@ -97,7 +98,17 @@ export function Dashboard() {
     }
   }, [running, fireId, navigate])
 
-  const all = shown?.alerts ?? []
+  const { tier, online: internet, fireNode } = useTier()
+  // Offline, only evidence that reaches the station without the internet is new: FireSense smoke and people on
+  // FireMesh. The free tier has no FireNode, so an alert that only FireSense saw isn't there. The low-data list
+  // carries no evidence breakdown, so there every alert stays.
+  const all = (shown?.alerts ?? []).filter((a) =>
+    Object.keys(a.signals).length + Object.keys(a.sources).length === 0
+      ? true
+      : tier === 'offline'
+      ? LOCAL_SIGNALS.some((k) => a.signals[k])
+      : fireNode || !(a.signals.sensor_smoke && Object.keys(a.sources).length === 0 && Object.keys(a.signals).length === 1),
+  )
   const suppressed = shown?.suppressed
   const onMap = tab === 'suppressed' ? all : filterQueue(all, tab)
   const close = useCallback(() => navigate('/'), [navigate])
@@ -126,13 +137,19 @@ export function Dashboard() {
           setBurnOpen((o) => !o)
         }}
         boardOpen={boardOpen}
-        onToggleBoard={() => {
+        onToggleBoard={internet ? () => {
           if (!boardOpen && selectedId != null) navigate('/')
           setBurnOpen(false)
           setBoardPostId(null)
           setBoardOpen(!boardOpen)
-        }}
+        } : undefined}
       />
+      {!internet && (
+        <div role="status" className="flex shrink-0 items-center gap-3 border-b border-line bg-degraded/10 px-4 py-1.5 text-[12.5px] text-degraded">
+          Station internet is down. Running on FireNode: FireSense sensors and reports over FireMesh radios, with the FireCast
+          model on this computer. Satellite feeds, weather updates, texts and FireCast Plus are unavailable.
+        </div>
+      )}
       {offline && (
         <div role="status" className="flex shrink-0 items-center gap-3 border-b border-line bg-investigate/10 px-4 py-1.5 text-[12.5px] text-investigate">
           Offline. {last ? `Last updated ${clock12(new Date(last.at).toISOString())}` : 'No data yet'}

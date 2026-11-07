@@ -569,7 +569,7 @@ export function Planner() {
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-[380px] shrink-0 flex-col overflow-y-auto border-r border-line bg-panel">
           <SectionHeader right={problems.length === 0 && (plan.isFetching || wanted !== request) ? <span className="num text-[10px] text-sample">PLANNING…</span> : null}>
-            Region planner
+            FireNode planner
           </SectionHeader>
           <div className="space-y-3 border-b border-line px-4 py-3">
             <label className="flex flex-col gap-1">

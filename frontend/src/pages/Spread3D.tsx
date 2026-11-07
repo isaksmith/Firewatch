@@ -91,7 +91,7 @@ export function Spread3D() {
         </Link>
         <span className="num border border-investigate/60 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-investigate">3D VIEW</span>
         <span className="label hidden !text-muted sm:inline">
-          Spread preview · <span className="text-text">{trackId(id)}</span>
+          FireCast spread preview · <span className="text-text">{trackId(id)}</span>
         </span>
         <span className="hidden h-4 w-px bg-line-2 sm:block" />
         <ScoreReadout score={a.score} rec={a.recommendation} size="sm" />

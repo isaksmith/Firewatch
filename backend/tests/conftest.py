@@ -10,6 +10,8 @@ def temp_db(tmp_path, monkeypatch):
     # .env may name a real key and a real radio; a test must never reach either
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
     monkeypatch.setenv("MESH_GATEWAY", "off")
+    monkeypatch.setenv("API_TOKEN", "")  # tests that need a token set their own
+    monkeypatch.setenv("SENSOR_SIM", "false")
     get_settings.cache_clear()
     from app.db import init_db
 

@@ -25,6 +25,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from . import cap, climate, fw1_feed, livesend, mesh, notify, planner, playbook, posts, routes_posts, sample, scenario
+from . import sensor_health, sensor_sim
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
@@ -118,6 +119,29 @@ async def _mesh_loop() -> None:
         await asyncio.sleep(MESH_RETRY_SECONDS)
 
 
+async def _sensor_sim_loop() -> None:
+    """Install the simulated sensor network if it isn't there, then report from it every couple of minutes."""
+    def seed():
+        with connect() as conn:
+            if not sensor_sim.installed(conn):
+                sensor_sim.seed(conn)
+
+    try:
+        await asyncio.to_thread(seed)
+    except Exception:
+        log.exception("sensor sim seed failed")
+        return
+    while True:
+        await asyncio.sleep(sensor_sim.TICK_S)
+        try:
+            def tick():
+                with connect() as conn:
+                    sensor_sim.tick(conn)
+            await asyncio.to_thread(tick)
+        except Exception:
+            log.exception("sensor sim tick failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -138,6 +162,8 @@ async def lifespan(app: FastAPI):
     _tasks.append(asyncio.create_task(_tick_loop()))
     if s.mesh_gateway != "off":
         _tasks.append(asyncio.create_task(_mesh_loop()))
+    if s.sensor_sim:
+        _tasks.append(asyncio.create_task(_sensor_sim_loop()))
     yield
     with connect() as conn:
         conn.execute("UPDATE replay_clock SET running = 0")
@@ -282,6 +308,8 @@ def list_alerts(
         f"(is_sample = 1 AND sample_slug IN ({','.join('?' * len(scenario_slugs))}))" if live and scenario_slugs
         else "0" if live else "is_sample = 1"
     )
+    if live:  # smoke from the simulated sensor network is a sample event, but it belongs on the live map
+        sample_clause = f"({sample_clause} OR (is_sample = 1 AND sample_slug IS NULL AND id IN ({_SIM_SMOKE_EVENTS})))"
     with connect() as conn:
         rows = conn.execute(
             f"SELECT * FROM events WHERE status IN ({','.join('?' * len(statuses))}) "
@@ -625,6 +653,7 @@ def health():
     return {
         "mode": s.mode,
         "firms_key_configured": bool(s.firms_map_key),
+        "llm_configured": bool(s.openrouter_api_key),
         "replay_running": sample.replay_running(),
         "sources": sources,
     }
@@ -838,6 +867,140 @@ def list_mesh_nodes():
     """Every Meshtastic radio the server's radio has heard, with its last position and the contact who carries it."""
     with connect() as conn:
         return mesh.list_nodes(conn)
+
+
+_SIM_SMOKE_EVENTS = (
+    "SELECT g.event_id FROM signals g JOIN sensor_nodes n ON g.source = 'mesh:' || n.node_id WHERE n.simulated = 1"
+)
+_sensor_cache: dict = {}
+
+
+def _sensor_nodes(conn, nid: str | None = None) -> list[dict]:
+    q = ("SELECT s.*, m.last_heard, m.snr, m.battery_pct FROM sensor_nodes s LEFT JOIN mesh_nodes m ON m.node_id = s.node_id"
+         + (" WHERE s.node_id = ?" if nid else " ORDER BY s.kind, s.site, s.node_id"))
+    return [dict(r) for r in conn.execute(q, (nid,) if nid else ())]
+
+
+def _network(conn, now) -> tuple[list[dict], dict[str, list[dict]], dict[int, dict]]:
+    """Every field node with its history, and the network medians each node's health is compared against."""
+    nodes = _sensor_nodes(conn)
+    rows = {n["node_id"]: sensor_health.history(conn, n["node_id"], now) for n in nodes}
+    medians = {
+        sim: sensor_health.network_medians(conn, [n for n in nodes if n["simulated"] == sim], now, rows)
+        for sim in (0, 1)
+    }
+    return nodes, rows, medians
+
+
+def _node_out(n: dict, health: dict, latest: dict) -> dict:
+    return {
+        "node_id": n["node_id"], "kind": n["kind"], "tier": n["tier"], "site": n["site"], "label": n["label"],
+        "lat": n["lat"], "lon": n["lon"], "via": n["via"], "installed_at": n["installed_at"],
+        "simulated": bool(n["simulated"]), "last_heard": n["last_heard"], "snr": n["snr"],
+        "battery_pct": n["battery_pct"], "status": health["status"], "radio": health["radio"],
+        "sensors": health["sensors"], "actions": health["actions"], "latest": latest,
+    }
+
+
+@api.get("/sensors")
+def list_sensors():
+    """The field sensor network: sensor nodes, relays, and the station bridge, each with its health."""
+    now = utcnow()
+    if (hit := _sensor_cache.get("list")) and (now - hit[0]).total_seconds() < 20:
+        return hit[1]
+    with connect() as conn:
+        nodes, rows, medians = _network(conn, now)
+        out = []
+        for n in nodes:
+            h = sensor_health.assess(conn, n, now, medians[n["simulated"]], rows[n["node_id"]])
+            out.append(_node_out(n, h, sensors_latest(rows[n["node_id"]])))
+    by_id = {n["node_id"]: n for n in out}
+    links = [
+        {"type": "Feature", "properties": {"kind": "backbone" if n["kind"] == "relay" else "gateway"},
+         "geometry": {"type": "LineString", "coordinates": [[n["lon"], n["lat"]], [by_id[n["via"]]["lon"], by_id[n["via"]]["lat"]]]}}
+        for n in out if n["kind"] != "sensor" and n["via"] in by_id
+    ]
+    # One gateway line per plot, from the plot's middle to the relay it reports through.
+    plots: dict[int, list[dict]] = {}
+    for n in out:
+        if n["kind"] == "sensor":
+            plots.setdefault(n["site"], []).append(n)
+    for members in plots.values():
+        via = by_id.get(members[0]["via"])
+        if via:
+            lon = sum(m["lon"] for m in members) / len(members)
+            lat = sum(m["lat"] for m in members) / len(members)
+            links.append({"type": "Feature", "properties": {"kind": "gateway"},
+                          "geometry": {"type": "LineString", "coordinates": [[lon, lat], [via["lon"], via["lat"]]]}})
+    counts = {s: sum(n["status"] == s for n in out) for s in sensor_health.STATUSES}
+    result = {
+        "simulated": any(n["simulated"] for n in out), "counts": counts, "nodes": out,
+        "links": {"type": "FeatureCollection", "features": links},
+    }
+    _sensor_cache["list"] = (now, result)
+    return result
+
+
+def sensors_latest(rows: list[dict]) -> dict:
+    out: dict = {}
+    for r in reversed(rows):
+        for k in ("temp_c", "rh_pct", "pressure_hpa", "gas_kohm", "pm25", "pm10", "pack_v", "pack_ma", "solar_v", "solar_ma"):
+            if k not in out and r[k] is not None:
+                out[k] = r[k]
+        out.setdefault("reading_at", r["at"])
+    return out
+
+
+@api.get("/sensors/{node_id}")
+def get_sensor(node_id: str):
+    """One field node: its health checks with the action each calls for, latest readings, and a day of history."""
+    now = utcnow()
+    with connect() as conn:
+        found = _sensor_nodes(conn, node_id)
+        if not found:
+            raise HTTPException(404, "no such sensor node")
+        nodes, rows, medians = _network(conn, now)
+        n = found[0]
+        h = sensor_health.assess(conn, n, now, medians[n["simulated"]], rows[node_id])
+        hist = rows[node_id]
+    series = {
+        k: [[r["at"], r[k]] for r in hist if r[k] is not None]
+        for k in ("pm25", "gas_kohm", "pack_v", "temp_c", "rh_pct")
+    }
+    series["solar_w"] = [
+        [r["at"], round(r["solar_v"] * r["solar_ma"] / 1000, 2)] for r in hist if r["solar_v"] is not None and r["solar_ma"] is not None
+    ]
+    via = next((m for m in nodes if m["node_id"] == n["via"]), None)
+    return {
+        **_node_out(n, h, sensors_latest(hist)), "checks": h["checks"], "series": series,
+        "via_label": via["label"] if via else None,
+        "baseline": loads(n["baseline_json"]) or {},
+    }
+
+
+class PlumeIn(BaseModel):
+    node_id: str
+
+
+@api.post("/sensors/sim/plume", dependencies=[Depends(require_token)])
+def sensor_plume(body: PlumeIn):
+    """Blow simulated smoke over the plot a simulated node sits on; its rich nodes should raise a smoke signal."""
+    with connect() as conn:
+        try:
+            out = sensor_sim.plume(conn, body.node_id)
+        except KeyError:
+            raise HTTPException(404, "not a simulated sensor node") from None
+    _sensor_cache.clear()
+    return out
+
+
+@api.post("/sensors/sim/reset", dependencies=[Depends(require_admin)])
+def sensor_sim_reset():
+    """Reinstall the simulated network from today's plan, with a fresh day of history."""
+    with connect() as conn:
+        n = sensor_sim.seed(conn)
+    _sensor_cache.clear()
+    return {"nodes": n}
 
 
 @api.get("/district")

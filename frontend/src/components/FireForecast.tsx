@@ -61,7 +61,7 @@ export function ForecastSlider({ fire, aheadMin, setAheadMin, loading }: {
     <div className="hud absolute bottom-10 left-1/2 w-[min(520px,calc(100%-2rem))] -translate-x-1/2 px-4 py-2.5">
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-[12px] font-semibold text-text">
-          Fire forecast {aheadMin === 0 ? 'now' : `+${Math.floor(aheadMin / 60)}:${String(aheadMin % 60).padStart(2, '0')}`}
+          FireCast spread {aheadMin === 0 ? 'now' : `+${Math.floor(aheadMin / 60)}:${String(aheadMin % 60).padStart(2, '0')}`}
           {step && <span className="ml-2 font-normal text-muted">{clock(step.at)}</span>}
         </span>
         {step ? (

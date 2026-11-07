@@ -10,6 +10,8 @@ import { AOI_BBOX, BASEMAP_STYLE, BLANK_STYLE, KANSAS_VIEW, ringPolygon } from '
 import { FEEDS, LiveLayers, LiveToggles, useLiveFeeds, type FeedKey } from './LiveFeeds'
 import { TrackGlyph } from './ui'
 import { FireForecastLayer, ForecastSlider } from './FireForecast'
+import { SensorHealthChip, SensorLayer, SensorPanel } from './SensorNetwork'
+import { useTier } from '../lib/tier'
 
 interface Props {
   alerts: AlertSummary[]
@@ -39,7 +41,7 @@ const AOI: GeoJSON.Feature = {
   },
 }
 
-type LayerKey = 'power_lines' | 'static_sources' | 'flint_hills' | 'aoi' | 'district' | 'distribution_lines' | 'dry_grid' | 'wind_lines' | 'mesh' | 'fire_forecast' | 'board' | 'burns'
+type LayerKey = 'power_lines' | 'static_sources' | 'flint_hills' | 'aoi' | 'district' | 'distribution_lines' | 'dry_grid' | 'wind_lines' | 'mesh' | 'sensors' | 'fire_forecast' | 'board' | 'burns'
 
 const SWATCH: Record<LayerKey, string> = {
   aoi: 'h-0 w-4 border-t border-dashed border-sample/70',
@@ -51,6 +53,7 @@ const SWATCH: Record<LayerKey, string> = {
   dry_grid: 'h-2 w-2 rounded-full bg-[#ffb21a]',
   wind_lines: 'h-0.5 w-4 bg-[#ff5c5c]',
   mesh: 'h-2 w-2 rotate-45 bg-ok',
+  sensors: 'h-2 w-2 rounded-full bg-ok',
   fire_forecast: 'h-2 w-4 bg-[#ff7a1a]/60 border border-[#ffb21a]',
   board: 'h-2 w-2 border border-dashed border-escalate',
   burns: 'h-2 w-2 rotate-45 border border-investigate bg-investigate/30',
@@ -191,10 +194,17 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
   const mapRef = useRef<MapRef>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   // One side panel at a time: opening an alert closes the layers panel.
+  const [sensorId, setSensorId] = useState<string | null>(null)
   useEffect(() => {
-    if (selectedId != null) setPanelOpen(false)
+    if (selectedId != null) {
+      setPanelOpen(false)
+      setSensorId(null)
+    }
   }, [selectedId])
-  const { on: lowData } = useLowData()
+  const { on: lowDataOn } = useLowData()
+  const { fireNode, online } = useTier()
+  // Offline there are no map tiles or feeds, so the map runs lean exactly as in low data mode.
+  const lowData = lowDataOn || !online
   const [layersWanted, setLayers] = useState<Record<LayerKey, boolean>>({
     power_lines: true,
     static_sources: true,
@@ -205,12 +215,16 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
     dry_grid: false,
     wind_lines: false,
     mesh: true,
+    sensors: true,
     fire_forecast: true,
     board: true,
     burns: true,
   })
   // Low data mode switches the heavy layers off without forgetting what the person picked.
-  const layers = lowData ? { ...layersWanted, ...HEAVY_OFF } : layersWanted
+  const layers = {
+    ...(lowData ? { ...layersWanted, ...HEAVY_OFF } : layersWanted),
+    ...(fireNode ? {} : { sensors: false, mesh: false }), // FireNode is the paid tier
+  }
   const [liveWanted, setLiveOn] = useState<Record<FeedKey, boolean>>(() => Object.fromEntries(FEEDS.map((f) => [f.key, false])) as Record<FeedKey, boolean>)
   const liveOn = lowData ? (Object.fromEntries(FEEDS.map((f) => [f.key, false])) as Record<FeedKey, boolean>) : liveWanted
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, retry: false })
@@ -238,7 +252,11 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [burnsQ.data],
   )
-  const placed = (meshNodes.data ?? []).filter((n) => n.lat != null && n.lon != null)
+  const sensorNet = useQuery({ queryKey: ['sensors'], queryFn: api.sensors, refetchInterval: lowData ? 120_000 : 30_000 })
+  const fieldIds = useMemo(() => new Set((sensorNet.data?.nodes ?? []).map((n) => n.node_id)), [sensorNet.data])
+  const fieldNodes = sensorNet.data?.nodes.length ?? 0
+  // Field sensors, relays, and the bridge draw on their own layer; this one is the radios people carry.
+  const placed = (meshNodes.data ?? []).filter((n) => n.lat != null && n.lon != null && !fieldIds.has(n.node_id))
   const district = useQuery({ queryKey: ['district'], queryFn: api.district, retry: false })
   const lines = useQuery({ queryKey: ['layer', 'power_lines'], queryFn: () => api.layer('power_lines') })
   const statics = useQuery({ queryKey: ['layer', 'static_sources'], queryFn: () => api.layer('static_sources') })
@@ -271,6 +289,14 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
         : null,
     [selected],
   )
+
+  const pickSensor = (id: string) => {
+    setSensorId(id)
+    setPanelOpen(false)
+    const n = sensorNet.data?.nodes.find((m) => m.node_id === id)
+    const map = mapRef.current
+    if (n && map && map.getZoom() < 12.5) map.flyTo({ center: [n.lon, n.lat], zoom: 15.5, duration: 900 })
+  }
 
   const rank = (a: AlertSummary) => ['monitor', 'investigate', 'escalate'].indexOf(a.recommendation) * 1000 + (a.score ?? 100)
   const ordered = [...alerts].sort((a, b) => (a.id === selectedId ? 1 : b.id === selectedId ? -1 : rank(a) - rank(b)))
@@ -395,6 +421,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
         })}
         {layers.fire_forecast && fire && selected && <FireForecastLayer fire={fire} aheadMin={aheadMin} lat={selected.lat} lon={selected.lon} />}
         <LiveLayers feeds={feeds} />
+        {layers.sensors && sensorNet.data && fieldNodes > 0 && <SensorLayer net={sensorNet.data} selectedId={sensorId} onPick={pickSensor} />}
         {layers.mesh && placed.map((n) => <MeshMarker key={n.node_id} n={n} />)}
         {layers.burns && burns.length > 0 && (
           <Source id="burn-circles" type="geojson" data={burnCircles}>
@@ -407,9 +434,19 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
       </Map>
 
       {lowData && (
-        <div className="hud num pointer-events-none absolute top-4 left-4 px-2 py-1 text-[10.5px] text-degraded">Low data: map pictures are off</div>
+        <div className="hud num pointer-events-none absolute top-4 left-4 px-2 py-1 text-[10.5px] text-degraded">
+          {online ? 'Low data: map pictures are off' : 'Internet down: no map tiles or satellite feeds'}
+        </div>
       )}
       <div className="pointer-events-none absolute inset-3 brackets" style={{ ['--b' as string]: '#3a414b' }} />
+      {layers.sensors && sensorNet.data && fieldNodes > 0 && (
+        <div className={`absolute left-4 ${lowData ? 'top-12' : 'top-4'}`}>
+          <SensorHealthChip net={sensorNet.data} onPick={pickSensor} />
+        </div>
+      )}
+      {layers.sensors && sensorId && (
+        <SensorPanel id={sensorId} onClose={() => setSensorId(null)} />
+      )}
       {layers.fire_forecast && selectedId != null && (
         <ForecastSlider fire={fire} aheadMin={aheadMin} setAheadMin={setAheadMin} loading={fireForecast.isFetching} />
       )}
@@ -435,10 +472,11 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
                   ['distribution_lines', 'Distribution (partial)'],
                   ['dry_grid', 'Dry air grid'],
                   ['wind_lines', 'Lines under wind'],
-                  ['fire_forecast', 'Fire forecast (selected alert)'],
+                  ['fire_forecast', 'FireCast spread (selected alert)'],
                   ...(burns.length > 0 ? ([['burns', `Burns today (${burns.length})`]] as const) : []),
                   ...(pins.length > 0 ? ([['board', `Community posts (${pins.length})`]] as const) : []),
-                  ...(placed.length > 0 ? ([['mesh', `Mesh radios (${placed.length})`]] as const) : []),
+                  ...(fireNode && fieldNodes > 0 ? ([['sensors', `FireSense + FireMesh (${fieldNodes})`]] as const) : []),
+                  ...(fireNode && placed.length > 0 ? ([['mesh', `FireMesh radios (${placed.length})`]] as const) : []),
                 ] as const
               ).map(([k, label]) => (
                 <label key={k} className="flex cursor-pointer items-center gap-2.5 text-[11.5px] text-muted hover:text-text">
@@ -450,7 +488,11 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
                 </label>
               ))}
             </div>
-            {lowData && <p className="border-t border-line px-3 pt-3 text-[11px] text-degraded">Low data is on, so live data and extra layers are off.</p>}
+            {lowData && (
+              <p className="border-t border-line px-3 pt-3 text-[11px] text-degraded">
+                {online ? 'Low data is on, so live data and extra layers are off.' : 'The internet is down, so live data and extra layers are off.'}
+              </p>
+            )}
             <div className={lowData ? 'pointer-events-none opacity-40' : ''} aria-disabled={lowData}>
               <LiveToggles feeds={feeds} on={liveOn} setOn={(k, v) => setLiveOn((o) => ({ ...o, [k]: v }))} keyConfigured={keyConfigured} />
             </div>

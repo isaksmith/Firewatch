@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api, type ActionName, type AlertDetail, type Message } from '../api'
 import { REC_META, centralTime, compass, kmhToMph, latLon, pad3, seenLabel, trackId } from '../lib/format'
 import { useOperator } from '../lib/operator'
+import { useTier } from '../lib/tier'
 import { DecisionPanel } from './DecisionPanel'
 import { EvidenceGlyph, KV, RecTag, ScoreReadout, SectionHeader, StatusTag } from './ui'
 
@@ -135,7 +136,7 @@ function DrawerBody({ a }: { a: AlertDetail }) {
         {a.messages.length > 0 && <TextsSection messages={a.messages} />}
 
         {a.reasons.length > 0 && (
-          <Section title="Why this score" right={<span className="num text-[10px] text-dim">TREND {a.score_trend.join(' → ')}</span>}>
+          <Section title="FireCast score" right={<span className="num text-[10px] text-dim">TREND {a.score_trend.join(' → ')}</span>}>
             <ul className="space-y-2">
               {a.reasons.slice(0, 6).map((r) => (
                 <li key={r.feature} className="grid grid-cols-[36px_1fr_72px] items-center gap-3">
@@ -280,6 +281,7 @@ const recipient = (m: Message) => m.contact_name ?? (m.purpose === 'channel_upda
 
 function ResponseSection({ a }: { a: AlertDetail }) {
   const r = a.response!
+  const { fireNode } = useTier()
   const t = (iso: string | null | undefined) => (iso ? centralTime(iso) : '—')
   return (
     <Section title="Response" right={<span className="num text-[10px] text-dim">{r.texts_sent} TEXTS OUT</span>}>
@@ -325,10 +327,10 @@ function ResponseSection({ a }: { a: AlertDetail }) {
           )}
         </div>
       )}
-      {r.crew.length > 0 && (
+      {fireNode && r.crew.length > 0 && (
         <div className="mt-3 border border-line bg-void px-3 py-2 text-[11.5px]">
           <div className="flex justify-between">
-            <span className="label">Crew on the mesh</span>
+            <span className="label">Crew on FireMesh</span>
             <span className="num text-[10px] text-dim">LIVE GPS</span>
           </div>
           <ul className="mt-2 space-y-1">
@@ -408,7 +410,7 @@ function TextsSection({ messages }: { messages: Message[] }) {
   const groups = groupMessages(messages)
   const anyMesh = messages.some((m) => m.channel === 'mesh')
   return (
-    <Section title="Texts" right={<span className="num text-[10px] text-dim">{anyMesh ? 'SMS + MESH' : 'SMS'} · 160 CHAR</span>}>
+    <Section title="Texts" right={<span className="num text-[10px] text-dim">{anyMesh ? 'SMS + FIREMESH' : 'SMS'} · 160 CHAR</span>}>
       <ol className="space-y-2.5">
         {groups.map(({ m, n, names }) => {
           const inbound = m.direction === 'in'

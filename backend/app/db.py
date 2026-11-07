@@ -175,6 +175,21 @@ CREATE TABLE IF NOT EXISTS sensor_readings (   -- telemetry from mesh sensor nod
 );
 CREATE INDEX IF NOT EXISTS idx_sensor_node_time ON sensor_readings(node_id, at);
 
+CREATE TABLE IF NOT EXISTS sensor_nodes (    -- surveyed field hardware: sensor nodes, relays, the station bridge
+  node_id       TEXT PRIMARY KEY,            -- the radio's mesh id, same as mesh_nodes
+  kind          TEXT NOT NULL,               -- sensor | relay | bridge
+  tier          TEXT,                        -- bare | rich (sensors only)
+  site          INTEGER,                     -- region planner plot number
+  label         TEXT NOT NULL,
+  lat           REAL NOT NULL,
+  lon           REAL NOT NULL,
+  via           TEXT,                        -- node_id its packets reach the station through
+  installed_at  TEXT NOT NULL,
+  baseline_json TEXT,                        -- readings logged at commissioning (gas resistance)
+  simulated     INTEGER NOT NULL DEFAULT 0,
+  sim_json      TEXT                         -- simulator state: charge, injected faults
+);
+
 CREATE TABLE IF NOT EXISTS burn_notices (
   id          INTEGER PRIMARY KEY,
   contact_id  INTEGER REFERENCES contacts(id),   -- NULL for a burn the dispatcher logged by phone (see caller)
@@ -237,6 +252,8 @@ MIGRATIONS = {
     "messages": {"channel": "TEXT NOT NULL DEFAULT 'sms'", "post_id": "INTEGER"},
     "burn_notices": {"start_at": "TEXT", "end_at": "TEXT", "caller": "TEXT", "label": "TEXT"},
     "posts": {"client_key": "TEXT", "queued_min": "INTEGER"},
+    "sensor_readings": {"gas_kohm": "REAL", "pressure_hpa": "REAL", "pack_v": "REAL", "pack_ma": "REAL",
+                        "solar_v": "REAL", "solar_ma": "REAL", "env_seq": "INTEGER", "pm_seq": "INTEGER"},
 }
 POST_MIGRATION = """
 CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_mesh ON contacts(mesh_id);

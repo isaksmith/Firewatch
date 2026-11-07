@@ -1,4 +1,4 @@
-"""Mesh sensor nodes: temperature, humidity, and particulate (docs/DESIGN.md section 5.8).
+"""Mesh sensor nodes: temperature, humidity, gas resistance, particulate, and power (docs/DESIGN.md section 5.8).
 
 Tower relays carry a PMSA003I particulate sensor and a temperature and humidity sensor, and Meshtastic sends
 their readings as telemetry. A smoke signal needs all three of:
@@ -41,23 +41,55 @@ def _settings() -> dict:
         return dict(DEFAULTS)
 
 
-def record(conn: sqlite3.Connection, nid: str, telemetry: dict, weather: dict | None = None) -> int | None:
-    """Store one telemetry packet's readings; returns the event id if it raised a smoke signal."""
+def store(conn: sqlite3.Connection, nid: str, telemetry: dict, at: datetime) -> tuple[float | None, float | None] | None:
+    """Store one telemetry packet's readings at `at`; returns (pm25, pm10), or None if it carried no readings.
+
+    Power readings come from Meshtastic power telemetry: channel 1 is the battery pack, channel 2 the solar panel.
+    The sample counters go up by one each time the firmware reads that sensor successfully.
+    """
     env = telemetry.get("environmentMetrics") or {}
     aq = telemetry.get("airQualityMetrics") or {}
+    pw = telemetry.get("powerMetrics") or {}
+    fw = telemetry.get("firewatchMetrics") or {}  # FireWatch firmware: per-sensor sample counters
     temp, rh = env.get("temperature"), env.get("relativeHumidity")
+    gas = env.get("gasResistance")  # MΩ in Meshtastic
     pm25 = aq.get("pm25Environmental", aq.get("pm25Standard"))
     pm10 = aq.get("pm100Environmental", aq.get("pm100Standard"))
-    if temp is None and rh is None and pm25 is None:
+    row = {
+        "temp_c": temp, "rh_pct": rh, "pm25": pm25, "pm10": pm10,
+        "gas_kohm": gas * 1000 if gas is not None else None, "pressure_hpa": env.get("barometricPressure"),
+        "pack_v": pw.get("ch1Voltage"), "pack_ma": pw.get("ch1Current"),
+        "solar_v": pw.get("ch2Voltage"), "solar_ma": pw.get("ch2Current"),
+        "env_seq": fw.get("envSeq"), "pm_seq": fw.get("pmSeq"),
+    }
+    if all(v is None for v in row.values()):
         return None
-    at = utcnow()
     conn.execute(
-        "INSERT INTO sensor_readings(node_id, at, temp_c, rh_pct, pm25, pm10) VALUES (?, ?, ?, ?, ?, ?)",
-        (nid, iso(at), temp, rh, pm25, pm10),
+        f"INSERT INTO sensor_readings(node_id, at, {', '.join(row)}) VALUES (?, ?, {', '.join('?' * len(row))})",
+        (nid, iso(at), *row.values()),
     )
-    if pm25 is None:
+    return pm25, pm10
+
+
+def record(conn: sqlite3.Connection, nid: str, telemetry: dict, weather: dict | None = None) -> int | None:
+    """Store one telemetry packet's readings; returns the event id if it raised a smoke signal."""
+    at = utcnow()
+    pm_seq = (telemetry.get("firewatchMetrics") or {}).get("pmSeq")
+    prev = conn.execute(
+        "SELECT pm_seq FROM sensor_readings WHERE node_id = ? AND pm_seq IS NOT NULL ORDER BY id DESC LIMIT 1", (nid,)
+    ).fetchone() if pm_seq is not None else None
+    stored = store(conn, nid, telemetry, at)
+    if stored is None or stored[0] is None:
         return None
+    if prev and prev["pm_seq"] == pm_seq:
+        return None  # a resent sample from a stalled sensor is not new evidence
+    pm25, pm10 = stored
     return check_smoke(conn, nid, float(pm25), float(pm10) if pm10 is not None else None, at, weather)
+
+
+def simulated(conn, nid: str) -> bool:
+    r = conn.execute("SELECT simulated FROM sensor_nodes WHERE node_id = ?", (nid,)).fetchone()
+    return bool(r and r["simulated"])
 
 
 def baseline(conn, nid: str, at: datetime) -> float:
@@ -72,11 +104,14 @@ def baseline(conn, nid: str, at: datetime) -> float:
 def _distant_rises(conn, nid: str, at: datetime) -> list[float]:
     """PM2.5 rise at each sensor far enough away that it can't be smelling the same fire."""
     me = conn.execute("SELECT lat, lon FROM mesh_nodes WHERE node_id = ?", (nid,)).fetchone()
+    # Simulated sensors are only compared with each other, never with real ones.
     rows = conn.execute(
         "SELECT r.node_id, r.pm25, n.lat, n.lon FROM sensor_readings r JOIN mesh_nodes n ON n.node_id = r.node_id "
+        "LEFT JOIN sensor_nodes s ON s.node_id = r.node_id "
         "WHERE r.node_id != ? AND r.pm25 IS NOT NULL AND r.at >= ? AND n.lat IS NOT NULL "
+        "AND COALESCE(s.simulated, 0) = ? "
         "AND r.id = (SELECT MAX(id) FROM sensor_readings WHERE node_id = r.node_id AND pm25 IS NOT NULL)",
-        (nid, iso(at - FRESH)),
+        (nid, iso(at - FRESH), int(simulated(conn, nid))),
     ).fetchall()
     return [
         r["pm25"] - baseline(conn, r["node_id"], at) for r in rows
@@ -123,7 +158,7 @@ def check_smoke(conn, nid: str, pm25: float, pm10: float | None, at: datetime, w
     replay_now = scenario.running_now()
     eid = add_signal(
         conn, "sensor_smoke", node["lat"], node["lon"], iso(replay_now or at), f"mesh:{nid}", why,
-        is_sample=replay_now is not None or get_settings().mode == "sample",
+        is_sample=replay_now is not None or get_settings().mode == "sample" or simulated(conn, nid),
     )
     evaluate_event(conn, eid, weather, replay_now or at)
     return eid
@@ -142,7 +177,10 @@ def local_weather(conn, lat: float, lon: float, weather: dict) -> dict:
     """The forecast with temperature and humidity from the nearest fresh sensor within 15 km, if there is one."""
     now = utcnow()
     best = None
-    for n in conn.execute("SELECT node_id, lat, lon FROM mesh_nodes WHERE lat IS NOT NULL"):
+    for n in conn.execute(
+        "SELECT n.node_id, n.lat, n.lon FROM mesh_nodes n LEFT JOIN sensor_nodes s ON s.node_id = n.node_id "
+        "WHERE n.lat IS NOT NULL AND COALESCE(s.simulated, 0) = 0"
+    ):
         km = haversine_km(lat, lon, n["lat"], n["lon"])
         if km <= LOCAL_WEATHER_KM and (env := latest_env(conn, n["node_id"], now)) and (best is None or km < best[0]):
             best = (km, n["node_id"], env)
@@ -154,7 +192,7 @@ def local_weather(conn, lat: float, lon: float, weather: dict) -> dict:
 
 def latest_readings(conn, nid: str) -> dict:
     out = {}
-    for col in ("temp_c", "rh_pct", "pm25", "pm10"):
+    for col in ("temp_c", "rh_pct", "pm25", "pm10", "gas_kohm", "pressure_hpa", "pack_v", "pack_ma", "solar_v", "solar_ma"):
         r = conn.execute(
             f"SELECT {col} v, at FROM sensor_readings WHERE node_id = ? AND {col} IS NOT NULL ORDER BY id DESC LIMIT 1",
             (nid,),
