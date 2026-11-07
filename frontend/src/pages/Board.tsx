@@ -90,7 +90,7 @@ function NewPost({ onPosted }: { onPosted: () => void }) {
       if (r.known) text = 'This one is already known and being watched.'
       else if (r.flagged && r.asked > 0) text = 'Posted. Neighbors nearby are being asked.'
       else if (r.flagged) text = 'Posted.'
-      else if (r.event_id != null) text = 'Report received. The duty officer is being told.'
+      else if (r.alerted) text = 'Report received. The duty officer is being told.'
       else if (category === 'burn') text = 'Posted. To register a burn, text BURN.'
       else text = 'Posted to the board.'
       if (r.used_home) text += ' We could not get your location, so we used your home address on file.'

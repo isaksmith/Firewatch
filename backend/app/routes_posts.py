@@ -195,7 +195,7 @@ def create_post(body: NewPost, request: Request, x_firewatch_device: str = Heade
                          channel="web", at=(body.lat, body.lon) if body.lat is not None and body.attach_location else None,
                          estimated=body.estimated or used_home, use_home=body.attach_location)
     return {"post_id": r["post_id"], "flagged": r["flagged"], "asked": r["asked"], "known": r.get("known", False),
-            "used_home": used_home}
+            "used_home": used_home, "alerted": r["event_id"] is not None}
 
 
 @public_router.post("/board/posts/{post_id}/confirm")

@@ -222,10 +222,13 @@ def clock_now(slug: str | None, t_min: int | None = None) -> datetime | None:
 
 
 def running_now() -> datetime | None:
-    """The running replay's clock, for replies from real radios while it plays. Falls back to the shared row
-    when another process runs the replay."""
+    """The running replay's clock, for replies from real radios while it plays. In sample mode only, falls back to
+    the shared row when another process runs the replay: in live mode a real public report must never turn into a
+    sample, which would keep it from reaching real people."""
     if _clock.get("running"):
         return clock_now(_clock.get("slug"))
+    if get_settings().mode != "sample":
+        return None
     with connect() as conn:
         row = conn.execute("SELECT * FROM replay_clock WHERE id = 1").fetchone()
     if not row or not row["running"] or row["t_min"] is None:

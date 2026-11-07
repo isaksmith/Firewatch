@@ -132,6 +132,8 @@ async def lifespan(app: FastAPI):
     if s.mesh_gateway != "off":
         _tasks.append(asyncio.create_task(_mesh_loop()))
     yield
+    with connect() as conn:
+        conn.execute("UPDATE replay_clock SET running = 0")
     for t in _tasks:
         t.cancel()
     _tasks.clear()
@@ -566,20 +568,20 @@ def health():
     }
 
 
-@api.post("/ingest/run", dependencies=[Depends(require_token)])
+@api.post("/ingest/run", dependencies=[Depends(require_admin)])
 async def ingest_run():
     if get_settings().mode == "sample":
         raise HTTPException(400, "ingest is disabled in sample mode; use /api/sample/replay")
     return await asyncio.to_thread(poll_firms_once)
 
 
-@api.post("/sample/replay", dependencies=[Depends(require_token)])
+@api.post("/sample/replay", dependencies=[Depends(require_admin)])
 async def sample_replay(duration_s: float = Query(60, ge=5, le=600)):
     sample.start_replay(duration_s)
     return {"status": "started", "duration_s": duration_s, "fixtures": len(sample.load_fixtures())}
 
 
-@api.post("/sample/load", dependencies=[Depends(require_token)])
+@api.post("/sample/load", dependencies=[Depends(require_admin)])
 async def sample_load():
     n = await asyncio.to_thread(sample.load_all_now)
     return {"status": "loaded", "fixtures": n}
@@ -772,7 +774,7 @@ def get_scenario(slug: str):
         raise HTTPException(404, "unknown scenario") from None
 
 
-@api.post("/scenario/{slug}/run", dependencies=[Depends(require_token)])
+@api.post("/scenario/{slug}/run", dependencies=[Depends(require_admin)])
 async def run_scenario(slug: str, seconds_per_minute: float | None = Query(None, ge=0.05, le=60)):
     """Replay the scenario on a scaled clock (default 2 s per scenario minute)."""
     try:
@@ -782,7 +784,7 @@ async def run_scenario(slug: str, seconds_per_minute: float | None = Query(None,
     return {"status": "started", "slug": slug}
 
 
-@api.post("/scenario/{slug}/load", dependencies=[Depends(require_token)])
+@api.post("/scenario/{slug}/load", dependencies=[Depends(require_admin)])
 async def load_scenario_now(slug: str):
     """Run the whole scenario instantly (no animation)."""
     try:

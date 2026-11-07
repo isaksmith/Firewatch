@@ -366,3 +366,64 @@ def test_static_serving(pub, tmp_path, monkeypatch):
     assert pub.get("/assets/../../secret").status_code == 404
     assert pub.get("/assets/%2e%2e/%2e%2e/secret").status_code == 404
     assert pub.get("/index.html").status_code == 404
+
+
+REPLAY_ROUTES = [r for r in TOKEN_ROUTES if r[1] not in ("/api/contacts", "/api/sms/inbound")]
+
+
+@pytest.fixture
+def live_no_token(monkeypatch):
+    monkeypatch.setenv("MODE", "live")
+    monkeypatch.setenv("API_TOKEN", "")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("method,path", REPLAY_ROUTES)
+def test_replay_routes_fail_closed_live_with_blank_token(live_no_token, method, path):
+    assert TestClient(app).request(method, path).status_code == 503
+
+
+def _shared_row_running():
+    scenario._clock.clear()
+    with connect() as conn:
+        conn.execute("INSERT INTO replay_clock(id, slug, t_min, running, updated_at) VALUES (1,?,?,1,?) "
+                     "ON CONFLICT(id) DO UPDATE SET slug = excluded.slug, t_min = excluded.t_min, running = 1, "
+                     "updated_at = excluded.updated_at", (SLUG, 5, iso(utcnow())))
+
+
+def test_live_mode_ignores_another_process_replay_clock(live_no_token):
+    _shared_row_running()
+    assert scenario.running_now() is None
+
+
+def test_real_public_post_stays_real_during_a_replay(live_no_token):
+    from app import public_app
+    _shared_row_running()
+    c = TestClient(public_app.app, client=("127.0.0.1", 50000))
+    token = c.post("/api/board/device").json()["token"]
+    r = c.post("/api/board/posts", json={"category": "fire", "body": "smoke over the ridge", "lat": 37.7, "lon": -96.6},
+               headers={"X-Firewatch-Device": token})
+    assert r.status_code == 200
+    with connect() as conn:
+        assert conn.execute("SELECT is_sample FROM posts WHERE id = ?", (r.json()["post_id"],)).fetchone()["is_sample"] == 0
+
+
+def test_shutdown_clears_the_shared_clock():
+    with TestClient(app):
+        _shared_row_running()
+    with connect() as conn:
+        assert conn.execute("SELECT running FROM replay_clock WHERE id = 1").fetchone()["running"] == 0
+
+
+def test_create_says_alerted_without_an_event_id():
+    from app import public_app
+    c = TestClient(public_app.app, client=("127.0.0.1", 50000))
+    body = {"category": "fire", "body": "smoke", "lat": 37.7, "lon": -96.6}
+    anon = c.post("/api/board/device").json()["token"]
+    r = c.post("/api/board/posts", json=body, headers=hd(anon)).json()
+    assert r["alerted"] is False and "event_id" not in r
+    m = member("Wes")
+    r = c.post("/api/board/posts", json=body, headers=hd(m)).json()
+    assert r["alerted"] is True and "event_id" not in r

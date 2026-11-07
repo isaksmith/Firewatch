@@ -547,6 +547,7 @@ export interface PostResult {
   asked: number
   known: boolean
   used_home: boolean
+  alerted: boolean
 }
 
 export interface ConfirmResult {
