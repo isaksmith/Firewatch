@@ -320,7 +320,7 @@ const SYSTEM = {
     marks: [
       { t: 0, clock: '1:50', text: 'A line falls on a lease 11 mi NW of the station. Nobody within 4 mi.' },
       { t: 27, clock: '2:17', text: 'A propane driver sees smoke. No signal.' },
-      { t: 31, clock: '2:21', text: 'He reaches 911.' },
+      { t: 31, clock: '2:21', text: 'The driver reaches 911.' },
       { t: 33, clock: '2:23', text: 'The district is paged.' },
       { t: 44, clock: '2:34', text: 'Brush 1 rolls with 2 volunteers. The chief is 30 mi away at work.' },
       { t: 62, clock: '2:52', text: 'On scene. The head is 2 to 3 mi downwind.' }
@@ -512,13 +512,13 @@ const SYSTEM = {
     {
       clock: '1:52 PM', tplus: 'T+2', tags: ['sim', 'assumed'], tone: 'escalate', level: 'escalate',
       title: 'A person decides',
-      say: 'Lt. Reyes replies PAGE. Firewatch never pages on its own. If she stays silent, the chief gets the same text at 3 minutes and county dispatch at 9.',
+      say: 'Lt. Reyes replies PAGE. Firewatch never pages on its own. If nobody answers, the chief gets the same text at 3 minutes and county dispatch at 9.',
       msgs: [
         { dir: 'in', who: 'Lt. Ana Reyes, duty officer', at: 'T+2', body: 'PAGE' },
         { dir: 'out', who: 'If silent: Chief Dan Moser', at: 'T+3', body: 'FIREWATCH FIRE 7 mi S of Rosalia: Line fault on a Red Flag day. No answer from duty officer. Reply PAGE to page, NO to stand down.' },
         { dir: 'out', who: 'If still silent: county dispatch', at: 'T+9', body: 'FIREWATCH: no answer from duty or chief. Likely fire 7 mi S of Rosalia: Line fault on a Red Flag day. Calling you now.' }
       ],
-      note: 'Her reply at minute 2 is our assumption. The chief and dispatch times are measured in the replay.',
+      note: 'The reply at minute 2 is our assumption. The chief and dispatch times are measured in the replay.',
       src: 'walk', nodes: ['ladder', 'page'], edges: ['ladder-page'],
       today: 'Nobody knows. 25 minutes until the driver sees smoke.'
     },
@@ -538,7 +538,7 @@ const SYSTEM = {
     {
       clock: '1:55 PM', tplus: 'T+5', tags: ['sim', 'assumed'], tone: 'escalate', level: 'escalate',
       title: 'Mutual aid before anyone sees smoke',
-      say: 'The forecast is past what 2 trucks can hold, so the chief got a draft in the same minute as the page. He replies SEND. Stations in reach get a heads-up.',
+      say: 'The forecast is past what 2 trucks can hold, so the chief got a draft in the same minute as the page. The chief replies SEND. Stations in reach get a heads-up.',
       msgs: [
         { dir: 'out', who: 'Chief Dan Moser', at: 'T+2', body: 'FIREWATCH mutual aid: ~1420 ac in 1 hr, over the 371 ac 2 trucks can hold. Reply SEND to request neighboring district.' },
         { dir: 'in', who: 'Chief Dan Moser', at: 'T+5', body: 'SEND' },
@@ -553,7 +553,7 @@ const SYSTEM = {
       title: "Today's first alarm becomes confirmation",
       say: "The driver's smoke and the satellite pass both land on the same event, which now scores 98. The same pass sees Gary's burn. It stays at Investigate: one quiet FYI, no request to page.",
       msgs: [{ dir: 'out', who: 'Lt. Ana Reyes, duty officer', at: 'T+38', body: "FIREWATCH check: Gary Pruitt's registered burn, no sign it…, 6 mi SE of Rosalia. Asked 6 neighbors. Reply PAGE to page, NO to stand down." }],
-      note: "The packet gives the driver no signal until 2:21, so his text lands nearer 2:21 than the replay's 2:17.",
+      note: "The packet gives the driver no signal until 2:21, so that text lands nearer 2:21 than the replay's 2:17.",
       src: 'walk', nodes: ['text', 'sat', 'score', 'event', 'burn', 'rule'], edges: ['text-event', 'sat-score', 'score-event', 'event-burn', 'burn-rule'],
       today: 'This is the first anyone hears of it: 2:17, then 911 at 2:21.'
     },
@@ -586,7 +586,7 @@ const SYSTEM = {
       msgs: [],
       note: 'Radios have only run against fakes. The station still needs its server, its radio, and internet for SMS and satellite data.',
       src: null, nodes: ['mesh', 'ring', 'rule', 'ladder'], edges: ['ring-rule', 'rule-ladder'],
-      today: 'One bar in the breaks. The driver drives until he finds one.'
+      today: 'One bar in the breaks. The driver keeps driving to find one.'
     }
   ],
 
@@ -598,7 +598,7 @@ const SYSTEM = {
     rows: [
       { name: 'Today', sub: 'The packet', tags: [], know: 27, page: 33, scene: 62, marks: [[27, 'l'], [31, 'r'], [33, 'r'], [44, 'r'], [62, 'l']],
         cells: ['27, driver sees smoke', 'None', '33, by 911', '62'], needs: 'Nothing. This is what happens now.' },
-      { name: 'Fault, she replies', sub: 'Red Flag day', tags: ['sim', 'assumed'], know: 0, page: 2, scene: 31, marks: [[0, 'r'], [2, 'r'], [31, 'r']],
+      { name: 'Fault, PAGE reply', sub: 'Red Flag day', tags: ['sim', 'assumed'], know: 0, page: 2, scene: 31, marks: [[0, 'r'], [2, 'r'], [31, 'r']],
         cells: ['0', '0', '2, by the duty officer', '31, estimate'], needs: 'A co-op feed, and Lt. Reyes replying PAGE.' },
       { name: 'Fault, nobody replies', sub: 'Red Flag day', tags: ['sim', 'assumed'], know: 0, page: 9, scene: 38, marks: [[0, 'r'], [3, 'r'], [9, 'r'], [38, 'r']],
         cells: ['0', '0', '9, dispatch texted', '38, estimate'], needs: 'A co-op feed, and dispatch toning out on that text.' },
@@ -610,7 +610,7 @@ const SYSTEM = {
       'First alert and Escalate are measured by replay on a scratch merge of michael eeb3517 and michael-board cb368e2. The fault rows use the ring-on ignition with Red Flag on, 4 mi or more from any contact. The page at 2 and the dispatch tone-out at 9 are assumptions.',
       'On scene is the page minute plus the packet\'s own 29 minutes from page to on scene. The replay code prints 2 minutes more, because its turnout setting is 13 minutes, not the packet\'s 11.',
       'Fire size at 38, forecast v2 on andrew at the Coldwater ignition: 329 ac against 954 ac at 62, head 2.11 mi against 3.63 mi. The packet says 2 to 3 mi, so treat these as model estimates.',
-      'With no Red Flag Warning the fault is one source: Investigate at 0, Escalate at 8 with Dale\'s assumed reply, 38 with none. The replay places the driver at minute 27, and the packet gives him no signal until 2:21.'
+      'With no Red Flag Warning the fault is one source: Investigate at 0, Escalate at 8 with Dale\'s assumed reply, 38 with none. The replay places the driver at minute 27, and the packet gives the driver no signal until 2:21.'
     ]
   },
 
@@ -676,7 +676,7 @@ const SYSTEM = {
       ['Burn map', 'Published burn notices answer: is that smoke expected? That is the reason to open the board on a day with no fire.'],
       ['What stops abuse', 'An upvote means I can see it. It captures position and counts only inside 15 miles. A stranger never counts as a full source, and nobody can vote a fire off the board.']
     ],
-    limit: 'The board does little for the 2:17 driver with no signal. His text goes out when he reaches a bar. About 30 to 40 members would cover the district, and the roster has 10 located neighbors today.'
+    limit: 'The board does little for the 2:17 driver with no signal. The text goes out when the driver reaches a bar. About 30 to 40 members would cover the district, and the roster has 10 located neighbors today.'
   },
 
   field: {
