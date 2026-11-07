@@ -72,7 +72,8 @@ RANGE_KM = {
     ("tower", "tower"): 25.0, ("mast", "tower"): 15.0, ("mast", "mast"): 10.0,
     ("ground", "tower"): 7.0, ("ground", "mast"): 5.0, ("ground", "ground"): 3.0,
 }
-RELAY_COST = {"town": 1.0, "substation": 1.1, "high_point": 1.4, "site_mast": 1.6}
+RELAY_COST = {"town": 1.0, "substation": 1.1, "high_point": 1.4, "site_mast": 1.6, "new_mast": 1.8}
+NEW_MAST_KM = 8.0  # fallback relay grid where there's no structure or high ground to use
 HOP_COST = 0.15
 HOP_LIMIT = 3  # Meshtastic default
 TERRAIN_ZOOM = 10  # ~150 m pixels: enough for 250 m line-of-sight steps, and a county is a few dozen tiles
@@ -561,6 +562,14 @@ def relay_candidates(g: Grid, region: Region, t: Terrain) -> list[dict]:
                         "mount": "mast", "power": "solar"})
             if len(taken) >= 25:
                 break
+    x0, y0 = (float(v) for v in g.plane.xy(w, s))
+    x1, y1 = (float(v) for v in g.plane.xy(e, n))
+    gx, gy = np.meshgrid(np.arange(x0 + NEW_MAST_KM / 2, x1, NEW_MAST_KM), np.arange(y0 + NEW_MAST_KM / 2, y1, NEW_MAST_KM))
+    glon, glat = g.plane.lonlat(gx.ravel(), gy.ravel())
+    for lon, lat in zip(glon[_inside(glon, glat, region.rings)], glat[_inside(glon, glat, region.rings)]):
+        where = place_label(float(lat), float(lon))[0].split(",")[0]
+        out.append({"kind": "new_mast", "name": f"New 10 m mast {where[0].lower()}{where[1:]}", "lon": float(lon),
+                    "lat": float(lat), "mount": "mast", "power": "solar"})
     seen, uniq = [], []
     for c in out:
         c["x"], c["y"] = (float(v) for v in g.plane.xy(c["lon"], c["lat"]))
@@ -608,37 +617,49 @@ def route_mesh(t: Terrain, station: dict, gateways: list[dict], cands: list[dict
     attach: dict[int, tuple[int, dict]] = {}
     pending = set(range(len(gateways)))
 
+    over_cap = HOP_LIMIT + 1  # every depth past the limit shares one state, which keeps the search finite
+
     def grow(limit: float) -> bool:
         # Search over (node, relays to station) so a cheap path can't hide a shorter one under the hop limit.
-        cost = {(t, d): 0.0 for t, d in depth.items()}
+        start = {(t, min(d, over_cap)): 0.0 for t, d in depth.items()}
+        cost = dict(start)
         prev: dict[tuple[int, int], tuple[tuple[int, int], dict]] = {}
-        heap = [(0.0, t, d) for t, d in depth.items()]
+        heap = [(0.0, t, d) for t, d in start]
         while heap:
             c, u, du = heapq.heappop(heap)
             if c > cost.get((u, du), math.inf):
                 continue
+            if du + 1 > limit:
+                continue
+            dv = min(du + 1, over_cap)
             for v, ln in adj[u]:
-                if v in depth or du + 1 > limit:
+                if v in depth:
                     continue
                 nc_ = c + RELAY_COST[nodes[v]["kind"]] + HOP_COST + ln["km"] * 1e-3
-                if nc_ < cost.get((v, du + 1), math.inf):
-                    cost[(v, du + 1)], prev[(v, du + 1)] = nc_, ((u, du), ln)
-                    heapq.heappush(heap, (nc_, v, du + 1))
+                if nc_ < cost.get((v, dv), math.inf):
+                    cost[(v, dv)], prev[(v, dv)] = nc_, ((u, du), ln)
+                    heapq.heappush(heap, (nc_, v, dv))
+        cheapest: dict[int, tuple[float, tuple[int, int]]] = {}
+        for (n_, d), c in cost.items():
+            if d <= limit and (n_ not in cheapest or c < cheapest[n_][0]):
+                cheapest[n_] = (c, (n_, d))
         best = None
         for gi in pending:
             for i, ln in gw_links[gi]:
-                for (n_, d), c in cost.items():
-                    if n_ == i and d <= limit and (best is None or c + ln["km"] * 1e-3 < best[0]):
-                        best = (c + ln["km"] * 1e-3, gi, (i, d), ln)
+                if i in cheapest and (best is None or cheapest[i][0] + ln["km"] * 1e-3 < best[0]):
+                    best = (cheapest[i][0] + ln["km"] * 1e-3, gi, cheapest[i][1], ln)
         if best is None:
             return False
         _, gi, state, ln = best
         attach[gi] = (state[0], ln)
+        path = []
         while state[0] not in depth:
             up, l2 = prev[state]
-            parent[state[0]] = (up[0], l2)
-            depth[state[0]] = state[1]
+            path.append((state[0], up[0], l2))
             state = up
+        for node, up, l2 in reversed(path):
+            parent[node] = (up, l2)
+            depth[node] = depth[up] + 1
         pending.discard(gi)
         return True
 
@@ -771,6 +792,9 @@ def plan_region(region: Region, overrides: dict | None = None, fetch_climate: bo
         n -= 1
         sites, curve, mesh, cost = build(n)
     p["sites"] = n
+    if p["budget_usd"] and cost * (1 + SPARES) > p["budget_usd"]:
+        warnings.append(f"${p['budget_usd']:,.0f} doesn't cover one plot with its relays, station bridge, and spares "
+                        f"(${cost * (1 + SPARES):,.0f}); showing one plot anyway.")
 
     region_fires = [f for f in _wildfires() if f["type"] == "WF"]
     site_out, node_feats = [], []

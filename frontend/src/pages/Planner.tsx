@@ -13,7 +13,17 @@ const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
 const pct = (x: number) => `${Math.round(x * 100)}%`
 const KM_PER_MI = 1.609344
 
-function useDebounced<T>(value: T, ms = 350): T {
+type FormKey = 'sites' | 'bare' | 'rich' | 'budget' | 'richKm' | 'bareKm'
+const LIMITS: Record<FormKey, { min: number; max: number; label: string }> = {
+  sites: { min: 1, max: 60, label: 'Plots' },
+  bare: { min: 0, max: 16, label: 'Bare per plot' },
+  rich: { min: 0, max: 16, label: 'Rich per plot' },
+  budget: { min: 500, max: 500000, label: 'Budget' },
+  richKm: { min: 0.5, max: 10, label: 'Rich smoke range' },
+  bareKm: { min: 0.1, max: 2, label: 'Bare gas fetch' },
+}
+
+function useDebounced<T>(value: T, ms = 400): T {
   const [v, setV] = useState(value)
   useEffect(() => {
     const t = setTimeout(() => setV(value), ms)
@@ -206,7 +216,17 @@ function NumField({ label, value, onChange, min, max, step = 1 }: { label: strin
   )
 }
 
-function PlanMap({ plan, selected, onSelect }: { plan: RegionPlan | undefined; selected: number | null; onSelect: (id: number) => void }) {
+function PlanMap({
+  plan,
+  selected,
+  onSelect,
+  busy,
+}: {
+  plan: RegionPlan | undefined
+  selected: number | null
+  onSelect: (id: number) => void
+  busy: string | null
+}) {
   const mapRef = useRef<MapRef>(null)
   const [ready, setReady] = useState(false)
   const lines = useQuery({ queryKey: ['layer', 'power_lines'], queryFn: () => api.layer('power_lines') })
@@ -351,6 +371,11 @@ function PlanMap({ plan, selected, onSelect }: { plan: RegionPlan | undefined; s
       </Map>
 
       <div className="pointer-events-none absolute inset-3 brackets" style={{ ['--b' as string]: '#3a414b' }} />
+      {busy && (
+        <div className="hud num absolute top-4 left-4 flex h-7 items-center gap-2 px-3 text-[10px] tracking-[0.12em] text-sample">
+          <span className="blink h-1.5 w-1.5 bg-sample" /> PLANNING {busy.toUpperCase()}…
+        </div>
+      )}
       <div className="hud absolute top-4 right-4 w-[210px] space-y-1.5 p-3 text-[11px] text-muted">
         <div className="label mb-1">Legend</div>
         <div className="flex items-center gap-2.5">
@@ -379,12 +404,18 @@ function PlanMap({ plan, selected, onSelect }: { plan: RegionPlan | undefined; s
 }
 
 export function Planner() {
-  const regions = useQuery({ queryKey: ['planner-regions'], queryFn: api.plannerRegions })
+  const regions = useQuery({ queryKey: ['planner-regions'], queryFn: api.plannerRegions, retry: true, retryDelay: 2000 })
   const [region, setRegion] = useState(DEFAULT_REGION)
   const [mode, setMode] = useState<'plots' | 'budget'>('plots')
   const [form, setForm] = useState({ sites: 10, bare: 7, rich: 2, budget: 20000, richKm: 3, bareKm: 0.4 })
   const [selected, setSelected] = useState<number | null>(null)
-  const params: PlanParams = useDebounced({
+  const problems = (Object.keys(LIMITS) as FormKey[])
+    .filter((k) => (k !== 'sites' || mode === 'plots') && (k !== 'budget' || mode === 'budget'))
+    .filter((k) => !(Number.isFinite(form[k]) && form[k] >= LIMITS[k].min && form[k] <= LIMITS[k].max))
+    .map((k) => `${LIMITS[k].label} must be ${LIMITS[k].min.toLocaleString()}–${LIMITS[k].max.toLocaleString()}`)
+  if (form.bare + form.rich < 1) problems.push('A plot needs at least one node')
+  const wanted = JSON.stringify({
+    region,
     sites: mode === 'plots' ? form.sites : undefined,
     budget_usd: mode === 'budget' ? form.budget : undefined,
     bare_per_site: form.bare,
@@ -392,21 +423,33 @@ export function Planner() {
     rich_range_km: form.richKm,
     bare_fetch_km: form.bareKm,
   })
+  // Only valid inputs reach the API, so a half-typed number can't replace the plan with an error.
+  const committed = useDebounced(problems.length ? null : wanted)
+  const [request, setRequest] = useState(wanted)
+  if (committed && committed !== request) setRequest(committed)
+  const { region: planRegion, ...params } = JSON.parse(request) as PlanParams & { region: string }
   const plan = useQuery({
-    queryKey: ['plan', region, params],
-    queryFn: () => api.plan(region, params),
+    queryKey: ['plan', request],
+    queryFn: () => api.plan(planRegion, params),
     placeholderData: keepPreviousData,
     staleTime: Infinity,
+    retry: false,
   })
   const p = plan.data
-  const set = (k: keyof typeof form) => (v: number) => setForm((f) => ({ ...f, [k]: v }))
+  const set = (k: FormKey) => (v: number) => setForm((f) => ({ ...f, [k]: v }))
+  const regionName = (key: string) =>
+    [...(regions.data?.districts ?? []), ...(regions.data?.counties ?? [])].find((r) => r.key === key)?.name ?? key
+  const outOfDate = !!p && (wanted !== request || plan.isFetching || plan.isError || problems.length > 0)
+  const plotCost = (form.bare * 175 + form.rich * 240) * 1.1
 
   return (
     <div className="flex h-full flex-col bg-bg">
       <TopBar />
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-[380px] shrink-0 flex-col overflow-y-auto border-r border-line bg-panel">
-          <SectionHeader right={plan.isFetching ? <span className="num text-[10px] text-sample">PLANNING…</span> : null}>Region planner</SectionHeader>
+          <SectionHeader right={problems.length === 0 && (plan.isFetching || wanted !== request) ? <span className="num text-[10px] text-sample">PLANNING…</span> : null}>
+            Region planner
+          </SectionHeader>
           <div className="space-y-3 border-b border-line px-4 py-3">
             <label className="flex flex-col gap-1">
               <span className="label !text-[9.5px]">Region</span>
@@ -418,6 +461,7 @@ export function Planner() {
                 }}
                 className="field w-full"
               >
+                {!regions.data && <option value={region}>{p?.region.name ?? 'Loading regions…'}</option>}
                 <optgroup label="Fire districts">
                   {regions.data?.districts.map((d) => (
                     <option key={d.key} value={d.key}>
@@ -460,10 +504,29 @@ export function Planner() {
             </p>
           </div>
 
-          {plan.isError && <div className="border-b border-line px-4 py-3 text-[12px] text-escalate">{(plan.error as Error).message}</div>}
+          {(problems.length > 0 || plan.isError || plan.isFetching || wanted !== request) && (
+            <div className="space-y-1 border-b border-line px-4 py-3 text-[11.5px] leading-snug">
+              {problems.map((m) => (
+                <div key={m} className="text-investigate">
+                  {m}. The plan updates when it's in range.
+                </div>
+              ))}
+              {plan.isError && !plan.isFetching && (
+                <div className="text-escalate">
+                  Couldn't plan {regionName(planRegion)}: {(plan.error as Error).message}
+                </div>
+              )}
+              {problems.length === 0 && (plan.isFetching || wanted !== request) && (
+                <div className="text-sample">
+                  Planning {regionName(JSON.parse(wanted).region)}… A county's first plan downloads its terrain and climate, which takes a few seconds.
+                </div>
+              )}
+              {outOfDate && <div className="text-dim">Below is the previous plan, for {p!.region.name}.</div>}
+            </div>
+          )}
 
           {p && (
-            <>
+            <div className={outOfDate ? 'opacity-50' : ''}>
               <SectionHeader right={<span className="num text-[10px] text-dim">{p.region.area_sq_mi.toLocaleString()} SQ MI</span>}>
                 {p.region.name}
               </SectionHeader>
@@ -477,6 +540,12 @@ export function Planner() {
                 <KV k="Priority watched" v={pct(p.summary.priority_covered)} accent="#3ddc97" />
                 <KV k="Max relays" v={p.summary.max_hops ?? '—'} />
               </div>
+              {p.params.budget_usd != null && (
+                <div className="border-b border-line px-4 py-2.5 text-[11.5px] leading-snug text-muted">
+                  {usd(p.bom.total)} of the {usd(p.params.budget_usd)} budget buys {p.summary.sites} plot{p.summary.sites === 1 ? '' : 's'}. Each plot
+                  adds about {usd(plotCost)} with spares, plus any relays it needs, so the plan changes in steps of roughly that much.
+                </div>
+              )}
               <div className="border-b border-line px-4 py-3">
                 <div className="label mb-1 !text-[9.5px]">Share of likely fire starts watched, by plots placed</div>
                 <CoverageCurve curve={p.summary.coverage_curve} chosen={p.summary.sites} />
@@ -565,10 +634,15 @@ export function Planner() {
                   <li key={a}>· {a}</li>
                 ))}
               </ul>
-            </>
+            </div>
           )}
         </aside>
-        <PlanMap plan={p} selected={selected} onSelect={(id) => setSelected(id)} />
+        <PlanMap
+          plan={p}
+          selected={selected}
+          onSelect={(id) => setSelected(id)}
+          busy={problems.length === 0 && (plan.isFetching || wanted !== request) ? regionName(JSON.parse(wanted).region) : null}
+        />
       </div>
     </div>
   )

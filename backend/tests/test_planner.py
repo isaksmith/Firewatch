@@ -124,6 +124,21 @@ def test_terrain_blocks_a_link():
     assert planner.link(flat, a, far) is None
 
 
+def test_routing_past_the_hop_limit_terminates():
+    flat = planner.Terrain(-10, -10, 0.5, np.full((40, 160), 400.0))
+    station = {"name": "Station", "x": 0.0, "y": 0.0, "mount": "mast", "lon": 0, "lat": 0}
+    masts = [
+        {"kind": "high_point", "name": f"Mast {k}", "x": 9.0 * k, "y": 0.0, "mount": "mast", "lon": 0, "lat": 0}
+        for k in range(1, 7)
+    ]
+    far = {"x": 9.0 * 6 + 4.0, "y": 0.0, "mount": "ground"}
+    near = {"x": 3.0, "y": 0.0, "mount": "ground"}
+    mesh = planner.route_mesh(flat, station, [near, far], masts)
+    assert mesh["unreached"] == []
+    assert mesh["over_hop_limit"] == [1]
+    assert mesh["hops"] == {0: 0, 1: 6}
+
+
 def test_planner_api():
     client = TestClient(app)
     regions = client.get("/api/planner/regions").json()

@@ -477,7 +477,10 @@ The tower relays carry sensors: a PMSA003I particulate sensor and an SHTC3 or BM
    - town elevators and water towers (30 m, mains power);
    - substations (30 m, mains);
    - terrain high points at least 5 m above their surroundings (10 m mast, solar);
-   - as a last resort, a 10 m mast at the plot itself.
+   - a 10 m mast at the plot itself;
+   - as a last resort, a new 10 m mast on an 8 km grid across the region, so sparse western counties with few towns can still be routed.
+
+   A plot whose own mast can't see any of these, usually one in a creek draw, is listed as unreached with a survey warning.
 
    Planning ranges come from `docs/research/hardware-pricing.txt`: tower to tower 25 km, tower to ground 7 km, mast to ground 5 km, ground to ground 3 km. Each link also needs line of sight over AWS terrain (about 150 m resolution), with 4/3-earth curvature and a Fresnel-zone margin that marks the link clear (60% or more) or marginal. A greedy Steiner tree connects the cheapest unconnected plot each round and pays only for new relays, within Meshtastic's default 3-hop limit. Plots aren't used as relays: the README says field nodes should prioritize sampling and power.
 8. **Power check.** Daily energy made (panel W × worst-week sun-hours × 0.6, the README's yield) is compared with need:
