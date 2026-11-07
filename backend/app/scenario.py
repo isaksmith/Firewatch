@@ -4,6 +4,7 @@ clock (docs/DESIGN.md section 10). Everything it writes is sample data."""
 import asyncio
 import json
 import logging
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import lru_cache
 
@@ -11,10 +12,10 @@ from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, iso, loads, parse_iso, utcnow
 from .redflag import replay_forecast_red_flag, replay_red_flag
-from .district import load_district, sync_roster
+from .district import load_district, overrides, sync_roster
 from .fire_weather import default_curing, gfdi, gfdi_band
 from .ngfs_signal import add_ngfs_signals
-from .notify import handle_inbound, tick
+from .notify import handle_inbound, hold_tick, tick
 from .pipeline import process_detections
 from .signals import add_signal
 from .sim.spread import growth
@@ -28,7 +29,20 @@ LIVE_REPLY_POLL_S = 0.5
 LIVE_ANSWERS = {"PAGE": ("PAGE", "NO")}  # the person may decide differently from the script
 
 _task: asyncio.Task | None = None
-_clock: dict = {}  # slug, t_min, running, waiting
+_clock: dict = {}  # slug, t_min, running, waiting (waiting stays in this process)
+STALE_CLOCK_S = 180
+
+
+def _set_clock(**kw) -> None:
+    """Every clock write goes through here so a second process sees it in the replay_clock row."""
+    _clock.update(kw)
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO replay_clock(id, slug, t_min, running, updated_at) VALUES (1,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET slug = excluded.slug, t_min = excluded.t_min, "
+            "running = excluded.running, updated_at = excluded.updated_at",
+            (_clock.get("slug"), _clock.get("t_min"), int(bool(_clock.get("running"))), iso(utcnow())),
+        )
 
 
 def load_scenario(slug: str) -> dict:
@@ -46,6 +60,14 @@ def list_scenarios() -> list[dict]:
     return out
 
 
+def _clear_posts(conn, where: str, args: tuple = ()) -> None:
+    sub = f"SELECT id FROM posts WHERE {where}"
+    conn.execute(f"DELETE FROM post_photos WHERE post_id IN ({sub})", args)
+    conn.execute(f"DELETE FROM post_confirms WHERE post_id IN ({sub})", args)
+    conn.execute(f"DELETE FROM post_asks WHERE post_id IN ({sub})", args)
+    conn.execute(f"DELETE FROM posts WHERE {where}", args)
+
+
 def clear() -> None:
     """Remove every scenario's events and all sample signals, messages, and burn notices, keeping sample fixtures.
     One replay lives in the database at a time: the packet replays share a place and a clock, so another
@@ -57,6 +79,7 @@ def clear() -> None:
             slugs,
         )]
         conn.executemany("DELETE FROM fw1_feed WHERE event_id = ?", [(i,) for i in ids])  # ids are reused; seq is not
+        _clear_posts(conn, "is_sample = 1")
         for table in ("scores", "actions", "detections", "signals", "messages"):
             conn.executemany(f"DELETE FROM {table} WHERE event_id = ?", [(i,) for i in ids])
         conn.executemany("DELETE FROM events WHERE id = ?", [(i,) for i in ids])
@@ -74,6 +97,10 @@ def _apply(conn, sc: dict, step: dict, now: datetime) -> None:
     elif kind == "detections":
         dets = [{**d, "acq_time": iso(now)} for d in step["detections"]]
         process_detections(conn, dets, is_sample=True, weather=sc["weather"], now=now)
+    elif kind == "post":
+        _post_step(conn, step, now)
+    elif kind == "confirm":
+        _confirm_step(conn, step, now)
     elif kind == "ngfs":
         # Each ngfs step is one scan of one tracked feature; the snapshot is every scan so far.
         pts = [
@@ -95,16 +122,40 @@ def _replay_red_flag(sc: dict) -> bool:
     return bool(sc.get("confirm_red_flag", sc.get("red_flag", False)))
 
 
+def _post_step(conn, step: dict, now: datetime) -> None:
+    """A free-text board post from a roster phone: {"type": "post", "from": phone, "body": text}."""
+    from . import posts
+    from .keywords import classify
+
+    contact = conn.execute("SELECT * FROM contacts WHERE phone = ?", (step["from"],)).fetchone()
+    c = classify(step["body"])
+    posts.create(conn, contact, step["from"], step["body"], c.category, c.hearsay, now, is_sample=True)
+
+
+def _confirm_step(conn, step: dict, now: datetime) -> None:
+    """A tap on the nth sample post: {"type": "confirm", "from": phone, "post": 1, "kind": "see"}."""
+    from . import posts
+
+    contact = conn.execute("SELECT * FROM contacts WHERE phone = ?", (step["from"],)).fetchone()
+    row = conn.execute("SELECT id FROM posts WHERE is_sample = 1 ORDER BY id LIMIT 1 OFFSET ?", (step.get("post", 1) - 1,)).fetchone()
+    if row and contact:
+        posts.confirm(conn, row["id"], contact, step.get("kind", "see"), now, is_sample=True)
+
+
 def _minute(conn, sc: dict, t: int, skip: tuple[dict, ...] = ()) -> None:
     t0 = parse_iso(sc["t0"])
     now = t0 + timedelta(minutes=t)
+    from . import posts
+
     token = replay_red_flag.set(_replay_red_flag(sc))
     forecast_token = replay_forecast_red_flag.set(bool(sc.get("red_flag", False)))
     try:
         for step in sc["timeline"]:
             if step["t"] == t and not any(step is s for s in skip):
                 _apply(conn, sc, step, now)
+        hold_tick(conn, now, is_sample=True)
         tick(conn, now, is_sample=True)
+        posts.tick(conn, now, is_sample=True)
     finally:
         replay_red_flag.reset(token)
         replay_forecast_red_flag.reset(forecast_token)
@@ -175,48 +226,57 @@ def _pre_steps(sc: dict) -> list[int]:
     return sorted({s["t"] for s in sc["timeline"] if s["t"] < 0})
 
 
+@contextmanager
+def _district_settings(sc: dict):
+    """Apply the scenario's optional `settings` block over the district's for the length of a run."""
+    with overrides(sc.get("settings")):
+        yield
+
+
 def run_now(slug: str, until: int | None = None) -> None:
     """Run the whole scenario synchronously (tests, and the instant 'load' button)."""
     sc = load_scenario(slug)
     clear()
     end = sc["duration_min"] if until is None else until
-    with connect() as conn:
+    with _district_settings(sc), connect() as conn:
         sync_roster(conn, sc["district"])
         for t in [*_pre_steps(sc), *range(end + 1)]:
             _minute(conn, sc, t)
-    _clock.update(slug=slug, t_min=end, running=False)
+    _set_clock(slug=slug, t_min=end, running=False)
 
 
 async def _replay(slug: str, seconds_per_minute: float) -> None:
     sc = load_scenario(slug)
     await asyncio.to_thread(clear)
+    # Entered here so every to_thread worker below copies a context that carries the overrides.
+    with _district_settings(sc):
 
-    def setup():
-        with connect() as conn:
-            sync_roster(conn, sc["district"])
-            for t in _pre_steps(sc):
-                _minute(conn, sc, t)
+        def setup():
+            with connect() as conn:
+                sync_roster(conn, sc["district"])
+                for t in _pre_steps(sc):
+                    _minute(conn, sc, t)
 
-    await asyncio.to_thread(setup)
-    _clock.update(slug=slug, t_min=-1, running=True)
-    _clock.pop("waiting", None)
-    try:
-        for t in range(sc["duration_min"] + 1):
-            def step(t=t):
-                with connect() as conn:
-                    live = _live_radio_steps(conn, sc, t)
-                    _minute(conn, sc, t, skip=tuple(s for s, _ in live))
-                    # a reply counts from the last alert sent to that person, which may be minutes before
-                    return [(s, c, _last_alert_id(conn, c["id"])) for s, c in live]
-
-            live = await asyncio.to_thread(step)
-            _clock["t_min"] = t
-            for s, contact, after_id in live:
-                await _await_live_reply(sc, t, s, contact, after_id)
-            await asyncio.sleep(seconds_per_minute)
-    finally:
-        _clock["running"] = False
+        _set_clock(slug=slug, t_min=-1, running=True)
         _clock.pop("waiting", None)
+        try:
+            await asyncio.to_thread(setup)
+            for t in range(sc["duration_min"] + 1):
+                def step(t=t):
+                    with connect() as conn:
+                        live = _live_radio_steps(conn, sc, t)
+                        _minute(conn, sc, t, skip=tuple(s for s, _ in live))
+                        # a reply counts from the last alert sent to that person, which may be minutes before
+                        return [(s, c, _last_alert_id(conn, c["id"])) for s, c in live]
+
+                live = await asyncio.to_thread(step)
+                _set_clock(t_min=t)
+                for s, contact, after_id in live:
+                    await _await_live_reply(sc, t, s, contact, after_id)
+                await asyncio.sleep(seconds_per_minute)
+        finally:
+            _set_clock(running=False)
+            _clock.pop("waiting", None)
     log.info("scenario %s finished", slug)
 
 
@@ -228,20 +288,36 @@ def start(slug: str, seconds_per_minute: float | None = None) -> None:
     _task = asyncio.create_task(_replay(slug, seconds_per_minute or get_settings().scenario_seconds_per_minute))
 
 
-def clock_now(slug: str | None) -> datetime | None:
+def clock_now(slug: str | None, t_min: int | None = None) -> datetime | None:
     """The scenario's current time, so console actions on its events land on its timeline."""
-    if not slug or _clock.get("slug") != slug or _clock.get("t_min") is None:
+    if t_min is None:
+        if not slug or _clock.get("slug") != slug:
+            return None
+        t_min = _clock.get("t_min")
+    if not slug or t_min is None:
         return None
     try:
         sc = load_scenario(slug)
     except KeyError:
         return None
-    return parse_iso(sc["t0"]) + timedelta(minutes=max(_clock["t_min"], 0))
+    return parse_iso(sc["t0"]) + timedelta(minutes=max(t_min, 0))
 
 
 def running_now() -> datetime | None:
-    """The running replay's clock, for replies from real radios while it plays."""
-    return clock_now(_clock.get("slug")) if _clock.get("running") else None
+    """The running replay's clock, for replies from real radios while it plays. In sample mode only, falls back to
+    the shared row when another process runs the replay: in live mode a real public report must never turn into a
+    sample, which would keep it from reaching real people."""
+    if _clock.get("running"):
+        return clock_now(_clock.get("slug"))
+    if get_settings().mode != "sample":
+        return None
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM replay_clock WHERE id = 1").fetchone()
+    if not row or not row["running"] or row["t_min"] is None:
+        return None
+    if (utcnow() - parse_iso(row["updated_at"])).total_seconds() > STALE_CLOCK_S:
+        return None
+    return clock_now(row["slug"], row["t_min"])
 
 
 @lru_cache(maxsize=4)
@@ -267,9 +343,9 @@ def status(slug: str) -> dict:
     def minutes(at: str | None) -> float | None:
         return None if at is None else round((parse_iso(at) - t0).total_seconds() / 60, 1)
 
-    cfg = load_district(sc["district"]).settings
+    cfg = {**load_district(sc["district"]).settings, **sc.get("settings", {})}
     turnout, drive = cfg.get("turnout_min", 13), cfg.get("drive_min", 18)
-    events, firewatch, escalated_seen = [], [], False
+    events, firewatch, fw_at, escalated_seen = [], [], None, False
     with connect() as conn:
         rows = conn.execute("SELECT * FROM events WHERE sample_slug = ? ORDER BY first_seen", (slug,)).fetchall()
         n_out = conn.execute(
@@ -286,9 +362,12 @@ def status(slug: str) -> dict:
                     "SELECT COUNT(*) n FROM messages WHERE event_id = ? AND direction = 'out'", (ev["id"],)
                 ).fetchone()["n"],
             })
-            # one timeline: the first event that got a text, unless a later one escalated
-            if state.get("investigate_at") and (not firewatch or (state.get("escalate_at") and not escalated_seen)):
-                escalated_seen = bool(state.get("escalate_at"))
+            # One timeline: the earliest event that got a text, unless a later one escalated. A registered burn
+            # is suppressed and never counts.
+            went, esc = state.get("investigate_at"), bool(state.get("escalate_at"))
+            better = fw_at is None or (esc and not escalated_seen) or (esc == escalated_seen and went is not None and went < fw_at)
+            if went and ev["suppression"] != "registered_burn" and better:
+                fw_at, escalated_seen = went, esc
                 page_t = minutes(state.get("page_at"))
                 firewatch = [
                     {"key": "signal", "t": minutes(ev["first_seen"]), "label": "First signal"},

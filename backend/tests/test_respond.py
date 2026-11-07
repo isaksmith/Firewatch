@@ -57,7 +57,7 @@ def test_scenario_beats_baseline():
     assert fire["recommendation"] == "escalate"
 
     with connect() as conn:
-        assert len(_out(conn, "ask_neighbor", fire["id"])) == 3
+        assert len(_out(conn, "ask_neighbor", fire["id"])) == 6  # district default is now 8 mi, 6 asks
         assert len(_out(conn, "page", fire["id"])) == 18
         downwind = [m["body"] for m in _out(conn, "downwind", fire["id"])]
         assert downwind and all("Could reach you in as little as " in b for b in downwind)
@@ -72,7 +72,7 @@ def test_line_fault_alone_investigates_and_asks_nearest_neighbors():
         ev = _event(conn, eid)
         assert ev["recommendation"] == "investigate" and ev["score"] is None
         asked = [m["contact_id"] for m in _out(conn, "ask_neighbor", eid)]
-        assert len(asked) == 3
+        assert len(asked) == 6  # district default is now 8 mi, 6 asks
         names = [conn.execute("SELECT name FROM contacts WHERE id = ?", (c,)).fetchone()["name"] for c in asked]
         assert names[0] == "Wes Kittle", "nearest first"
         assert len(_out(conn, "duty_fyi", eid)) == 1

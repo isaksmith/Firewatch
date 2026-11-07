@@ -189,18 +189,59 @@ CREATE TABLE IF NOT EXISTS burn_notices (
   caller      TEXT,
   label       TEXT
 );
+CREATE TABLE IF NOT EXISTS posts (
+  id INTEGER PRIMARY KEY, contact_id INTEGER REFERENCES contacts(id), phone TEXT,
+  channel TEXT NOT NULL,
+  category TEXT NOT NULL,
+  body TEXT NOT NULL, lat REAL, lon REAL,
+  estimated INTEGER NOT NULL DEFAULT 0,
+  hearsay INTEGER NOT NULL DEFAULT 0, flagged INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'open',
+  event_id INTEGER REFERENCES events(id), parent_id INTEGER REFERENCES posts(id),
+  duty_told_at TEXT, ack_level TEXT, ack_by TEXT, ack_at TEXT, ack_until TEXT,
+  is_sample INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS post_confirms (
+  id INTEGER PRIMARY KEY, post_id INTEGER NOT NULL REFERENCES posts(id),
+  contact_id INTEGER NOT NULL REFERENCES contacts(id),
+  kind TEXT NOT NULL,
+  channel TEXT NOT NULL, lat REAL, lon REAL, ip_hash TEXT,
+  counted INTEGER NOT NULL DEFAULT 0, reason TEXT, created_at TEXT NOT NULL,
+  UNIQUE(post_id, contact_id)
+);
+CREATE TABLE IF NOT EXISTS post_photos (
+  post_id INTEGER PRIMARY KEY REFERENCES posts(id), jpeg BLOB NOT NULL,
+  width INTEGER NOT NULL, height INTEGER NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS post_devices (
+  token_hash TEXT PRIMARY KEY, contact_id INTEGER NOT NULL REFERENCES contacts(id),
+  created_at TEXT NOT NULL, last_seen_at TEXT
+);
+CREATE TABLE IF NOT EXISTS post_asks (
+  id INTEGER PRIMARY KEY, post_id INTEGER NOT NULL REFERENCES posts(id),
+  contact_id INTEGER NOT NULL REFERENCES contacts(id), asked_at TEXT NOT NULL, answered_at TEXT,
+  UNIQUE(post_id, contact_id)
+);
+CREATE TABLE IF NOT EXISTS replay_clock (
+  id INTEGER PRIMARY KEY CHECK (id = 1), slug TEXT, t_min INTEGER,
+  running INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL
+);
 """
 
 # Columns added after the first release; ALTER them onto older databases.
 MIGRATIONS = {
-    "events": {"evidence_json": "TEXT", "level_reason": "TEXT", "response_json": "TEXT"},
+    "events": {"evidence_json": "TEXT", "level_reason": "TEXT", "response_json": "TEXT",
+               "ack_level": "TEXT", "ack_by": "TEXT", "ack_at": "TEXT", "ack_until": "TEXT",
+               "ack_mark_det": "INTEGER", "ack_mark_sig": "INTEGER"},
     "contacts": {"mesh_id": "TEXT", "app": "INTEGER NOT NULL DEFAULT 0"},
-    "messages": {"channel": "TEXT NOT NULL DEFAULT 'sms'"},
+    "messages": {"channel": "TEXT NOT NULL DEFAULT 'sms'", "post_id": "INTEGER"},
     "burn_notices": {"start_at": "TEXT", "end_at": "TEXT", "caller": "TEXT", "label": "TEXT"},
+    "posts": {"client_key": "TEXT", "queued_min": "INTEGER"},
 }
 POST_MIGRATION = """
 CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_mesh ON contacts(mesh_id);
 CREATE INDEX IF NOT EXISTS idx_messages_gateway ON messages(gateway_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_client_key ON posts(contact_id, client_key) WHERE client_key IS NOT NULL;
 """
 
 

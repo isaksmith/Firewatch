@@ -2,7 +2,8 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronDown } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Map, { Layer, Marker, NavigationControl, ScaleControl, Source, useMap, type MapRef } from 'react-map-gl/maplibre'
-import { api, type AlertSummary, type MeshNode, type SensorReadings } from '../api'
+import { api, type AdminBurn, type AdminPost, type AlertSummary, type MeshNode, type SensorReadings } from '../api'
+import { catMeta, isPinnable, useBoardBurns, useBoardPosts } from '../lib/board'
 import { REC_META, latLon, trackId } from '../lib/format'
 import { useLowData } from '../lib/lowData'
 import { AOI_BBOX, BASEMAP_STYLE, BLANK_STYLE, KANSAS_VIEW, ringPolygon } from '../lib/map'
@@ -16,6 +17,7 @@ interface Props {
   hoveredId: number | null
   onSelect: (id: number) => void
   onHover: (id: number | null) => void
+  onBoardPin: (post: AdminPost) => void
 }
 
 const SIZE = { escalate: 18, investigate: 14, monitor: 9 }
@@ -37,7 +39,7 @@ const AOI: GeoJSON.Feature = {
   },
 }
 
-type LayerKey = 'power_lines' | 'static_sources' | 'flint_hills' | 'aoi' | 'district' | 'distribution_lines' | 'dry_grid' | 'wind_lines' | 'mesh' | 'fire_forecast'
+type LayerKey = 'power_lines' | 'static_sources' | 'flint_hills' | 'aoi' | 'district' | 'distribution_lines' | 'dry_grid' | 'wind_lines' | 'mesh' | 'fire_forecast' | 'board' | 'burns'
 
 const SWATCH: Record<LayerKey, string> = {
   aoi: 'h-0 w-4 border-t border-dashed border-sample/70',
@@ -50,6 +52,8 @@ const SWATCH: Record<LayerKey, string> = {
   wind_lines: 'h-0.5 w-4 bg-[#ff5c5c]',
   mesh: 'h-2 w-2 rotate-45 bg-ok',
   fire_forecast: 'h-2 w-4 bg-[#ff7a1a]/60 border border-[#ffb21a]',
+  board: 'h-2 w-2 border border-dashed border-escalate',
+  burns: 'h-2 w-2 rotate-45 border border-investigate bg-investigate/30',
 }
 
 const MESH_FRESH_MIN = 30
@@ -63,6 +67,97 @@ function sensorLine(s: SensorReadings | null): { text: string; high: boolean } |
     s.rh_pct != null && `RH ${Math.round(s.rh_pct)}%`,
   ].filter(Boolean)
   return parts.length ? { text: parts.join(' · '), high: (s.pm25 ?? 0) >= PM25_HIGH } : null
+}
+
+function BurnPin({ group }: { group: AdminBurn[] }) {
+  const [open, setOpen] = useState(false)
+  const b = group[0]
+  const n = group.length
+  return (
+    <Marker longitude={b.lon} latitude={b.lat} anchor="center" style={{ zIndex: open ? 5 : undefined }}>
+      <div className="relative">
+        <button
+          type="button"
+          aria-label={n > 1 ? `${n} controlled burns here` : `Controlled burn, ${b.name}`}
+          aria-expanded={open}
+          onClick={(e) => {
+            e.stopPropagation()
+            setOpen((o) => !o)
+          }}
+          className="flex h-6 min-w-6 items-center justify-center gap-0.5"
+        >
+          <span className="block h-3 w-3 rotate-45 border border-investigate bg-investigate/30" />
+          {n > 1 && <span className="num text-[10px] font-semibold text-text">{n}</span>}
+        </button>
+        {open && (
+          <div className="hud absolute bottom-full left-1/2 z-10 mb-1 w-56 -translate-x-1/2 px-2 py-1.5 text-left text-[11.5px] leading-snug text-text">
+            <div className="flex items-start justify-between gap-2">
+              <span className="label block text-investigate">Controlled burn{n > 1 ? `s (${n})` : ''}</span>
+              <button type="button" aria-label="Close" className="text-muted hover:text-text" onClick={() => setOpen(false)}>
+                x
+              </button>
+            </div>
+            {group.map((g, i) => (
+              <div key={i} className={i > 0 ? 'mt-1.5 border-t border-line pt-1.5' : 'mt-1'}>
+                <div className="font-medium break-words">{g.name}</div>
+                <div className="text-muted">Registered {g.registered_at}</div>
+                {g.late && <div className="text-investigate">Late: sent after reports started</div>}
+                {g.reports_nearby && <div className="text-investigate">Reports nearby</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Marker>
+  )
+}
+
+function BoardPin({ group, onPick }: { group: AdminPost[]; onPick: (p: AdminPost) => void }) {
+  const [tip, setTip] = useState(false)
+  // Newest post in the group is the one the panel opens on.
+  const p = group.reduce((a, b) => (b.id > a.id ? b : a))
+  const m = catMeta(p.category)
+  const n = group.length
+  return (
+    <Marker longitude={p.lon!} latitude={p.lat!} anchor="center">
+      <div className="relative">
+        <button
+          type="button"
+          aria-label={n > 1 ? `${n} community posts here, newest: ${p.body}` : `${m.label} post: ${p.body}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            onPick(p)
+          }}
+          onMouseEnter={() => setTip(true)}
+          onMouseLeave={() => setTip(false)}
+          onFocus={() => setTip(true)}
+          onBlur={() => setTip(false)}
+          className="flex h-6 min-w-6 items-center justify-center gap-0.5"
+        >
+          <span className={`block h-3 w-3 ${p.estimated ? `border border-dashed ${m.border} bg-void` : m.bg}`} />
+          {n > 1 && <span className="num text-[10px] font-semibold text-text">{n}</span>}
+        </button>
+        {tip && (
+          <span className="hud pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 w-56 -translate-x-1/2 px-2 py-1.5 text-left text-[11.5px] leading-snug text-text">
+            <span className={`label block ${m.text}`}>
+              {m.label}
+              {p.estimated ? ' · approx location' : ''}
+              {n > 1 ? ` · ${n} posts` : ''}
+            </span>
+            {group
+              .slice()
+              .sort((a, b) => b.id - a.id)
+              .slice(0, 3)
+              .map((g) => (
+                <span key={g.id} className="block break-words">
+                  {g.body}
+                </span>
+              ))}
+          </span>
+        )}
+      </div>
+    </Marker>
+  )
 }
 
 function MeshMarker({ n }: { n: MeshNode }) {
@@ -92,7 +187,7 @@ function MeshMarker({ n }: { n: MeshNode }) {
   )
 }
 
-export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Props) {
+export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBoardPin }: Props) {
   const mapRef = useRef<MapRef>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   // One side panel at a time: opening an alert closes the layers panel.
@@ -111,6 +206,8 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
     wind_lines: false,
     mesh: true,
     fire_forecast: true,
+    board: true,
+    burns: true,
   })
   // Low data mode switches the heavy layers off without forgetting what the person picked.
   const layers = lowData ? { ...layersWanted, ...HEAVY_OFF } : layersWanted
@@ -119,7 +216,28 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, retry: false })
   const keyConfigured = !!health.data?.firms_key_configured
   const feeds = useLiveFeeds(liveOn, keyConfigured)
-  const meshNodes = useQuery({ queryKey: ['mesh-nodes'], queryFn: api.meshNodes, refetchInterval: lowData ? 60_000 : 10_000, })
+  const meshNodes = useQuery({ queryKey: ['mesh-nodes'], queryFn: api.meshNodes, refetchInterval: lowData ? 60_000 : 10_000 })
+  const boardPosts = useBoardPosts()
+  const pins = (boardPosts.data ?? []).filter(isPinnable)
+  const pinGroups = useMemo(() => {
+    const g = new globalThis.Map<string, AdminPost[]>()
+    for (const p of pins) g.set(`${p.lat},${p.lon}`, [...(g.get(`${p.lat},${p.lon}`) ?? []), p])
+    return [...g.entries()]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardPosts.data])
+  const burnsQ = useBoardBurns()
+  const burns = burnsQ.data ?? []
+  const burnGroups = useMemo(() => {
+    const g = new globalThis.Map<string, AdminBurn[]>()
+    for (const b of burns) g.set(`${b.lat},${b.lon}`, [...(g.get(`${b.lat},${b.lon}`) ?? []), b])
+    return [...g.entries()]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [burnsQ.data])
+  const burnCircles = useMemo<GeoJSON.FeatureCollection>(
+    () => ({ type: 'FeatureCollection', features: burns.map((b) => ringPolygon(b.lat, b.lon, b.radius_km)) }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [burnsQ.data],
+  )
   const placed = (meshNodes.data ?? []).filter((n) => n.lat != null && n.lon != null)
   const district = useQuery({ queryKey: ['district'], queryFn: api.district, retry: false })
   const lines = useQuery({ queryKey: ['layer', 'power_lines'], queryFn: () => api.layer('power_lines') })
@@ -278,6 +396,13 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
         {layers.fire_forecast && fire && selected && <FireForecastLayer fire={fire} aheadMin={aheadMin} lat={selected.lat} lon={selected.lon} />}
         <LiveLayers feeds={feeds} />
         {layers.mesh && placed.map((n) => <MeshMarker key={n.node_id} n={n} />)}
+        {layers.burns && burns.length > 0 && (
+          <Source id="burn-circles" type="geojson" data={burnCircles}>
+            <Layer id="burn-circles" type="line" paint={{ 'line-color': '#ffb21a', 'line-width': 1, 'line-opacity': 0.35, 'line-dasharray': [2, 3] }} />
+          </Source>
+        )}
+        {layers.burns && burnGroups.map(([k, g]) => <BurnPin key={k} group={g} />)}
+        {layers.board && pinGroups.map(([k, g]) => <BoardPin key={k} group={g} onPick={onBoardPin} />)}
         <CursorReadout />
       </Map>
 
@@ -311,6 +436,8 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
                   ['dry_grid', 'Dry air grid'],
                   ['wind_lines', 'Lines under wind'],
                   ['fire_forecast', 'Fire forecast (selected alert)'],
+                  ...(burns.length > 0 ? ([['burns', `Burns today (${burns.length})`]] as const) : []),
+                  ...(pins.length > 0 ? ([['board', `Community posts (${pins.length})`]] as const) : []),
                   ...(placed.length > 0 ? ([['mesh', `Mesh radios (${placed.length})`]] as const) : []),
                 ] as const
               ).map(([k, label]) => (

@@ -582,6 +582,17 @@ export const api = {
     request<AlertDetail>(`/alerts/${id}/decision`, { method: 'POST', body: JSON.stringify({ action, operator }) }),
   district: () => request<District>('/district'),
   meshNodes: () => request<MeshNode[]>('/mesh/nodes'),
+  boardAdminPosts: () => request<AdminPost[]>('/board/admin/posts'),
+  boardAdminBurns: () => request<AdminBurn[]>('/board/admin/burns'),
+  boardStation: (id: number, action: StationAction, operator: string) =>
+    request<StationResult>(`/board/admin/posts/${id}/station`, {
+      method: 'POST',
+      body: JSON.stringify({ action, operator }),
+    }),
+  pendingMembers: () => request<PendingMember[]>('/members/pending'),
+  approveMember: (id: number, lat: number, lon: number) =>
+    request<ApproveResult>(`/members/${id}/approve`, { method: 'POST', body: JSON.stringify({ lat, lon }) }),
+  rejectMember: (id: number) => request<{ ok: boolean }>(`/members/${id}/reject`, { method: 'POST' }),
   scenarios: () => request<ScenarioSummary[]>('/scenarios'),
   scenario: (slug: string) => request<ScenarioStatus>(`/scenario/${slug}`),
   runScenario: (slug: string) => request<{ status: string }>(`/scenario/${slug}/run`, { method: 'POST' }),
@@ -595,4 +606,230 @@ export const api = {
     for (const [k, v] of Object.entries(params)) if (v != null && !Number.isNaN(v)) q.set(k, String(v))
     return request<RegionPlan>(`/planner/plan?${q}`)
   },
+}
+
+// ---- Community board ----
+
+const DEVICE_KEY = 'firewatch.device'
+
+const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/
+
+export function isWellFormedToken(t: string): boolean {
+  return TOKEN_RE.test(t)
+}
+
+export function getDeviceToken(): string | null {
+  try {
+    const t = localStorage.getItem(DEVICE_KEY)
+    if (t === null) return null
+    if (TOKEN_RE.test(t)) return t
+    localStorage.removeItem(DEVICE_KEY)
+    return null
+  } catch {
+    return null
+  }
+}
+
+export function setDeviceToken(token: string) {
+  if (!TOKEN_RE.test(token)) return
+  try {
+    localStorage.setItem(DEVICE_KEY, token)
+  } catch {
+    /* storage blocked: the page still works without it */
+  }
+}
+
+export function clearDeviceToken() {
+  try {
+    localStorage.removeItem(DEVICE_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
+export type BoardCategory = 'fire' | 'smoke' | 'hazard' | 'burn' | 'other'
+export type ConfirmKind = 'see' | 'not_seeing' | 'burn'
+export type StationAction = 'ack' | 'send' | 'page' | 'dismiss' | 'resolve'
+
+export interface BoardMe {
+  name: string | null
+  role: string | null
+  member: boolean
+  station: boolean
+}
+
+export interface BoardPost {
+  id: number
+  category: string
+  body: string
+  lat: number | null
+  lon: number | null
+  estimated: boolean
+  hearsay: boolean
+  flagged: boolean
+  status: string
+  parent_id: number | null
+  event_id?: number | null
+  created_at: string
+  author: string | null
+  confirms: number
+  notes: number | null
+  badge: string | null
+  unconfirmed: boolean
+  held?: boolean
+  event_status?: string | null
+  has_photo?: boolean
+  thread_size?: number
+  age_min?: number
+  sent_late_min?: number | null
+}
+
+export interface AdminPost extends BoardPost {
+  held: boolean
+  event_id: number | null
+  event_status: string | null
+}
+
+export interface StationResult {
+  ok: boolean
+  event_id: number | null
+  repeat?: boolean
+}
+
+export interface PendingMember {
+  id: number
+  name: string
+  phone: string
+}
+
+export interface ApproveResult {
+  token: string | null
+  link: string | null
+  texted: boolean
+}
+
+export const BOARD_ADMIN_KEY = ['board-admin-posts'] as const
+
+/** A burn on the board's "Burns today": the public view, rounded and without identity. Same store as Burn. */
+export interface BoardBurn {
+  lat: number
+  lon: number
+  radius_km: number
+  registered_at: string
+  reports_nearby: boolean
+}
+
+export interface AdminBurn extends BoardBurn {
+  name: string
+  late: boolean
+  /** Logged by phone: the window, UTC ISO. */
+  start?: string
+  end?: string
+}
+
+export const BOARD_BURNS_ADMIN_KEY = ['board-admin-burns'] as const
+
+export interface PostResult {
+  post_id: number
+  event_id: number | null
+  flagged: boolean
+  asked: number
+  known: boolean
+  used_home: boolean
+  alerted: boolean
+  duplicate?: boolean
+}
+
+export interface ConfirmResult {
+  ok: boolean
+  reason: string
+  counted: boolean
+  count: number
+  event_id: number | null
+  level: string | null
+}
+
+export class BoardError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
+async function boardRequest<T>(path: string, init?: RequestInit, tokenOverride?: string): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const token = tokenOverride ?? getDeviceToken()
+  if (token) headers['X-Firewatch-Device'] = token
+  const res = await fetch(`${BASE}/board${path}`, { ...init, headers })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new BoardError(typeof body.detail === 'string' ? body.detail : `${res.status} ${res.statusText}`, res.status)
+  }
+  return res.json() as Promise<T>
+}
+
+/** Create a device token the first time someone posts or confirms. */
+export async function ensureDevice(): Promise<void> {
+  if (getDeviceToken()) return
+  const r = await boardRequest<{ token: string }>('/device', { method: 'POST' })
+  setDeviceToken(r.token)
+}
+
+/** Ensure a device, call, and on a 401 make one new device and retry once. */
+async function withDevice<T>(call: () => Promise<T>): Promise<T & { reissued: boolean }> {
+  await ensureDevice()
+  try {
+    return { ...(await call()), reissued: false }
+  } catch (e) {
+    if (!(e instanceof BoardError) || e.status !== 401) throw e
+  }
+  clearDeviceToken()
+  await ensureDevice()
+  return { ...(await call()), reissued: true }
+}
+
+export const boardPhotoUrl = (id: number) => `${BASE}/board/posts/${id}/photo`
+export const boardAdminPhotoUrl = (id: number) => `${BASE}/board/admin/posts/${id}/photo`
+
+async function uploadPhoto(postId: number, blob: Blob): Promise<void> {
+  await ensureDevice()
+  const headers: Record<string, string> = { 'Content-Type': blob.type }
+  const token = getDeviceToken()
+  if (token) headers['X-Firewatch-Device'] = token
+  const res = await fetch(`${BASE}/board/posts/${postId}/photo`, { method: 'POST', headers, body: blob })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new BoardError(typeof body.detail === 'string' ? body.detail : `${res.status} ${res.statusText}`, res.status)
+  }
+}
+
+export interface NewPostBody {
+  category: BoardCategory
+  body: string
+  lat: number | null
+  lon: number | null
+  attach_location: boolean
+  client_key?: string
+  queued_min?: number
+  bearing?: number
+  miles?: number
+}
+
+export const boardApi = {
+  uploadPhoto,
+  /** With no token there is no identity to look up, so no request goes out. */
+  me: async (token?: string): Promise<BoardMe | null> => {
+    const t = token ?? getDeviceToken()
+    if (!t) return null
+    return boardRequest<BoardMe>('/me', undefined, t)
+  },
+  posts: () => boardRequest<BoardPost[]>('/posts'),
+  burns: () => boardRequest<BoardBurn[]>('/burns'),
+  post: (b: NewPostBody) =>
+    withDevice(() => boardRequest<PostResult>('/posts', { method: 'POST', body: JSON.stringify(b) })),
+  confirm: (id: number, b: { kind: ConfirmKind; lat: number | null; lon: number | null }) =>
+    withDevice(() => boardRequest<ConfirmResult>(`/posts/${id}/confirm`, { method: 'POST', body: JSON.stringify(b) })),
+  station: (id: number, action: StationAction) =>
+    boardRequest<unknown>(`/posts/${id}/station`, { method: 'POST', body: JSON.stringify({ action }) }),
 }

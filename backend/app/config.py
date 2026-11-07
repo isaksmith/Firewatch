@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     mesh_channel_index: int = 0
     mesh_channel_feed: bool = True  # copy every mesh text to the district channel as well as the person's radio
     scenario_seconds_per_minute: float = 2.0
+    forwarded_ip_header: str = ""  # e.g. cf-connecting-ip; trusted only from a loopback peer
     api_token: str = ""  # when set, required (X-Firewatch-Token) on endpoints that can text people
     # FIREWATCH_SECRET signs the /lite form tokens (a random per-process key when unset).
     # FIREWATCH_OPERATOR_TOKEN unlocks real SMS (X-Firewatch-Operator-Token); unset means live texting is off.

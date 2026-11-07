@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from . import cap, climate, fw1_feed, livesend, mesh, notify, planner, playbook, sample, scenario
+from . import cap, climate, fw1_feed, livesend, mesh, notify, planner, playbook, posts, routes_posts, sample, scenario
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
@@ -91,7 +91,11 @@ def poll_jobs() -> dict:
 
 def _tick_live() -> None:
     with connect() as conn:
-        notify.tick(conn, utcnow(), is_sample=False)
+        now = utcnow()
+        notify.hold_tick(conn, now, is_sample=get_settings().mode == "sample",
+                         skip_slugs=[p.stem for p in scenario.SCENARIOS_DIR.glob("*.json")])
+        notify.tick(conn, now, is_sample=False)
+        posts.tick(conn, now, is_sample=get_settings().mode == "sample")
 
 
 async def _tick_loop() -> None:
@@ -117,6 +121,8 @@ async def _mesh_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    with connect() as conn:
+        conn.execute("UPDATE replay_clock SET running = 0")
     s = get_settings()
     try:
         with connect() as conn:
@@ -133,10 +139,20 @@ async def lifespan(app: FastAPI):
     if s.mesh_gateway != "off":
         _tasks.append(asyncio.create_task(_mesh_loop()))
     yield
+    with connect() as conn:
+        conn.execute("UPDATE replay_clock SET running = 0")
     for t in _tasks:
         t.cancel()
     _tasks.clear()
     mesh.stop()
+
+
+def require_admin(x_firewatch_token: str = Header(default="")) -> None:
+    """Admin routes mint credentials, so a blank token fails closed outside sample mode."""
+    s = get_settings()
+    if not s.api_token and s.mode != "sample":
+        raise HTTPException(503, "set API_TOKEN to use admin routes")
+    require_token(x_firewatch_token)
 
 
 def require_token(x_firewatch_token: str = Header(default="")) -> None:
@@ -157,7 +173,7 @@ api = APIRouter(prefix="/api")
 
 RECOMMENDATION_ORDER = {"escalate": 0, "investigate": 1, "monitor": 2}
 TRANSITIONS = {
-    "acknowledge": ({"new"}, "acknowledged"),
+    "acknowledge": ({"new", "acknowledged", "escalated"}, "acknowledged"),
     "escalate": ({"new", "acknowledged"}, "escalated"),
     "dismiss": ({"new", "acknowledged", "escalated"}, "dismissed"),
     "reopen": ({"acknowledged", "escalated", "dismissed", "closed"}, "new"),
@@ -361,20 +377,29 @@ class ActionIn(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
-@api.post("/alerts/{event_id}/actions")
+@api.post("/alerts/{event_id}/actions", dependencies=[Depends(require_token)])
 def act_on_alert(event_id: int, body: ActionIn):
     allowed_from, new_status = TRANSITIONS[body.action]
     with connect() as conn:
         ev = _get_event(conn, event_id)
         if ev["status"] not in allowed_from:
             raise HTTPException(400, f"cannot {body.action} an alert that is {ev['status']}")
-        now = iso(utcnow())
-        conn.execute(
-            "INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, ?, ?, ?)",
-            (event_id, body.action, body.operator, body.note, now),
-        )
-        conn.execute("UPDATE events SET status = ?, updated_at = ? WHERE id = ?", (new_status, now, event_id))
-        fw1_feed.sync_event(conn, event_id, parse_iso(now))
+        clock = (scenario.clock_now(ev["sample_slug"]) if ev["is_sample"] else None) or utcnow()
+        if body.action == "acknowledge":
+            r = notify.acknowledge(conn, event_id=event_id, by=body.operator, role="operator", now=clock, note=body.note)
+            if not r["ok"]:
+                raise HTTPException(409, f"cannot acknowledge: {r['refused']}")
+        else:
+            conn.execute(
+                "INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, ?, ?, ?)",
+                (event_id, body.action, body.operator, body.note, iso(clock)),
+            )
+            conn.execute("UPDATE events SET status = ?, updated_at = ? WHERE id = ?", (new_status, iso(clock), event_id))
+            if body.action == "dismiss":
+                notify.clear_hold(conn, event_id)
+            else:
+                notify.release_hold(conn, event_id, clock)
+        fw1_feed.sync_event(conn, event_id, clock)
     return get_alert(event_id)
 
 
@@ -605,20 +630,20 @@ def health():
     }
 
 
-@api.post("/ingest/run")
+@api.post("/ingest/run", dependencies=[Depends(require_admin)])
 async def ingest_run():
     if get_settings().mode == "sample":
         raise HTTPException(400, "ingest is disabled in sample mode; use /api/sample/replay")
     return await asyncio.to_thread(poll_firms_once)
 
 
-@api.post("/sample/replay")
+@api.post("/sample/replay", dependencies=[Depends(require_admin)])
 async def sample_replay(duration_s: float = Query(60, ge=5, le=600)):
     sample.start_replay(duration_s)
     return {"status": "started", "duration_s": duration_s, "fixtures": len(sample.load_fixtures())}
 
 
-@api.post("/sample/load")
+@api.post("/sample/load", dependencies=[Depends(require_admin)])
 async def sample_load():
     n = await asyncio.to_thread(sample.load_all_now)
     return {"status": "loaded", "fixtures": n}
@@ -764,13 +789,16 @@ async def sms_inbound(request: Request):
         url = f"{s.public_base_url.rstrip('/')}{request.url.path}"
         if not notify.valid_twilio_signature(s.twilio_auth_token, url, params, request.headers.get("X-Twilio-Signature", "")):
             raise HTTPException(403, "bad Twilio signature")
+    else:
+        require_admin(request.headers.get("X-Firewatch-Token", ""))
     phone, text = params.get("From"), params.get("Body", "")
     if not phone:
         raise HTTPException(422, "From is required")
 
     def handle():
         with connect() as conn:
-            notify.handle_inbound(conn, phone, text, utcnow(), is_sample=s.mode == "sample")
+            replay_now = scenario.running_now()
+            notify.handle_inbound(conn, phone, text, replay_now or utcnow(), is_sample=replay_now is not None or s.mode == "sample")
 
     await asyncio.to_thread(handle)
     return Response('<?xml version="1.0" encoding="UTF-8"?><Response/>', media_type="application/xml")
@@ -787,21 +815,21 @@ def sms_simulate(msg: SimulatedSms):
     if get_settings().mode != "sample":
         raise HTTPException(400, "simulated texts are only allowed in sample mode")
     with connect() as conn:
-        return notify.handle_inbound(conn, msg.from_, msg.body, utcnow(), is_sample=True)
+        return notify.handle_inbound(conn, msg.from_, msg.body, scenario.running_now() or utcnow(), is_sample=True)
 
 
-@api.get("/messages")
+@api.get("/messages", dependencies=[Depends(require_admin)])
 def list_messages(event_id: int | None = None, limit: int = Query(300, ge=1, le=2000)):
     with connect() as conn:
         return _messages(conn, event_id=event_id, limit=limit)
 
 
-@api.get("/contacts")
+@api.get("/contacts", dependencies=[Depends(require_admin)])
 def list_contacts():
     with connect() as conn:
         return [
             {**dict(r), "phone": _mask(r["phone"])}
-            for r in conn.execute("SELECT * FROM contacts ORDER BY ladder_rank IS NULL, ladder_rank, role, name")
+            for r in conn.execute("SELECT * FROM contacts WHERE phone NOT LIKE 'web:%' ORDER BY ladder_rank IS NULL, ladder_rank, role, name")
         ]
 
 
@@ -887,7 +915,7 @@ def alert_decision(event_id: int, body: DecisionIn, x_firewatch_operator_token: 
     """PAGE / NO / SEND from the console; the same path as the duty officer texting it."""
     with connect() as conn:
         ev = _get_event(conn, event_id)
-        if not ev["response_json"]:
+        if not ev["response_json"] and not ev["ack_until"]:
             raise HTTPException(409, "this alert has no response in progress")
         now = scenario.clock_now(ev["sample_slug"]) if ev["is_sample"] else None
         if livesend.real_sms_possible(bool(ev["is_sample"])):
@@ -985,7 +1013,7 @@ def get_scenario(slug: str):
         raise HTTPException(404, "unknown scenario") from None
 
 
-@api.post("/scenario/{slug}/run")
+@api.post("/scenario/{slug}/run", dependencies=[Depends(require_admin)])
 async def run_scenario(slug: str, seconds_per_minute: float | None = Query(None, ge=0.05, le=60)):
     """Replay the scenario on a scaled clock (default 2 s per scenario minute)."""
     try:
@@ -995,7 +1023,7 @@ async def run_scenario(slug: str, seconds_per_minute: float | None = Query(None,
     return {"status": "started", "slug": slug}
 
 
-@api.post("/scenario/{slug}/load")
+@api.post("/scenario/{slug}/load", dependencies=[Depends(require_admin)])
 async def load_scenario_now(slug: str):
     """Run the whole scenario instantly (no animation)."""
     try:
@@ -1005,6 +1033,8 @@ async def load_scenario_now(slug: str):
     return scenario.status(slug)
 
 
+api.include_router(routes_posts.public_router)
+api.include_router(routes_posts.admin_router, dependencies=[Depends(require_admin)])
 app.include_router(api)
 app.include_router(lite_router)
 app.include_router(mobile_router)

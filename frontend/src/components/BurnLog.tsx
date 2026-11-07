@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { api, type NewBurn } from '../api'
+import { api, BOARD_BURNS_ADMIN_KEY, type NewBurn } from '../api'
 import { centralInput, centralToIso, clock12 } from '../lib/format'
 import { useLowData } from '../lib/lowData'
 import { useUndoable } from '../lib/undoable'
@@ -15,6 +15,7 @@ function submitBurn(body: NewBurn, qc: QueryClient, keepalive: boolean): Promise
   return api.logBurn(body, keepalive).then(
     (b) => {
       qc.invalidateQueries({ queryKey: ['burns'] })
+      qc.invalidateQueries({ queryKey: BOARD_BURNS_ADMIN_KEY }) // the map's burn pins read the same table
       qc.invalidateQueries({ queryKey: ['alerts'] })
       notice = { text: `Burn logged. Smoke near it will not page the district until ${clock12(b.end)}.`, bad: false }
       return notice.text

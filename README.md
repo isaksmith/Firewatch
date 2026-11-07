@@ -93,6 +93,19 @@ The **forecast** and the **playbook** sit beside the confirmation rules:
 
 **Status:** the satellite path (ingest, clustering, enrichment, ML scoring, map, 3D spread, logged actions) is built and evaluated on real Kansas data. The whole chain also runs end to end in the **Cottonwood Creek replay**: line fault, neighbor texts, two-source confirmation, PAGE by text, downwind warnings with arrival estimates, mutual aid, and a registered burn that texts nobody. Texts go to a simulated outbox. Twilio sending is written but not yet tried on a real phone. The plan, honest cost numbers, and failure modes are in [docs/PLAN.md](docs/PLAN.md).
 
+## Community board
+
+Built and tested on the backend (499 tests pass). Evidence, commands and gaps are in [docs/board-evidence.md](docs/board-evidence.md).
+
+| Piece | State |
+|---|---|
+| Member and anonymous posts, confirms, ladder, acknowledge | Built, tested |
+| Abuse limits (100 anonymous posts send 0 pages, no self-confirm, no far confirm) | Built, tested |
+| Public location rounding, photo limits and EXIF strip | Built, tested |
+| Offline posting and compass | Built, server-tested only |
+| Replay A/B (`python -m scripts.replay_board_ab`) | Run; board minutes are ASSUMED |
+| Keyword spot check, outdoor compass, real Twilio phone | Not tested yet |
+
 ## Docs
 
 - [Build plan](docs/PLAN.md): the scenario in minutes, whole-chain design, constraints, failure modes, cost and who pays, evidence, weekend scope, next step, plus Shane's research additions and open questions.
@@ -136,6 +149,15 @@ cp .env.example .env            # add FIRMS_MAP_KEY for MODE=live; MODE=sample w
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/uvicorn app.main:app --reload --port 8000
+```
+
+Public board (the only thing a tunnel may point at). The tunnel points at port 8012 and never at the main API or Vite. The main server must also run for timers and alerts. Set `FORWARDED_IP_HEADER` (for example `cf-connecting-ip`) so rate limits see the visitor, not the tunnel. Run `npm run build` in frontend first.
+
+```
+.venv/bin/uvicorn app.public_app:app --host 127.0.0.1 --port 8012
+```
+
+```
 .venv/bin/pytest                 # tests
 
 # frontend (http://localhost:5173)

@@ -8,6 +8,7 @@ import { BurnLog } from '../components/BurnLog'
 import { AlertList } from '../components/AlertList'
 import { MapView } from '../components/MapView'
 import { ScenarioStrip } from '../components/ScenarioStrip'
+import { CommunityBoard } from '../components/CommunityBoard'
 import { TopBar } from '../components/TopBar'
 import { SUPPRESSION_LABEL, clock12 } from '../lib/format'
 import { dismissAutoBanner, noteFetchFailure, noteFetchTime, setLowData, useLowData } from '../lib/lowData'
@@ -34,6 +35,8 @@ export function Dashboard() {
   const [tab, setTab] = useState<QueueTab>('active')
   const [scenarioHidden, setScenarioHidden] = useState(false)
   const [slug, setSlug] = useState(SCENARIO)
+  const [boardOpen, setBoardOpen] = useState(false)
+  const [boardPostId, setBoardPostId] = useState<number | null>(null)
 
   const scenarios = useQuery({ queryKey: ['scenarios'], queryFn: api.scenarios, staleTime: Infinity })
   const scenario = useQuery({
@@ -112,7 +115,17 @@ export function Dashboard() {
         threeDId={selectedId ?? onMap[0]?.id ?? null}
         threeDSelected={selectedId != null}
         burnOpen={burnOpen}
-        onBurnLog={() => setBurnOpen((o) => !o)}
+        onBurnLog={() => {
+          setBoardOpen(false)
+          setBurnOpen((o) => !o)
+        }}
+        boardOpen={boardOpen}
+        onToggleBoard={() => {
+          if (!boardOpen && selectedId != null) navigate('/')
+          setBurnOpen(false)
+          setBoardPostId(null)
+          setBoardOpen(!boardOpen)
+        }}
       />
       {offline && (
         <div role="status" className="flex shrink-0 items-center gap-3 border-b border-line bg-investigate/10 px-4 py-1.5 text-[12.5px] text-investigate">
@@ -151,8 +164,36 @@ export function Dashboard() {
           onSelect={(id) => navigate(`/alerts/${id}`)}
           onHover={setHoveredId}
         />
-        <MapView alerts={onMap} selectedId={selectedId} hoveredId={hoveredId} onSelect={(id) => navigate(`/alerts/${id}`)} onHover={setHoveredId} />
-        {burnOpen ? <BurnLog onClose={() => setBurnOpen(false)} /> : selectedId != null && <AlertDrawer id={selectedId} onClose={close} />}
+        <MapView
+          alerts={onMap}
+          selectedId={selectedId}
+          hoveredId={hoveredId}
+          onSelect={(id) => {
+            setBoardOpen(false)
+            setBurnOpen(false)
+            navigate(`/alerts/${id}`)
+          }}
+          onHover={setHoveredId}
+          onBoardPin={(post) => {
+            setBurnOpen(false)
+            if (post.event_id != null) {
+              setBoardOpen(false)
+              navigate(`/alerts/${post.event_id}`)
+            } else {
+              if (selectedId != null) navigate('/')
+              setBoardPostId(post.id)
+              setBoardOpen(true)
+            }
+          }}
+        />
+        {burnOpen ? (
+          <BurnLog onClose={() => setBurnOpen(false)} />
+        ) : (
+          selectedId != null && <AlertDrawer id={selectedId} onClose={close} />
+        )}
+        {boardOpen && !burnOpen && selectedId == null && (
+          <CommunityBoard focusId={boardPostId} onClose={() => setBoardOpen(false)} />
+        )}
       </div>
 
       <footer className="num flex h-7 shrink-0 items-center gap-5 overflow-hidden border-t border-line bg-void px-4 text-[10px] tracking-[0.08em] whitespace-nowrap text-dim">

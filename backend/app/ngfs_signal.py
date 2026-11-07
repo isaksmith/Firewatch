@@ -12,7 +12,7 @@ be a strong detection, so NGFS alone reaches Investigate and cannot escalate. NO
 import sqlite3
 from datetime import datetime
 
-from .confirm import CENTRAL
+from .confirm import CENTRAL, burns_overlapping
 from .db import iso, parse_iso
 from .geo import haversine_km
 from .signals import add_signal
@@ -43,12 +43,7 @@ def qualifying(points: list[dict]) -> list[dict]:
 
 
 def burn_covers(conn: sqlite3.Connection, lat: float, lon: float, at: datetime, is_sample: int) -> bool:
-    day = at.astimezone(CENTRAL).date().isoformat()
-    rows = conn.execute(
-        "SELECT lat, lon, radius_km FROM burn_notices WHERE is_sample = ? AND ("
-        "(start_at IS NULL AND burn_date = ?) OR (start_at IS NOT NULL AND start_at <= ? AND end_at >= ?))",
-        (is_sample, day, iso(at), iso(at)),
-    ).fetchall()
+    rows = burns_overlapping(conn, is_sample, at.astimezone(CENTRAL).date().isoformat(), at, at)
     return any(haversine_km(lat, lon, b["lat"], b["lon"]) <= b["radius_km"] for b in rows)
 
 

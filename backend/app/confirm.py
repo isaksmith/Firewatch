@@ -82,6 +82,19 @@ def _stakes_promotion(conn: sqlite3.Connection, event_id: int, level: str, reaso
     return target, why
 
 
+def _promotable(evidence: list[dict]) -> bool:
+    """The stakes model may lift an event only when it has a signal from outside the community board.
+
+    Board posts and confirms (`<channel>:post:<id>`, `<channel>:confirm:<id>`) reach Escalate through the
+    source count (two independent people), never through the stakes model on their own: that keeps the board's
+    abuse limits (anonymous and hearsay posts reach Investigate, not Escalate) whatever the stakes. A sensor, a
+    line fault or a text report beside board posts still counts, so board evidence never lowers a level."""
+    def board(src: str) -> bool:
+        return ":post:" in src or ":confirm:" in src
+
+    return any(e.get("kind") == "satellite" or (e.get("source") and not board(e["source"])) for e in evidence)
+
+
 def _district() -> District | None:
     try:
         return load_district()
@@ -138,7 +151,7 @@ def evaluate_event(
         ),
     )
 
-    if district is not None and district.contains(ev["lat"], ev["lon"]):
+    if district is not None and district.contains(ev["lat"], ev["lon"]) and _promotable(evidence):
         level, reason = _stakes_promotion(conn, event_id, level, reason, suppression, now)
     from . import fw1_feed
 
@@ -290,6 +303,46 @@ def decide_level(
     return level, reason, evidence, suppression
 
 
+BURN_SELECT = (
+    "SELECT b.*, COALESCE(c.name, b.label, b.caller, 'Logged burn') AS name FROM burn_notices b "
+    "LEFT JOIN contacts c ON c.id = b.contact_id "
+)
+
+
+def burns_overlapping(conn, is_sample, local_date: str, start: datetime, end: datetime, extra: str = "", args: tuple = ()) -> list:
+    """The one burn rule, shared by the alert logic, the burn log and the board's "Burns today".
+
+    Both kinds live in `burn_notices`. A text-registered notice (no start_at) covers its whole local date. A burn
+    logged by phone (start_at/end_at, at most 24 h) counts only while its window overlaps [start, end], so a burn
+    that ended before the fire started suppresses nothing. Oldest registration first."""
+    return conn.execute(
+        BURN_SELECT + "WHERE b.is_sample = ? AND ("
+        "(b.start_at IS NULL AND b.burn_date = ?) OR (b.start_at IS NOT NULL AND b.start_at <= ? AND b.end_at >= ?)) "
+        + extra + " ORDER BY b.created_at, b.id",
+        (int(is_sample), local_date, iso(end), iso(start), *args),
+    ).fetchall()
+
+
+def pick_burn(conn, ev) -> tuple[dict | None, bool]:
+    """The burn notice covering this event today and whether it is `late` (sent after the event started)."""
+    burn_date = parse_iso(ev["first_seen"]).astimezone(CENTRAL).date().isoformat()
+    rows = burns_overlapping(conn, ev["is_sample"], burn_date, parse_iso(ev["first_seen"]), parse_iso(ev["last_seen"]))
+    first = parse_iso(ev["first_seen"])
+    covering = [dict(b) for b in rows if haversine_km(ev["lat"], ev["lon"], b["lat"], b["lon"]) <= b["radius_km"]]
+    on_time = [b for b in covering if parse_iso(b["created_at"]) <= first]
+    burn = (on_time or covering or [None])[0]
+    return burn, burn is not None and not on_time
+
+
+def burn_late(conn, burn: dict) -> bool:
+    """True when an event this notice covers started before it was sent and no earlier notice covered it."""
+    for ev in conn.execute("SELECT * FROM events WHERE is_sample = ?", (burn["is_sample"],)):
+        picked, late = pick_burn(conn, dict(ev))
+        if late and picked is not None and picked["id"] == burn["id"]:
+            return True
+    return False
+
+
 def _registered_burn(conn, ev, signals) -> tuple[dict | None, list[str], bool]:
     """The burn notice covering this event today, why it counts as escaped (empty if it hasn't), and
     whether it is `late`: sent after the event started, so only a claim and never a reason to stay quiet.
@@ -297,23 +350,9 @@ def _registered_burn(conn, ev, signals) -> tuple[dict | None, list[str], bool]:
     Escape needs evidence: any report (the notice tells the burner to text FIRE), a "1" (sees smoke) from
     someone other than the burner, or fire seen outside the notice. Fire danger is a condition, not evidence,
     and a satellite detection is not evidence either: a registered burn is visible from space."""
-    burn_date = parse_iso(ev["first_seen"]).astimezone(CENTRAL).date().isoformat()
-    # A text-registered notice covers its local date. A burn logged by phone (start_at/end_at set) counts only
-    # while its window overlaps the event's lifetime, so a burn that ended before the fire started suppresses nothing.
-    rows = conn.execute(
-        "SELECT b.*, COALESCE(c.name, b.label, b.caller, 'Logged burn') AS name FROM burn_notices b "
-        "LEFT JOIN contacts c ON c.id = b.contact_id WHERE b.is_sample = ? AND ("
-        "(b.start_at IS NULL AND b.burn_date = ?) OR (b.start_at IS NOT NULL AND b.start_at <= ? AND b.end_at >= ?)) "
-        "ORDER BY b.created_at",
-        (ev["is_sample"], burn_date, iso(parse_iso(ev["last_seen"])), iso(parse_iso(ev["first_seen"]))),
-    ).fetchall()
-    first = parse_iso(ev["first_seen"])
-    covering = [dict(b) for b in rows if haversine_km(ev["lat"], ev["lon"], b["lat"], b["lon"]) <= b["radius_km"]]
-    on_time = [b for b in covering if parse_iso(b["created_at"]) <= first]
-    burn = (on_time or covering or [None])[0]
+    burn, late = pick_burn(conn, ev)
     if burn is None:
         return None, [], False
-    late = not on_time
     escaped = []
     limit = burn["radius_km"] + BURN_ESCAPE_OUTSIDE_KM
     points = [(d["lat"], d["lon"]) for d in conn.execute("SELECT lat, lon FROM detections WHERE event_id = ?", (ev["id"],))]

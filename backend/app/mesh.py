@@ -256,9 +256,11 @@ def _ack(conn, decoded: dict, from_num: int, my_num: int | None) -> str:
         status = "relayed"  # implicit ACK: another radio rebroadcast it, the recipient hasn't confirmed
     else:
         status = "delivered"
+    # Only the recipient can say delivered. An ack from any other radio is a rebroadcast at best.
     cur = conn.execute(
-        "UPDATE messages SET status = ? WHERE gateway_id = ? AND channel = 'mesh' AND status != 'delivered'",
-        (status, f"mesh-{decoded['requestId']}"),
+        "UPDATE messages SET status = CASE WHEN ? = 'delivered' AND lower(phone) != lower(?) THEN 'relayed' ELSE ? END "
+        "WHERE gateway_id = ? AND channel = 'mesh' AND status != 'delivered'",
+        (status, node_id(from_num), status, f"mesh-{decoded['requestId']}"),
     )
     if cur.rowcount:
         return "ack"
