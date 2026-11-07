@@ -651,7 +651,7 @@ def sms_simulate(msg: SimulatedSms):
         return notify.handle_inbound(conn, msg.from_, msg.body, scenario.running_now() or utcnow(), is_sample=True)
 
 
-@api.get("/messages", dependencies=[Depends(require_token)])
+@api.get("/messages", dependencies=[Depends(require_admin)])
 def list_messages(event_id: int | None = None, limit: int = Query(300, ge=1, le=2000)):
     with connect() as conn:
         return _messages(conn, event_id=event_id, limit=limit)

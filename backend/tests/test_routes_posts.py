@@ -724,3 +724,9 @@ def test_volunteer_dismisses_plain_and_crowd_held_families():
         assert _row(pid2)["ack_level"] == "crowd"
         assert sh(c, vol, pid2, "dismiss").status_code == 200
         assert _row(pid2)["status"] == "dismissed" and _row(pid2)["ack_level"] is None
+
+
+def test_messages_fail_closed_with_blank_token_outside_sample(monkeypatch):
+    with TestClient(app) as c:
+        _cfg(monkeypatch, api_token="", mode="live")
+        assert c.get("/api/messages").status_code == 503
