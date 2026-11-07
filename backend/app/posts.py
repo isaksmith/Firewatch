@@ -102,12 +102,6 @@ def create(
     member = bool(contact and contact["registered"])
     out = {"post_id": None, "event_id": None, "asked": 0, "flagged": 0, "parent_id": None}
     if category in FIRE_LIKE:
-        known = _known_hold(conn, pt, is_sample, now)
-        if known:
-            eid, parent_id = known
-            pid = _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, False, parent_id, eid, is_sample, now)
-            out.update(post_id=pid, event_id=eid, parent_id=parent_id, known=True)
-            return out
         if member and not hearsay and pt:
             pid = _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, False, None, None, is_sample, now)
             from .notify import ESTIMATE_JOIN_KM
@@ -117,6 +111,12 @@ def create(
             conn.execute("UPDATE posts SET event_id = ? WHERE id = ?", (eid, pid))
             evaluate_event(conn, eid, None, now)
             out.update(post_id=pid, event_id=eid)
+            return out
+        known = _known_hold(conn, pt, is_sample, now)
+        if known:
+            eid, parent_id = known
+            pid = _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, False, parent_id, eid, is_sample, now)
+            out.update(post_id=pid, event_id=eid, parent_id=parent_id, known=True)
             return out
         parent = _parent_for(conn, category, pt, is_sample, now)
         pid = _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, True,

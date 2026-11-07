@@ -499,3 +499,32 @@ def test_duty_ack_with_no_texts_falls_back_to_the_open_response():
         assert conn.execute("SELECT response_json FROM events WHERE id = ?", (eid,)).fetchone()[0] is not None
         r = notify.handle_inbound(conn, DUTY, "ACK", at(2), is_sample=True)
         assert r["action"] == "ack" and ev(conn, eid)["ack_level"] == "ladder"
+
+
+MEMBER = "+13165550131"  # WES, a registered member
+
+
+@pytest.mark.parametrize("role", ["duty_officer", "volunteer"])
+def test_member_web_post_near_held_event_stores_a_report_signal_and_sends_nothing(role):
+    with connect() as conn:
+        eid = escalated(conn)
+        notify.acknowledge(conn, event_id=eid, by="Holder", role=role, now=at(9))
+        wes = conn.execute("SELECT * FROM contacts WHERE phone = ?", (WES,)).fetchone()
+        assert wes["registered"]
+        n_out, n_sig = all_out(conn), conn.execute("SELECT COUNT(*) n FROM signals").fetchone()["n"]
+        r = posts.create(conn, wes, WES, "smoke near the creek", "smoke", False, at(10), True, channel="web", at=FIRE)
+        assert conn.execute("SELECT COUNT(*) n FROM signals").fetchone()["n"] == n_sig + 1
+        sig = conn.execute("SELECT * FROM signals ORDER BY id DESC").fetchone()
+        assert sig["kind"] == "report" and sig["event_id"] == eid and sig["contact_id"] == wes["id"]
+        assert r["post_id"] and r["event_id"] == eid
+        assert all_out(conn) == n_out
+
+
+def test_stranger_post_near_held_event_attaches_with_no_signal():
+    with connect() as conn:
+        eid = escalated(conn)
+        notify.acknowledge(conn, event_id=eid, by="Duty", role="duty_officer", now=at(9))
+        n_sig = conn.execute("SELECT COUNT(*) n FROM signals").fetchone()["n"]
+        r = posts.create(conn, None, "+13165559003", "smoke near the creek", "smoke", False, at(10), True, at=FIRE)
+        assert r.get("known") and r["event_id"] == eid
+        assert conn.execute("SELECT COUNT(*) n FROM signals").fetchone()["n"] == n_sig
