@@ -9,6 +9,7 @@ from app import notify, scenario
 from app.confirm import evaluate_event
 from app.db import connect, iso, loads, parse_iso
 from app.district import load_district, sync_roster
+from app.geo import haversine_km
 from app.main import app
 from app.signals import add_signal
 
@@ -61,7 +62,7 @@ def test_scenario_beats_baseline():
         assert len(_out(conn, "ask_neighbor", fire["id"])) == 3
         assert len(_out(conn, "page", fire["id"])) == 18
         downwind = [m["body"] for m in _out(conn, "downwind", fire["id"])]
-        assert downwind and all("Could reach you in ~" in b for b in downwind)
+        assert downwind and all("Could reach you in as little as " in b for b in downwind)
         assert len(_out(conn, "mutual_aid", fire["id"])) == 1
         assert not _out(conn, "ladder"), "the duty officer answered, so the ladder never moved"
 
@@ -359,12 +360,11 @@ def _first_out_minute(conn, slug: str, purpose: str, t0: str):
 
 @pytest.mark.parametrize(
     "slug,fyi,escalate,dispatch",
-    [("cottonwood-creek-packet", 38, 0, 9), ("cottonwood-creek-packet-no-fault", 27, 38, 47)],
+    [("cottonwood-creek-packet", 38, 0, 9), ("cottonwood-creek-packet-no-fault", 31, 38, 47), ("cottonwood-creek-packet-ngfs", 19, 38, 47)],
 )
 def test_packet_scenarios_report_the_worse_number(slug, fyi, escalate, dispatch):
     # Measured, not tuned. With the line fault on a Red Flag day Firewatch escalates at minute 0 (no FYI
     # first; the minute-38 FYI on the packet is Gary's registered burn, Investigate on a Red Flag day); the no-fault packet has no fault to lean on and escalates at 38. Neither asks to page.
-    # One scenario per DB: a second replay in the same DB loses its duty_fyi (finding, not fixed here).
     t0 = "2026-03-17T18:50:00Z"
     scenario.run_now(slug)
     with connect() as conn:
@@ -373,6 +373,29 @@ def test_packet_scenarios_report_the_worse_number(slug, fyi, escalate, dispatch)
         assert _first_out_minute(conn, slug, "ladder_dispatch", t0) == dispatch
     fw = {m["key"]: m["t"] for m in scenario.status(slug)["firewatch"]}
     assert fw["escalate"] == escalate and fw["page"] is None
+
+
+def test_a_second_replay_in_the_same_db_keeps_its_own_timeline():
+    # The packet replays share a place and a clock: a leftover open event used to swallow the next replay's signals.
+    t0 = "2026-03-17T18:50:00Z"
+    scenario.run_now("cottonwood-creek-packet-no-fault")
+    scenario.run_now("cottonwood-creek-packet-ngfs")
+    with connect() as conn:
+        assert _first_out_minute(conn, "cottonwood-creek-packet-ngfs", "duty_fyi", t0) == 19
+    assert scenario.status("cottonwood-creek-packet-no-fault")["events"] == []
+    assert {m["key"]: m["t"] for m in scenario.status("cottonwood-creek-packet-ngfs")["firewatch"]}["investigate"] == 19
+
+
+@pytest.mark.parametrize("slug", ["cottonwood-creek-packet", "cottonwood-creek-packet-no-fault", "cottonwood-creek-packet-ngfs"])
+def test_packet_replays_match_the_packet(slug):
+    sc = scenario.load_scenario(slug)
+    ig = sc["ignition"]
+    with connect() as conn:
+        sync_roster(conn, sc["district"])
+        located = conn.execute("SELECT lat, lon FROM contacts WHERE lat IS NOT NULL").fetchall()
+    assert located and min(haversine_km(ig["lat"], ig["lon"], c["lat"], c["lon"]) for c in located) >= 4 * 1.609344
+    reports = [s for s in sc["timeline"] if s.get("kind") == "report"]
+    assert [s["t"] for s in reports] == [31]  # the driver sees smoke at 27 but has no signal until 31
 
 
 # --- line fault on a Red Flag day -----------------------------------------------------------------------

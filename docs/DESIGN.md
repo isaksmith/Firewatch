@@ -524,6 +524,8 @@ The planner drafts a placement design. The radio survey and the supervised-burn 
 
 ## 6. Spread simulation
 
+Every estimate from this model is shown as a worst case ("as little as", "up to", "soonest"). It runs fast: on the packet's weather it gives 7.7 mi at minute 62, against the packet's 2 to 3 mi. A downwind text warned too early costs little; one warned too late does not.
+
 ### 6.1 Inputs and outputs
 
 Input: event centroid, wind speed (km/h) and direction (from, °), temperature, RH, curing, duration (default 60 min). Wind can be overridden by the user.

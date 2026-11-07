@@ -42,10 +42,16 @@ def list_scenarios() -> list[dict]:
     return out
 
 
-def clear(slug: str) -> None:
-    """Remove this scenario's events and all sample signals, messages, and burn notices."""
+def clear() -> None:
+    """Remove every scenario's events and all sample signals, messages, and burn notices, keeping sample fixtures.
+    One replay lives in the database at a time: the packet replays share a place and a clock, so another
+    replay's open event would swallow this one's signals."""
+    slugs = [s["slug"] for s in list_scenarios()]
     with connect() as conn:
-        ids = [r["id"] for r in conn.execute("SELECT id FROM events WHERE is_sample = 1 AND (sample_slug = ? OR sample_slug IS NULL)", (slug,))]
+        ids = [r["id"] for r in conn.execute(
+            f"SELECT id FROM events WHERE is_sample = 1 AND (sample_slug IS NULL OR sample_slug IN ({','.join('?' * len(slugs))}))",
+            slugs,
+        )]
         for table in ("scores", "actions", "detections", "signals", "messages"):
             conn.executemany(f"DELETE FROM {table} WHERE event_id = ?", [(i,) for i in ids])
         conn.executemany("DELETE FROM events WHERE id = ?", [(i,) for i in ids])
@@ -98,7 +104,7 @@ def _pre_steps(sc: dict) -> list[int]:
 def run_now(slug: str, until: int | None = None) -> None:
     """Run the whole scenario synchronously (tests, and the instant 'load' button)."""
     sc = load_scenario(slug)
-    clear(slug)
+    clear()
     end = sc["duration_min"] if until is None else until
     with connect() as conn:
         sync_roster(conn, sc["district"])
@@ -109,7 +115,7 @@ def run_now(slug: str, until: int | None = None) -> None:
 
 async def _replay(slug: str, seconds_per_minute: float) -> None:
     sc = load_scenario(slug)
-    await asyncio.to_thread(clear, slug)
+    await asyncio.to_thread(clear)
 
     def setup():
         with connect() as conn:
