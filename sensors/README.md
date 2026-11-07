@@ -6,17 +6,137 @@ the repository root and open http://127.0.0.1:5174. Blender models, generation
 scripts and deployment renders are in [`cad/`](cad/README.md); see
 [`cad/REVISION2.md`](cad/REVISION2.md) for the latest design and mount variants.
 
-Prototype build guide for Kansas deployments
+Sensor architecture, prototype build guide, and custom-board inspection model for Kansas deployments
 
-**Revision 0.1 · First design iteration · November 6, 2026 at 9:44 p.m. CST (America/Chicago)**
+**Documentation revision 0.2 · November 7, 2026 · CAD revision 2**
 
-FireWatch uses two types of ground sensor on the same US915 Meshtastic network. The **bare node** reports local gas response, temperature, humidity, and pressure. The **rich node** measures the same signals and adds particulate sensing. Its firmware can issue a pre-warning and send the measurements behind it. The central FireWatch model assesses the event using those measurements alongside utility line events, NASA satellite detections, NOAA weather and wind, Red Flag information, and public reports.
+FireWatch's proposed sensor network uses two types of ground node on the same US915 Meshtastic network. The **Bare node** is designed to measure gas resistance, temperature, humidity, and pressure. The **Rich node** adds optical particulate sensing. Local pre-warning firmware and holistic sensor-stream ML are planned capabilities, not validated features of the current custom-board design. The backend already accepts selected Meshtastic telemetry and can raise a particulate-based smoke signal for its event-confirmation workflow.
 
 The same radio, enclosure, and sensing architecture supports both builds. The rich node adds one distinct measurement rather than several experimental sensors. This is a module-based prototype design with a path to a custom PCB. Firmware integration, power autonomy, enclosure performance, and fire detection distance still require bench and field validation.
 
+## Current designs and implementation status
+
+Two hardware implementations are documented here. They share the two-tier idea but use different environmental sensors and power paths:
+
+| Block | Module-based prototype | Custom-board concept shown in CAD/viewer |
+|---|---|---|
+| Radio/carrier | RAK4631 on RAK19007 | RAK4630 on a proposed FireWatch carrier |
+| Environmental head, both tiers | RAK1906 with **BME680**, on an extension | Replaceable external **BME688** daughterboard |
+| Rich-only particulate | RAK12039 adapter and PMSA003I | Retains RAK12039 and PMSA003I for the first custom spin |
+| Power | Separate BQ24074 charger and 5 V boost, feeding WisBlock USB-C | Proposed BQ24074 power path and regulated 3.3 V buck-boost carrier rail |
+| Current artifacts | Parts list and assembly instructions | Editable Blender assembly, renders, browser GLB and standalone viewer |
+
+The CAD is a **mechanical/presentation concept**, generated with Blender Python. It is not an export of a routed PCB. There is no released KiCad schematic, board layout or manufacturing package in this folder. Exact footprints, connector selections, battery fit, RF clearance, seals, load ratings and outdoor performance remain open.
+
+The current backend stores temperature, relative humidity, PM2.5 and PM10 with **gateway receipt time**. Gas resistance, pressure, sample timestamps, validity/sequence metadata and external pack-voltage telemetry still need ingestion support. Its smoke rule checks a PM2.5 rise over baseline, applies a fine-particle ratio check when PM10 is nonzero, and checks for regional rises when enough distant observations exist. It needs a known node position to raise a signal. All smoke nodes collectively count as **one independent evidence source**, so two nodes observing a plume do not alone satisfy the two-source escalation rule. See [`backend/app/sensors.py`](../backend/app/sensors.py), [`mesh.py`](../backend/app/mesh.py) and [`confirm.py`](../backend/app/confirm.py).
+
+The trained scorer's evaluation uses historical satellite/context data, not collected FireWatch gas/particulate streams. See the [ML report](../backend/ml/report.md). A sensor pre-warning, a working mesh link and confirmed wildfire detection are separate things that require end-to-end testing.
+
+## Standalone 3D Node Explorer
+
+The hardware viewer runs independently of the main React dashboard and FastAPI backend. From the repository root:
+
+```powershell
+python sensors/viewer/serve.py
+```
+
+Open **http://127.0.0.1:5174**. Stop the server with Ctrl+C. To choose another port:
+
+```powershell
+python sensors/viewer/serve.py --port 5175
+```
+
+### Requirements
+
+| Task | Requirements |
+|---|---|
+| Run the hardware viewer | Python 3 for the local server; a modern browser with WebGL |
+| Python packages for the viewer | **None.** `serve.py` uses Python's standard library; no viewer `requirements.txt` or pip install is needed |
+| JavaScript packages for the viewer | **No npm install or build step.** Three.js 0.181.1 and its MIT license are bundled locally |
+| Edit/regenerate CAD or export GLB | Blender; the saved design and scripts were verified with **Blender 5.2.3 LTS** |
+| Run optional viewer checks | Node.js, then `node sensors/viewer/verify.mjs`; no npm dependencies |
+| Run the main FireWatch application | Separate setup: `backend/requirements.txt`, optional `backend/requirements-ml.txt`, and `frontend/package.json`; see the [root README](../README.md#getting-started) |
+
+No account, API key, CDN connection or Blender installation is needed just to view the exported model. The server binds to this computer's loopback address. The optional [`viewer/start.ps1`](viewer/start.ps1) launcher can use a local portable Blender Python or a Python installation. Portable Blender and downloaded skill caches under `sensors/tools/` are **not committed**; a fresh clone can run the viewer with its own Python installation.
+
+### Viewer controls and design files
+
+- **Tier selector:** Bare/Rich; switches the particulate assembly and panel size.
+- **Mount selector:** node only, adjustable tree/pole bands, or ground stake.
+- **Explode slider:** compact separation with no added fan-out. Mounted configurations separate outward with the node's orientation; solar and mounting hardware remain anchored. Node-only keeps the original Blender separation offsets.
+- **Layer controls:** independently show/hide enclosure, backplate, battery, PCB, environmental head, particulate assembly, solar, mounts and harnesses.
+- **Component information:** click a part or list entry for Overview and **Specs & Limits**, including composition, technical ratings, design limitations and source links.
+- **Focus on this component:** adjusts the camera; it does not isolate the component or change layer visibility.
+- **Resizable information panel:** drag its left divider or use Expand/Collapse. The divider supports arrow keys and Home/End; double-click resets its width.
+- **Camera controls:** orbit, zoom, Front/Rear/Top and Reset view.
+
+| Artifact | Purpose |
+|---|---|
+| [`cad/firewatch_revision2.blend`](cad/firewatch_revision2.blend) | Current editable model; shared internals plus Rich/Bare band and stake deployment scenes |
+| [`cad/firewatch_first_pass.blend`](cad/firewatch_first_pass.blend) | Retained original assembly and input to the revision-2 generator |
+| [`cad/renders/`](cad/renders/) | Assembled/exploded views, mount variants and component close-ups |
+| [`cad/scripts/`](cad/scripts/) | Scene generation, GLB export and validation scripts |
+| [`viewer/assets/firewatch.glb`](viewer/assets/firewatch.glb) | Browser-ready geometry, named components and assembly metadata |
+| [`cad/REVISION2.md`](cad/REVISION2.md) | Blender scene navigation, source dimensions and rebuild instructions |
+| [`viewer/README.md`](viewer/README.md) | Standalone viewer setup, controls and verification |
+
+In Blender's inspection scene, frame **1** is assembled and frame **100** is exploded. The Scene dropdown selects layer inspection or an upright Rich/Bare band/stake deployment scene. Deployment scenes are static snapshots; the exploded animation belongs to the inspection scene. Named collections can be collapsed and hidden in the Outliner. Blender and browser presentation poses differ for mounted views.
+
+## Hardware specifications and dimensions
+
+### Radio and processor
+
+The proposed custom carrier uses a **RAK4630** module containing a **Nordic nRF52840 MCU** and a **Semtech SX1262 LoRa transceiver**, connected over SPI. The MCU handles processing and Bluetooth; the SX1262 handles the sub-GHz link.
+
+| Specification | Value / design implication |
+|---|---|
+| CPU | 64 MHz Arm Cortex-M4 with floating-point unit |
+| Internal flash | **1 MB total**, shared by firmware and persistent application data |
+| RAM | **256 KB total**, volatile working memory |
+| Local connectivity | 2.4 GHz Bluetooth LE; the RAK module documents BLE 5.0 |
+| LoRa configuration | Intended **US915**, Meshtastic region **US**, operating within **902–928 MHz** |
+| Radio output capability | Up to **+22 dBm**, approximately 160 mW; actual configured output depends on firmware, region and hardware |
+| Module envelope | **15 × 23 × 3 mm** |
+| External logging storage | Not specified in the current custom design |
+
+Flash and RAM values are chip totals, not free application memory after firmware, bootloader and reserved areas. Select the correct regional module suffix and antenna; the SX1262 chip's wider tuning range does not mean one assembled module supports every band. Meshtastic mesh firmware is different from stock RAK LoRaWAN firmware, and custom-board compatibility still requires bring-up.
+
+Manufacturer references: [RAK4630 datasheet](https://docs.rakwireless.com/product-categories/wisduo/rak4630-module/datasheet/), [Nordic nRF52840](https://www.nordicsemi.com/Products/nRF52840), [Semtech SX1262](https://www.semtech.com/products/wireless-rf/lora-connect/sx1262), and [Meshtastic radio settings](https://meshtastic.org/docs/configuration/radio/lora/).
+
+**Communication range is not established for FireWatch.** Kilometer-scale LoRa links are possible, but antenna height, terrain, vegetation, interference and modem settings determine the installed result. Long-distance records are not a ground-node guarantee. Radio reach also does not establish the distance at which gas or smoke will reach an inlet. Survey radio links and measure plume encounters separately.
+
+### Shared and tier-specific hardware
+
+| Item | Bare | Rich |
+|---|---|---|
+| Custom environmental head | BME688: gas resistance, temperature, RH and pressure | Same |
+| Particulate | Not fitted | PMSA003I via RAK12039; PM1.0 / PM2.5 / PM10 |
+| Protected 1S battery | 3.7 V nominal, **4,400 mAh**, about **16.3 Wh** | 3.7 V nominal, **6,600 mAh**, about **24.4 Wh** |
+| Solar panel | Voltaic **P126**, sold as nominal 6 V / 2 W | Voltaic **P105**, sold as nominal 5 V / 5 W |
+| Panel envelope | **112 × 136 × 2.7 mm**; **4.41 × 5.35 × 0.11 in** | **137 × 222 × 4 mm**; **5.39 × 8.74 × 0.16 in** |
+| Enclosure envelope, both tiers | **175 × 125 × 75 mm**; upright **6.89 in high × 4.92 in wide × 2.95 in deep** | Same |
+| Proposed carrier, both tiers | **88 × 72 × 1.6 mm** | Same |
+
+The enclosure dimensions are the nominal outer box, excluding side pods, bracket, panel and mount. The carrier outline is proposed, not a finalized PCB. The visible battery is labeled **BATTERY PACK** and uses a common placeholder envelope; the actual two pack sizes still need fit verification.
+
+The **BME688 package is 3 × 3 × 0.93 mm**. Its heated gas element does not by itself identify a gas species or provide calibrated CO concentration. Keep the head in shaded outside air, away from the charger and battery. The prototype BOM below instead uses BME680 on the stocked RAK1906 module. [Bosch BME688 specifications](https://www.bosch-sensortec.com/en/products/environmental-sensors/gas-sensors/bme688)
+
+The **PMSA003I body is 38 × 35 × 12 mm** and the **RAK12039 adapter is 25 × 15 mm**. The sensor uses a nominal 5 V supply and 3.3 V I²C signaling. Its effective PM2.5 range is 0–500 µg/m³, with 1 µg/m³ output resolution; operating temperature is −10 to +60 °C. Resolution is not a validated field detection threshold. Dust and fog can also raise readings. See the [RAK12039 datasheet](https://docs.rakwireless.com/product-categories/wisblock/rak12039/datasheet/) and [Plantower manual](https://cdn-shop.adafruit.com/product-files/4632/4505_PMSA003I_series_data_manual_English_V2.6.pdf).
+
+The panel dimensions above follow the [P126](https://www.adafruit.com/product/5366) and [P105](https://www.adafruit.com/product/5367) vendor listings. Nominal panel watts and nominal pack Wh are not daily harvested energy or guaranteed runtime. The PM sensor alone can consume up to 12 Wh/day continuously; see the energy discussion below.
+
+### External mount concepts
+
+Both tiers use a shared rear spine and load spreaders, with the solar panel on a separate bracket rather than attached to the service lid.
+
+- **Tree/pole option:** two adjustable-band concepts, buckle/tail details and cushioned saddles. The displayed example has a 128 mm (5.04 in) band inside diameter around a 127 mm reference pole. Adjustment is illustrative, not a rigged mechanism or validated diameter range.
+- **Ground-stake option:** square-section shaft, retention collars, foot bar, depth collar, anti-rotation fin and pointed tip. The model places the enclosure center **700 mm (27.6 in) above grade** and the point **300 mm (11.8 in) below grade**. These are concept dimensions, not validated installation depth or sensor inlet height.
+
+Mount load capacity, soil stability, tree/pole fit, corrosion, weather sealing and RF performance have not been established. Sampled browser-path checks distinguish existing CAD contacts from newly introduced intersections; they do not certify real-world fit or structural strength.
+
 ## Parts and budget
 
-Quantities are **per node**, in USD. Linked prices are public single-unit listings checked for this design, before tax and shipping. The mechanical allowances cover consumables and fabricated pieces that are priced by the build. Confirm checkout prices and availability before ordering. Tools, assembly labor, shared relays, and the station bridge are separate.
+Quantities are **per node**, in USD. Prices below are the original prototype design's cost snapshot, not freshly verified checkout quotes. The mechanical allowances cover consumables and fabricated pieces that are priced by the build. Confirm prices and availability before ordering. Tools, assembly labor, shared relays, and the station bridge are separate. The stocked-module BOM is distinct from the custom-board concept shown in the viewer.
 
 | Part | Exact module and vendor | Unit price | Bare | Rich |
 |---|---|---:|---:|---:|
@@ -122,7 +242,9 @@ The custom assembly replaces **$88.81** in the existing BOM: the radio kit, envi
 
 The custom figures retain the battery, solar panel, enclosure, mounting, and rich node’s PM module. They exclude design, board revisions, validation, and compliance work. At 90 nodes, the estimated hardware savings are approximately **$3,000–$4,400** before those expenses. At $40 savings per node, an illustrative $4,000 development cost breaks even at 100 units. Get assembly quotes from the actual BOM and placement files before using the savings in a county proposal.
 
-### KiCad and Blender workflow
+### Planned KiCad-to-Blender engineering workflow
+
+The existing Blender revision is generated from proposed geometry; it was not imported from KiCad. The steps below describe the next engineering workflow once the schematic and routed board exist.
 
 1. **KiCad schematic.** Capture the carrier and sensor-head circuits and assign exact footprints from vendor drawings. Check the module pin map, I²C pull-ups, power sequencing, antenna requirements, and test pads against the reference designs. Run the electrical rules check before laying out the boards.
 2. **KiCad board layout.** Agree on the enclosure’s usable interior, standoff pattern, and connector exits before fixing the carrier outline. Route power and RF to the reference layout, run the board design rules check, and inspect the 3D view. Maintain separate bare and rich assembly BOMs for the same carrier.
