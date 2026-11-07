@@ -40,7 +40,7 @@ export interface AlertSummary {
 export type Suppression = 'static_source' | 'likely_prescribed' | 'registered_burn' | 'low_signal'
 
 export interface Evidence {
-  kind: 'satellite' | 'line_fault' | 'report' | 'neighbor_reply' | 'camera_smoke' | 'burn_notice'
+  kind: 'satellite' | 'line_fault' | 'report' | 'neighbor_reply' | 'camera_smoke' | 'sensor_smoke' | 'burn_notice'
   label: string
   at: string
   counts: 'strong' | 'yes' | 'weak' | 'no'
@@ -67,6 +67,47 @@ export interface ResponseBrief {
     helpers: { contact_id: number; name: string; role: string }[]
   } | null
   texts_sent: number
+  crew: CrewPosition[]
+}
+
+/** A roster contact whose Meshtastic radio has a GPS fix from the last 30 minutes. */
+export interface CrewPosition {
+  contact_id: number
+  name: string
+  role: string
+  lat: number
+  lon: number
+  mi: number
+  from_fire: string
+  position_min_ago: number
+}
+
+export interface MeshNode {
+  node_id: string
+  long_name: string | null
+  short_name: string | null
+  hw_model: string | null
+  lat: number | null
+  lon: number | null
+  position_at: string | null
+  battery_pct: number | null
+  snr: number | null
+  last_heard: string
+  contact_id: number | null
+  contact_name: string | null
+  contact_role: string | null
+  is_gateway: boolean
+  heard_min_ago: number
+  position_min_ago: number | null
+  sensors: SensorReadings | null
+}
+
+export interface SensorReadings {
+  temp_c?: number
+  rh_pct?: number
+  pm25?: number
+  pm10?: number
+  reading_at: string
 }
 
 export interface Message {
@@ -78,6 +119,7 @@ export interface Message {
   status: string
   created_at: string
   phone: string | null
+  channel: 'sms' | 'mesh'
   contact_name: string | null
   contact_role: string | null
 }
@@ -196,6 +238,148 @@ export interface FeedResponse {
   data: any
 }
 
+export interface PlannerRegions {
+  districts: { key: string; name: string }[]
+  counties: { key: string; name: string }[]
+}
+
+export interface PlanParams {
+  sites?: number
+  bare_per_site?: number
+  rich_per_site?: number
+  budget_usd?: number
+  rich_range_km?: number
+  bare_fetch_km?: number
+}
+
+export interface WindMode {
+  from_deg: number
+  from: string
+  share: number
+}
+
+export interface Climatology {
+  source: string
+  fire_gfdi: number
+  fire_hours_per_year: number
+  very_high_hours_per_year: number
+  fire_hours_by_month: number[]
+  fire_wind_rose: number[]
+  fire_wind_kmh_median: number
+  fire_wind_modes: WindMode[]
+  sun_hours: { fire_season_mean: number; fire_season_worst_week: number; winter_worst_week: number; december_mean: number }
+  pm_too_cold_days_per_year: number
+  fire_season_fog_morning_share: number
+}
+
+interface PowerRow {
+  sun_hours: number
+  made_wh_day: number
+  need_wh_day: number
+  days_on_battery: number | null
+}
+
+export interface TierPower {
+  panel_w: number
+  pack_wh: number
+  fire_season_worst_week: PowerRow
+  winter_worst_week: PowerRow
+  max_pm_duty_fire_season?: number
+}
+
+export interface RadioLink {
+  km: number
+  fresnel: number
+  quality: 'clear' | 'marginal'
+}
+
+export interface PlanSite {
+  id: number
+  label: string
+  lon: number
+  lat: number
+  on: 'line' | 'cell'
+  priority: number
+  adds_coverage: number
+  reasons: string[]
+  risk: {
+    rank: number
+    factors: { key: RiskFactor; label: string; share: number }[]
+    tallgrass: boolean
+    downwind_of_town: number
+  }
+  choice: string[]
+  placement: string
+  layout: string
+  checks: string[]
+  bare: number
+  rich: number
+  gateway: (RadioLink & { name: string }) | null
+  hops: number | null
+  nodes: { tier: 'bare' | 'rich'; lon: number; lat: number; faces: string | null }[]
+}
+
+export type RiskFactor = 'history' | 'burns' | 'lines' | 'people'
+
+export interface PlanRelay extends RadioLink {
+  name: string
+  kind: 'town' | 'substation' | 'high_point' | 'site_mast' | 'new_mast'
+  why: string
+  serves: number[]
+  mount: 'tower' | 'mast'
+  power: 'mains' | 'solar'
+  lon: number
+  lat: number
+  uplink: string
+}
+
+export interface RegionPlan {
+  region: {
+    key: string
+    name: string
+    kind: string
+    area_km2: number
+    area_sq_mi: number
+    bbox: [number, number, number, number]
+    cell_km: number
+    boundary: GeoJSON.Feature
+  }
+  params: Required<Omit<PlanParams, 'budget_usd'>> & { budget_usd: number | null; plot_acres: number; site_min_sep_km: number }
+  climate: Climatology
+  power: { bare: TierPower; rich: TierPower }
+  summary: {
+    sites: number
+    bare: number
+    rich: number
+    relays: number
+    priority_covered: number
+    coverage_curve: number[]
+    reported_wildfires: number
+    burns_per_year: number
+    max_hops: number | null
+    unreached_sites: number[]
+    prevailing_fire_wind: string
+    fire_wind_compass: string
+  }
+  station: { name: string; lon: number; lat: number }
+  sites: PlanSite[]
+  relays: PlanRelay[]
+  bom: {
+    lines: { item: string; qty: number; unit: number; total: number }[]
+    hardware: number
+    spares: number
+    total: number
+    custom_pcb_hardware: number
+  }
+  geojson: {
+    cells: GeoJSON.FeatureCollection<GeoJSON.Polygon, { priority: number; covered: number }>
+    nodes: GeoJSON.FeatureCollection<GeoJSON.Point, { kind: 'sensor'; tier: 'bare' | 'rich'; site: number }>
+    links: GeoJSON.FeatureCollection<GeoJSON.LineString, RadioLink & { kind: 'backbone' | 'gateway' }>
+  }
+  assumptions: string[]
+  warnings: string[]
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
@@ -231,6 +415,13 @@ export const api = {
   decide: (id: number, action: 'page' | 'no' | 'send', operator: string) =>
     request<AlertDetail>(`/alerts/${id}/decision`, { method: 'POST', body: JSON.stringify({ action, operator }) }),
   district: () => request<District>('/district'),
+  meshNodes: () => request<MeshNode[]>('/mesh/nodes'),
   scenario: (slug: string) => request<ScenarioStatus>(`/scenario/${slug}`),
   runScenario: (slug: string) => request<{ status: string }>(`/scenario/${slug}/run`, { method: 'POST' }),
+  plannerRegions: () => request<PlannerRegions>('/planner/regions'),
+  plan: (region: string, params: PlanParams) => {
+    const q = new URLSearchParams({ region })
+    for (const [k, v] of Object.entries(params)) if (v != null && !Number.isNaN(v)) q.set(k, String(v))
+    return request<RegionPlan>(`/planner/plan?${q}`)
+  },
 }

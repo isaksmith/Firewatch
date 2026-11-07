@@ -118,6 +118,60 @@ The Vite dev server proxies `/api` to `http://127.0.0.1:8000` (override with `AP
 
 On macOS, XGBoost needs OpenMP: `brew install libomp`.
 
+### Mesh radios (Meshtastic)
+
+Firewatch can send its texts over a Meshtastic LoRa mesh, for volunteers and trucks out of cell coverage, and take replies and GPS positions back. It's built for the SenseCAP T1000-E, but any Meshtastic radio works. See [DESIGN.md section 5.7](docs/DESIGN.md#57-mesh-radios-meshtastic).
+
+1. On each radio, use the Meshtastic phone app to set the LoRa region to **US** and put both radios on the same primary channel. A real district would use a private channel with its own key. On the field radio, shorten the position broadcast interval so the map stays current.
+2. Plug the station radio into the server with its USB cable. Run `backend/.venv/bin/meshtastic --info` to confirm it's connected and read its node ID. Keep phones off the station radio while the server is using it.
+3. Put the field radio's node ID (`!a1b2c3d4`, shown in the Meshtastic app) in the `mesh_id` column of `backend/data/districts/cottonwood-creek/roster.csv`, on the row of whoever carries it. For the demo, use the duty officer. The radio also appears at `GET /api/mesh/nodes` once the station has heard it.
+4. Set `MESH_GATEWAY=serial` in `.env` (and `MESH_DEVICE=/dev/cu.usbmodem…` if the server has more than one serial device), then restart the backend. **MESH** appears in the top bar.
+5. Run the scenario. The field radio buzzes with the duty officer's texts. Reply `PAGE` in the Meshtastic app's direct-message thread from the station radio. Each mesh text in the drawer shows **DELIVERED** once that radio acknowledges it.
+
+### Tower sensor nodes (temperature, humidity, smoke)
+
+Mesh relays on elevators and water towers can report temperature, humidity, and PM2.5/PM10, and raise a smoke-sensor signal. See [DESIGN.md section 5.8](docs/DESIGN.md#58-tower-sensor-nodes). Rough parts list per node:
+
+| Part | ~Cost |
+|---|---|
+| RAK WisBlock starter kit (RAK19007 base with solar charger + RAK4631 nRF52840/LoRa core), from a US distributor | $35 |
+| Weatherproof junction box + 2–3 W, 6 V solar panel | $25 |
+| Two 18650 cells | $10 |
+| Outdoor 915 MHz antenna + pigtail adapter | $27 |
+| RAK12039 particulate sensor (Plantower PMSA003I, I²C; Meshtastic doesn't read the cheaper serial version) | $38 |
+| RAK1901 temperature/humidity sensor (SHTC3) | $9 |
+| Vented radiation shield for the sensors (they can't sit inside the sealed box) | $5 |
+| Mount, cable, wiring | $8 |
+| **Per node** | **~$157** |
+
+A county: 6 nodes ($942) + a station radio (~$45) + an optional duty-officer T1000-E ($51) ≈ **$1,040**, about $1,140 with spares. No monthly fees. Costs, coverage, grants, and a comparison with Dryad Silvanet are in [docs/research/hardware-pricing.txt](docs/research/hardware-pricing.txt).
+
+1. Flash Meshtastic, set region **US** and the district's channel, role **Router**.
+2. Enable telemetry: environment metrics and air quality, both on a 5-minute interval.
+3. Set a **fixed position** at the tower's coordinates. Without one, the node's readings are stored but it raises no smoke signals.
+4. Mount the sensors in the shield, facing open air, with the antenna as high as the structure allows.
+
+The map shows each node's latest PM2.5, °C, and RH. Thresholds are in `backend/data/districts/<district>/settings.json` (`smoke_pm25_rise`, `smoke_fine_ratio`, `smoke_regional_share`, `smoke_repeat_min`).
+
+### Region planner (where to put a sensor network)
+
+Open **Planner** in the top bar (`/planner`) and pick a fire district or any Kansas county. It lays out the mixed bare/rich design from [sensors/README.md](sensors/README.md):
+- where each 15-acre plot of 7 bare and 2 rich nodes goes;
+- where the nodes sit inside the plot;
+- which elevators, substations, or high ground relay them to the station bridge;
+- what it costs.
+
+It's built from the region's geography and climate:
+- reported wildfires and ten years of satellite-detected burning;
+- power lines, substations, towns, and Flint Hills tallgrass;
+- terrain line of sight for every radio link;
+- ten years of hourly fire-weather winds, so sensors sit downwind of what they watch;
+- winter and fire-season sun, to check the solar budget.
+
+Change the plot count or switch to a budget, the nodes per plot, and the assumed detection ranges, and the plan updates. Each plot lists why it was chosen and what to check on site. The method and its limits are in [DESIGN.md section 5.9](docs/DESIGN.md#59-region-planner).
+
+Climate summaries are cached per 0.25° cell in `backend/data/climate/`. A county that isn't cached yet is fetched once from the Open-Meteo archive, which takes a few seconds. Terrain tiles are fetched once and cached. The planner's history layers (`wildfire_history.geojson`, `burn_activity.json`, `counties.geojson`) are rebuilt from the ML downloads with `.venv/bin/python -m ml.planner_layers`.
+
 ### Map layers and the scorer
 
 `backend/data/layers/` holds real Kansas data: transmission lines ≥ 115 kV, transmission substations, and towns from OpenStreetMap (counties from Census boundaries), plus persistent industrial heat sources derived from ten years of FIRMS detections. `backend/data/model/` holds the trained scorer. Both are committed, so the app runs without rebuilding them. To rebuild:
@@ -143,10 +197,14 @@ Results are in [backend/ml/report.md](backend/ml/report.md); the full analysis o
 | `backend/app/sim/` | Grass-fire spread estimate (arrival-time grid → isochrones, impacts) |
 | `backend/app/signals.py`, `confirm.py` | Line faults and texted reports on events; the two-source level rules and burn registry |
 | `backend/app/notify.py` | SMS gateway (outbox / Twilio), templates, neighbor asks, no-answer ladder, PAGE / NO / SEND, downwind warnings, mutual aid, inbound keywords |
+| `backend/app/mesh.py` | Meshtastic bridge: texts out as acknowledged direct messages, replies in, radio positions and crew distances |
+| `backend/app/sensors.py` | Tower sensor telemetry: readings, the smoke rule (baseline, dust check, regional check), local temperature and humidity |
+| `backend/app/planner.py`, `climate.py` | Region planner: priority grid, wind-weighted plot siting, plot layout, relay routing with terrain line of sight, power check, bill of materials; fire-weather climatology |
 | `backend/app/scenario.py` | Scenario replay on its own clock |
 | `backend/app/main.py` | FastAPI routes: alerts, actions, decisions, signals, SMS, simulate, layers, district, scenario, health, sample replay |
 | `frontend/src/pages/Dashboard.tsx` | Alert list, map, detail drawer, actions, scenario strip |
 | `frontend/src/pages/Spread3D.tsx` | 3D terrain spread preview with wind override |
+| `frontend/src/pages/Planner.tsx` | Region planner page: controls, climate, power, plots, relays, bill of materials, map |
 
 ## Data sources and APIs
 
@@ -205,4 +263,4 @@ Not used, on purpose: Kansas Mesonet, Synoptic, restricted MADIS and PurpleAir (
 
 ## Data attribution
 
-NASA FIRMS (LANCE) · Open-Meteo (CC BY 4.0) · NOAA / National Weather Service · NIFC WFIGS / IRWIN · © OpenStreetMap contributors (ODbL) · AWS Terrain Tiles · US Census TIGER · EPA ecoregions.
+NASA FIRMS (LANCE) · Open-Meteo (CC BY 4.0), including ERA5 reanalysis (Copernicus Climate Change Service) · NOAA / National Weather Service · NIFC WFIGS / IRWIN · © OpenStreetMap contributors (ODbL) · AWS Terrain Tiles · US Census TIGER · EPA ecoregions.

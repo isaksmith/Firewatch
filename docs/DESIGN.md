@@ -142,21 +142,46 @@ CREATE TABLE contacts (
   weekday_avail INTEGER NOT NULL DEFAULT 0,
   ladder_rank   INTEGER,                   -- order in the duty escalation ladder
   opted_in      INTEGER NOT NULL DEFAULT 1, -- STOP sets 0
-  registered    INTEGER NOT NULL DEFAULT 1  -- 0 for unknown numbers that texted in
+  registered    INTEGER NOT NULL DEFAULT 1, -- 0 for unknown numbers that texted in
+  mesh_id       TEXT UNIQUE                -- Meshtastic node ID (!a1b2c3d4) of the radio they carry
 );
 
 CREATE TABLE messages (
   id           INTEGER PRIMARY KEY,
   event_id     INTEGER REFERENCES events(id),
   contact_id   INTEGER REFERENCES contacts(id), -- null for a number not in the roster
-  phone        TEXT NOT NULL,
+  phone        TEXT NOT NULL,              -- phone number, or mesh node ID on the mesh channel
   direction    TEXT NOT NULL,              -- out | in
   purpose      TEXT,                       -- ask_neighbor | duty_fyi | duty_escalate | ladder | ladder_dispatch | page | page_dispatch | downwind | helper | mutual_aid_draft | mutual_aid | reply
   body         TEXT NOT NULL,              -- ≤ 160 chars for outbound
-  status       TEXT NOT NULL,              -- sent | failed | received
-  gateway_id   TEXT,                       -- Twilio SID; outbox-… in sample mode
+  status       TEXT NOT NULL,              -- sent | failed | received; mesh adds relayed | delivered
+  gateway_id   TEXT,                       -- Twilio SID; outbox-… in sample mode; mesh-<packet id>
   is_sample    INTEGER NOT NULL DEFAULT 0,
-  created_at   TEXT NOT NULL               -- the response clock (the scenario's own time during a replay)
+  created_at   TEXT NOT NULL,              -- the response clock (the scenario's own time during a replay)
+  channel      TEXT NOT NULL DEFAULT 'sms' -- sms | mesh
+);
+
+CREATE TABLE mesh_nodes (                  -- every Meshtastic radio the server's radio has heard
+  node_id      TEXT PRIMARY KEY,           -- !a1b2c3d4; contacts.mesh_id links a radio to a person
+  long_name    TEXT,
+  short_name   TEXT,
+  hw_model     TEXT,
+  lat          REAL,                       -- last GPS fix
+  lon          REAL,
+  position_at  TEXT,                       -- wall-clock time the fix arrived
+  battery_pct  INTEGER,
+  snr          REAL,
+  last_heard   TEXT NOT NULL
+);
+
+CREATE TABLE sensor_readings (             -- telemetry from mesh sensor nodes (5.8)
+  id       INTEGER PRIMARY KEY,
+  node_id  TEXT NOT NULL,
+  at       TEXT NOT NULL,                  -- wall-clock arrival time
+  temp_c   REAL,
+  rh_pct   REAL,
+  pm25     REAL,                           -- µg/m³, "environmental" (outdoor) correction
+  pm10     REAL
 );
 
 CREATE TABLE burn_notices (
@@ -282,6 +307,7 @@ Satellite detections go through 4.1–4.4 and get an ML score (section 5). Every
 | `neighbor_reply` | Inbound SMS reply to an ask-the-neighbor text | Reply `1` (smoke). Reply `3` from the contact who registered a burn here today makes the event a registered burn. Reply `2` is recorded but doesn't lower the level, because the neighbor may not have a view. |
 | `camera_smoke` | Phase 3 camera node | Detector confidence above its threshold on two consecutive frames |
 | `ngfs` | `app/ngfs_signal.py`, after each NGFS poll (never `process_detections`) | Type is `Possible Wildland Fire` (null fails closed), at least two separate `acq_date_time` scans of the same `feature_tracking_id`, and no registered burn covers it. One signal per feature. Same source class as a satellite, never strong, so it cannot escalate alone |
+| `sensor_smoke` | Mesh sensor node telemetry (5.8) | Always: the smoke rule already ran before the signal was raised. All sensors together count as one kind. A sensor joins events within 8 km, not 3, because smoke drifts downwind; it doesn't move the event's location when a line fault or report has placed it, and it can't show a burn has escaped. |
 | Satellite | Section 4.1 | ML score ≥ 40 |
 
 **Level rules** (evaluated after every new detection, signal, or reply; each rule that fires becomes a reason):
@@ -403,6 +429,99 @@ health         FIREWATCH 7AM: satellites OK, co-op feed {coop_status}, SMS OK. {
 
 **Gateway.** One `SmsGateway` interface with two implementations: `OutboxGateway` (sample mode: writes `messages` rows and shows them in the console's outbox) and `TwilioGateway` (live: sends, and receives on `POST /api/sms/inbound`, with the webhook signature verified). Outbound is rate-limited per contact (at most 1 message a minute; batched FYIs at most once every 15 minutes).
 
+### 5.7 Mesh radios (Meshtastic)
+
+For the places with no cell bar at all, volunteers and trucks can carry a Meshtastic LoRa radio (SenseCAP T1000-E: ~$51, card-sized, GPS, buzzer, IP65). One radio plugged into the server by USB (or reachable over TCP) is the gateway. Code: `backend/app/mesh.py`.
+
+- **Out.** `notify.send` texts a contact by SMS and, if the roster gives them a `mesh_id` and the gateway radio is connected, also sends the same text over the mesh as a direct message with an ACK requested. That's one `messages` row per channel. Mesh rows go from `sent` to `relayed` (another radio rebroadcast it), `delivered` (the recipient's radio acknowledged it), or `failed` (the firmware gave up). SMS has no equivalent "delivered to the device" signal. Mesh sends happen in sample mode too, since they only reach radios the roster links to a contact.
+- **In.** A direct message to the gateway radio goes through the same `handle_inbound` parser as an SMS (`PAGE`, `R`, `1`/`2`/`3`, `FIRE`, `BURN`, `STOP`). The reply goes back on the mesh only. Broadcast channel chatter is ignored. A radio with no roster contact counts like an unregistered number: it can open an Investigate, never an Escalate.
+- **Positions.** Position, node-info, and telemetry packets update `mesh_nodes`. A `FIRE` from a radio with a fix from the last 30 minutes is located at the radio, not at a roster address. So a volunteer or lease truck can report from the field, and volunteers, who have no roster location, show on the map. Each alert's response lists `crew`: roster contacts with a fresh fix, nearest the fire first.
+- **Health.** `/api/health` reports `mesh` as a source: `ok` if a packet arrived in the last 15 minutes, `stale` if connected but quiet, `down` if no radio is attached. The server retries the connection every 30 s.
+- **Range, honestly.** A body-worn T1000-E reaches about 2–5 km on flat ground and further from height. 450 sq mi needs relay radios (router role, solar) on the same elevators and water towers as the phase 3 cameras. Until then the mesh covers the station area and wherever radios happen to chain.
+
+### 5.8 Tower sensor nodes
+
+The tower relays carry sensors: a PMSA003I particulate sensor and an SHTC3 or BME280 temperature and humidity sensor on a RAK4631, in a vented radiation shield. Meshtastic firmware reads them and sends telemetry packets; `mesh.handle_packet` passes them to `backend/app/sensors.py`, which stores `sensor_readings`. Each tower node needs a fixed position set in Meshtastic: a node with no position records readings but raises no signals.
+
+- **Smoke rule.** For each PM2.5 reading: rise = PM2.5 − the node's baseline (median of its readings from 3 h to 20 min ago, or 10 µg/m³ with fewer than 3). It's smoke if rise ≥ `smoke_pm25_rise` (50), PM2.5/PM10 ≥ `smoke_fine_ratio` (0.6; dust is coarse), and, when at least 2 sensors more than 15 km away reported in the last 30 minutes, fewer than `smoke_regional_share` (50%) of them rose by half the threshold (otherwise it's regional haze). Then `add_signal("sensor_smoke", node position, source "mesh:<node>")`, at most once per node per `smoke_repeat_min` (60). Thresholds live in the district's `settings.json`.
+- **Local weather.** On live (non-sample) events, temperature and humidity from the nearest sensor within 15 km with a reading in the last 30 minutes replace the forecast's values before fire danger is computed; `weather.local_sensor` names the node. Sample events keep the scenario's weather, so a sensor on the demo table can't change the replay.
+- **Map.** `GET /api/mesh/nodes` includes each node's latest `sensors` readings; the map label shows PM2.5, °C, and RH, amber at PM2.5 ≥ 35.
+- **Power.** The PMSA003I fan draws 60–120 mA, more than a small panel supplies running nonstop. Set the air-quality telemetry interval to 5 minutes. Whether the firmware sleeps the fan between readings (through the sensor's SET pin) is unverified; check it on the first node before buying six.
+
+### 5.9 Region planner
+
+[sensors/README.md](../sensors/README.md) defines two ground-node tiers: **bare** (gas, temperature, humidity, pressure; $175) and **rich** (bare plus a PMSA003I particulate sensor; $240). Its illustrative layout is seven bare and two rich nodes per 15-acre planning plot, or 70 bare and 20 rich for a county, "depending on site assessment", with separately powered relays and one station bridge. The region planner does the desk half of that site assessment for any fire district or Kansas county. It decides where the plots go, how the nodes sit in each plot, and which relays connect them to the station, using only public geography and climate data. Code: `backend/app/planner.py`, `backend/app/climate.py`; page `/planner`.
+
+1. **Grid.** The region is cut into 1 km cells, or coarser so that there are at most 2,500 cells.
+2. **Where fires start.** For each cell, a likelihood is built from four inputs, each normalized to the region's 95th percentile:
+   - Reported wildfires: NIFC WFIGS, 2014–2026, Gaussian kernel σ 4 km, weight 0.30.
+   - Satellite-detected burning: ten years of FIRMS events with industrial heat removed, σ 3 km, weight 0.25. Escaped pasture and debris burns are a leading Kansas cause.
+   - Transmission lines (e-fold 1 km) and substations (1.5 km), weight 0.25.
+   - Towns, weighted by population (e-fold 3 km), weight 0.20.
+
+   The sum is multiplied by fuel: 1.0 in the Flint Hills tallgrass, 0.7 elsewhere. **Consequence** is the share of fire-weather hours whose wind carries a fire from the cell toward a town within 12 km. Priority = likelihood × (0.6 + 0.4 × consequence).
+3. **Climate.** `climate.py` pulls ten years of hourly ERA5 data (Open-Meteo archive) for the region's 0.25° cell and keeps the hours with grass fire danger of High or worse (GFDI ≥ 12, the same bar a line fault must clear). From those hours it derives:
+   - a 16-sector wind rose and its main wind directions, where a second direction counts if it is at least 67.5° from the first and holds at least 10% of the hours;
+   - High+ hours by month;
+   - worst-week sun-hours in fire season and in winter;
+   - days below the PM sensor's −10 °C limit;
+   - the share of foggy fire-season mornings.
+
+   For Cottonwood Creek: 116 High+ hours a year, 75% from the SSW and 24% from the NW behind cold fronts, almost all in March and April. The cached summaries in `data/climate/` are committed so planning works offline.
+4. **Detection model.** A sensor only smells a fire it is downwind of, so a plot's catchment is a wedge upwind of it, weighted by the wind rose:
+   - **Rich nodes:** 3 km, ±20° plume half-width, 0.8 chance a node in the plume catches it.
+   - **Bare nodes:** the plot itself plus 0.4 km of fetch upwind. Dryad's 100 m spacing is the only reference.
+
+   These are planning guesses, because the README is explicit that no node has a proven detection radius. They are request parameters so the detection trial's numbers can replace them.
+5. **Siting.** The top 400 cells by priority are candidates. A cell crossed by a power line puts its plot on the line, at the co-op's right of way; otherwise the plot goes at the cell center. Plots are chosen greedily by marginal priority covered, at least 3 km apart. The page plots the coverage curve up to twice the requested count, so a county can see what each extra plot buys. A budget can replace the plot count; the planner then fits plots, relays, the station and 10% spares under it.
+6. **Plot layout.** Nodes go on a 4 × 4 lattice across the 15-acre square (~82 m spacing).
+   - Rich nodes take the corner farthest downwind of each fire-wind direction, one per direction. In Cottonwood Creek that puts one on the NE corner for SSW winds and one on the SE corner for post-frontal NW winds.
+   - Bare nodes fill the next most-downwind positions.
+7. **Mesh.** Relay candidates are:
+   - town elevators and water towers (30 m, mains power);
+   - substations (30 m, mains);
+   - terrain high points at least 5 m above their surroundings (10 m mast, solar);
+   - a 10 m mast at the plot itself;
+   - as a last resort, a new 10 m mast on an 8 km grid across the region, so sparse western counties with few towns can still be routed.
+
+   A plot whose own mast can't see any of these, usually one in a creek draw, is listed as unreached with a survey warning.
+
+   Planning ranges come from `docs/research/hardware-pricing.txt`: tower to tower 25 km, tower to ground 7 km, mast to ground 5 km, ground to ground 3 km. Each link also needs line of sight over AWS terrain (about 150 m resolution), with 4/3-earth curvature and a Fresnel-zone margin that marks the link clear (60% or more) or marginal. A greedy Steiner tree connects the cheapest unconnected plot each round and pays only for new relays, within Meshtastic's default 3-hop limit. Plots aren't used as relays: the README says field nodes should prioritize sampling and power.
+8. **Power check.** Daily energy made (panel W × worst-week sun-hours × 0.6, the README's yield) is compared with need:
+   - **Need:** 1.5 Wh/day base load (an assumption until the bench trial measures it), plus 3 Wh/day for a rich node's PM sensor at 25% duty.
+   - **Output:** days on the pack when there's a deficit, and the highest PM duty the fire-season worst week supports.
+   - **Cottonwood Creek:** both tiers break even in fire season. In the worst winter week, a rich node runs a 1 Wh/day deficit that its 24.4 Wh pack covers for about 20 days.
+9. **Site checks.** Each plot gets the README's nuisance list applied to its location:
+   - a substation within 0.5 km means mains power, so the PM fan can run continuously;
+   - a town within 1 km moves the gas baseline (exhaust, heating);
+   - an industrial heat source within 5 km;
+   - Flint Hills burn-season haze;
+   - foggy mornings.
+10. **Explanations.** Following principle 2, every placement says why:
+    - **The ground:** the cell's risk rank within the region, and how much of its score each factor supplies (reported wildfires, satellite-seen burning, power lines, towns), plus tallgrass fuel and whether fire winds carry it toward a town.
+    - **The pick:** the share of the region's risk the plot adds, and the next-best spot's share. It also says how many riskier cells were passed over, and why: too close to an earlier plot, or with less risk upwind of them.
+    - **The layout:** whether the plot sits on a line right-of-way or at the cell center, and which corners the rich nodes take for which fire winds.
+    - **Each relay:** why that kind of mount was used, and which plots it carries.
+
+    The map shades risk in three classes by rank within the region (the top 5%, the next 15%, the next 30%), because scores are normalized per region. Hovering a cell shows its breakdown.
+
+**Output.** `GET /api/planner/plan?region=district:cottonwood-creek` returns:
+- the region, climate and power check;
+- plots with reasons, a risk breakdown, why each was picked and laid out, checks, node positions, gateway link and hop count;
+- relays with uplinks, why each was used, and the plots each carries;
+- a bill of materials at the README's prices, plus the custom-PCB estimate;
+- GeoJSON for the priority grid (with each cell's rank and factor shares), nodes and links;
+- the assumptions, and any warnings.
+
+For Cottonwood Creek's 446 sq mi, the default 10 plots (70 bare, 20 rich) need 8 relays and come to about $19,700 with spares. They watch about 10% of the priority-weighted ground. That's the honest number: plots add evidence where fires are most likely, and satellites, line faults and neighbor reports cover the rest.
+
+**Limits.**
+- OpenStreetMap has transmission lines only. The co-op's distribution feeders, where most line fires start, should replace them in a real assessment.
+- WFIGS misses most small fires.
+- Trees, grain bins and buildings aren't in the terrain model.
+
+The planner drafts a placement design. The radio survey and the supervised-burn detection trial in sensors/README.md confirm or move each site.
+
 ## 6. Spread simulation
 
 ### 6.1 Inputs and outputs
@@ -501,7 +620,8 @@ Query: `minutes` (default 60, max 120), optional `wind_kmh`, `wind_from_deg`. Re
 
 ### Others
 
-- `GET /api/layers/{power_lines|substations|towns|static_sources|counties}` → GeoJSON (cached files).
+- `GET /api/layers/{power_lines|substations|towns|static_sources|flint_hills|wildfire_history|counties}` → GeoJSON (cached files).
+- `GET /api/planner/regions` → districts and the 105 Kansas counties. `GET /api/planner/plan?region=district:<slug>|county:<name>` plans a sensor network (section 5.9); optional `sites`, `budget_usd`, `bare_per_site`, `rich_per_site`, `rich_range_km`, `bare_fetch_km`, `site_min_sep_km`. `POST /api/planner/plan` takes the same fields plus a GeoJSON `geometry` for a custom area.
 - `GET /api/health` → `{"mode": "live", "sources": {"firms_viirs": {"last_ok": "...", "age_min": 4, "status": "ok"}, "open_meteo": {...}}}`. Status is `ok` (< 15 min), `stale` (< 60 min), or `down`.
 - `POST /api/ingest/run` → runs one poll immediately.
 - `POST /api/sample/replay` → clears sample events and streams fixtures in over `duration_s` (default 60).
@@ -671,11 +791,16 @@ App
 │   ├── MapView (BaseMap, EventMarkers, AssetLayers, CountyLayer)
 │   ├── SuppressedStrip
 │   └── AlertDrawer (ScoreHeader, ReasonBars, Conditions, NearbyAssets, DetectionTimeline, ActionBar, History)
-└── Spread3DPage
-    ├── TerrainMap (IsochroneLayers, WindParticles, AssetLayers)
-    ├── WindPanel (Override toggle, SpeedSlider, DirectionDial)
-    ├── ImpactsPanel
-    └── TimeBar (Play, Scrubber, SpeedToggle, Reset)
+├── Spread3DPage
+│   ├── TerrainMap (IsochroneLayers, WindParticles, AssetLayers)
+│   ├── WindPanel (Override toggle, SpeedSlider, DirectionDial)
+│   ├── ImpactsPanel
+│   └── TimeBar (Play, Scrubber, SpeedToggle, Reset)
+└── PlannerPage (/planner)
+    ├── Controls (Region, Plots or Budget, Bare/Rich per plot, detection ranges)
+    ├── Summary (counts, cost, CoverageCurve), ClimatePanel (WindRose, MonthBars), PowerRow[]
+    ├── SiteCard[] (why this ground, why this plot, layout, checks, gateway link), Relays (why, plots carried), Bill of materials, Assumptions
+    └── PlanMap (risk classes with hover breakdown, watched cells, plots, nodes at zoom ≥ 12, relays, links, station, reported wildfires; collapsible legend)
 ```
 
 ## 9. Configuration
@@ -701,6 +826,9 @@ TWILIO_AUTH_TOKEN=
 TWILIO_FROM=
 PUBLIC_BASE_URL=           # used to check Twilio signatures and in console links
 API_TOKEN=                 # when set, required on endpoints that can text people
+MESH_GATEWAY=off           # off | serial | tcp: a Meshtastic radio attached to the server
+MESH_DEVICE=               # serial port (first Meshtastic port when blank) or the radio's host for tcp
+MESH_CHANNEL_INDEX=0
 ```
 
 `backend/data/districts/<slug>/settings.json` holds what a chief tunes:
@@ -719,7 +847,7 @@ API_TOKEN=                 # when set, required on endpoints that can text peopl
 }
 ```
 
-The roster is a CSV the chief already has in some form (`name, phone, role, lat, lon, weekday_avail, ladder_rank`). Ranchers and pumpers can also join by texting `JOIN` plus a road or landmark.
+The roster is a CSV the chief already has in some form (`name, phone, role, lat, lon, weekday_avail, ladder_rank, mesh_id`). `mesh_id` is the Meshtastic node ID (`!a1b2c3d4`) of the radio the person carries, blank if none. Ranchers and pumpers can also join by texting `JOIN` plus a road or landmark.
 
 ## 10. Sample fixture format
 

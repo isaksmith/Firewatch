@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Box, Flame, Play, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
 import { api, type SourceHealth } from '../api'
 import { setOperator, useOperator } from '../lib/operator'
 import { Mark } from './ui'
 
-const SOURCE_LABELS: Record<string, string> = { firms: 'FIRMS', open_meteo: 'WX' }
+const SOURCE_LABELS: Record<string, string> = { firms: 'FIRMS', open_meteo: 'WX', mesh: 'MESH' }
 
 const HEALTH_STYLE: Record<SourceHealth['status'], { dot: string; text: string }> = {
   ok: { dot: 'bg-ok', text: 'text-ok' },
@@ -84,6 +84,26 @@ export function TopBar({
           <span className="hidden text-[10px] font-normal tracking-normal text-muted lg:inline">{threeDSelected ? 'selected alert' : 'top alert'}</span>
         </Link>
       )}
+      <Divider />
+      <nav className="flex items-center gap-1">
+        {(
+          [
+            ['/', 'Console'],
+            ['/planner', 'Planner'],
+          ] as const
+        ).map(([to, label]) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={to === '/'}
+            className={({ isActive }) =>
+              `num px-2 py-[2px] text-[10px] tracking-[0.14em] uppercase ${isActive ? 'bg-raised text-text' : 'text-dim hover:text-muted'}`
+            }
+          >
+            {label}
+          </NavLink>
+        ))}
+      </nav>
       <Divider />
       <span className="label hidden 2xl:inline">Kansas AOI · Confirmation Layer</span>
       {mode === 'sample' && (

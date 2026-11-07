@@ -317,6 +317,30 @@ function ResponseSection({ a }: { a: AlertDetail }) {
           )}
         </div>
       )}
+      {r.crew.length > 0 && (
+        <div className="mt-3 border border-line bg-void px-3 py-2 text-[11.5px]">
+          <div className="flex justify-between">
+            <span className="label">Crew on the mesh</span>
+            <span className="num text-[10px] text-dim">LIVE GPS</span>
+          </div>
+          <ul className="mt-2 space-y-1">
+            {r.crew.map((c) => {
+              const responding = r.responders.some((x) => x.contact_id === c.contact_id)
+              return (
+                <li key={c.contact_id} className="flex justify-between gap-3">
+                  <span className="min-w-0 truncate">
+                    {c.name}
+                    {responding && <span className="num ml-2 text-[10px] text-ok">RESPONDING</span>}
+                  </span>
+                  <span className="num shrink-0 text-text">
+                    {c.mi} MI {c.from_fire} <span className="text-dim">{c.position_min_ago < 1 ? 'NOW' : `${c.position_min_ago}M`}</span>
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
       {r.mutual_aid && (
         <div className="mt-3 text-[11.5px]">
           <span className="label mr-2">Mutual aid</span>
@@ -338,7 +362,14 @@ function groupMessages(messages: Message[]) {
   const out: { m: Message; n: number; names: string[] }[] = []
   for (const m of messages) {
     const last = out[out.length - 1]
-    if (last && m.direction === 'out' && last.m.direction === 'out' && last.m.purpose === m.purpose && last.m.body === m.body) {
+    if (
+      last &&
+      m.direction === 'out' &&
+      last.m.direction === 'out' &&
+      last.m.purpose === m.purpose &&
+      last.m.body === m.body &&
+      last.m.channel === m.channel
+    ) {
       last.n += 1
       last.names.push(m.contact_name ?? m.phone ?? '?')
     } else {
@@ -348,10 +379,28 @@ function groupMessages(messages: Message[]) {
   return out
 }
 
+const MESH_STATUS: Record<string, { label: string; cls: string }> = {
+  delivered: { label: 'DELIVERED', cls: 'text-ok' },
+  relayed: { label: 'RELAYED', cls: 'text-investigate' },
+  failed: { label: 'NOT DELIVERED', cls: 'text-escalate' },
+  sent: { label: 'SENT', cls: 'text-dim' },
+}
+
+function MeshTag({ m }: { m: Message }) {
+  const st = m.direction === 'out' ? MESH_STATUS[m.status] : undefined
+  return (
+    <span className="flex gap-1.5">
+      <span className="border border-ok/50 px-1 text-ok">MESH</span>
+      {st && <span className={st.cls}>{st.label}</span>}
+    </span>
+  )
+}
+
 function TextsSection({ messages }: { messages: Message[] }) {
   const groups = groupMessages(messages)
+  const anyMesh = messages.some((m) => m.channel === 'mesh')
   return (
-    <Section title="Texts" right={<span className="num text-[10px] text-dim">SMS · 160 CHAR</span>}>
+    <Section title="Texts" right={<span className="num text-[10px] text-dim">{anyMesh ? 'SMS + MESH' : 'SMS'} · 160 CHAR</span>}>
       <ol className="space-y-2.5">
         {groups.map(({ m, n, names }) => {
           const inbound = m.direction === 'in'
@@ -359,6 +408,7 @@ function TextsSection({ messages }: { messages: Message[] }) {
             <li key={m.id} className={`flex flex-col ${inbound ? 'items-start' : 'items-end'}`}>
               <div className="num mb-0.5 flex gap-2 text-[9.5px] tracking-[0.06em] text-dim">
                 <span>{centralTime(m.created_at)}</span>
+                {m.channel === 'mesh' && <MeshTag m={m} />}
                 <span className={inbound ? 'text-sample' : 'text-muted'}>
                   {inbound ? `FROM ${(m.contact_name ?? m.phone ?? '').toUpperCase()}` : `${(PURPOSE_LABEL[m.purpose ?? ''] ?? m.purpose ?? '').toUpperCase()} → ${n > 1 ? `${n} PEOPLE` : names[0].toUpperCase()}`}
                 </span>

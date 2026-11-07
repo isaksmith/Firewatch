@@ -152,6 +152,11 @@ def clock_now(slug: str | None) -> datetime | None:
     return parse_iso(sc["t0"]) + timedelta(minutes=max(_clock["t_min"], 0))
 
 
+def running_now() -> datetime | None:
+    """The running replay's clock, for replies from real radios while it plays."""
+    return clock_now(_clock.get("slug")) if _clock.get("running") else None
+
+
 @lru_cache(maxsize=4)
 def _growth(slug: str) -> list[dict]:
     sc = load_scenario(slug)

@@ -53,7 +53,7 @@ These times come from running the replay (`POST /api/scenario/cottonwood-creek/r
 
 | Constraint | Design rule it produces |
 |---|---|
-| **One bar of cell, no fiber** | Every field interaction is a 160-character SMS (works on one bar, carrier store-and-forward). Replies are single digits or one word. The web console is for the station and county, never required in the field. |
+| **One bar of cell, no fiber** | Every field interaction is a 160-character SMS (works on one bar, carrier store-and-forward). Replies are single digits or one word. The web console is for the station and county, never required in the field. Where there is **no** bar, volunteers and trucks can carry a $51 Meshtastic LoRa radio that gets the same texts and replies with a delivery receipt (section 4.3). |
 | **Power** | Phase 1 puts no hardware in the district: the server runs in the cloud, the district needs phones. Phase 3 camera nodes are solar + battery, send stills not video, and store-and-forward. |
 | **False alarms** (dust, haze, March burns, neighbors' smoke) | No single weak signal pages anyone. Pages need two independent signals, or a strong multi-pass satellite score. Registered burns are suppressed inside their area and day. Line faults only count on fire-weather days. Rate limits and batching. A measured **cry-wolf budget**: at most 2 non-fire pages a month in burn season. |
 | **Rural cost and scale** | Free public data, one small cloud VM, pay-per-message SMS. No full-time operator: the system texts a human only when it needs a decision. |
@@ -108,6 +108,8 @@ flowchart LR
 | **GOES-East fire detection** | Scans every 5 min; ~2 km pixels | Free | Server-side | Sees growing fires between polar passes; can't see small ones. Read directly from NOAA open-data S3 (`noaa-goes19`, `noaa-goes18`, product `ABI-L2-FDCC`), about 3.5 min after scan start when measured. NOAA's Next Generation Fire System builds alerts on this (public access to verify). |
 | **VIIRS / MODIS** (FIRMS) | <1 min to ~3 h after an overpass; ~6–8 looks a day, clustered early afternoon and around 1–2 am | Free | Server-side | Sharp (375 m) but sparse in time. Day passes land around 12:30–2:30 pm, which overlaps afternoon fire weather. Our ML score runs on these. |
 | **Texted reports** | Human speed | ~1¢ per message | Yes (SMS) | Keyword `FIRE` plus a road or landmark. Ranchers and lease pumpers drive the district daily. Reports from unregistered numbers count, but can't page alone. |
+| **Mesh radio reports** | Human speed | ~$51 per radio, no per-message cost | No cell needed; LoRa range ~2–5 km per hop | `FIRE` from a Meshtastic radio (SenseCAP T1000-E) is located at the radio's GPS fix, so a volunteer or lease truck can report from where they stand. |
+| **Smoke and weather sensors on tower relays** | 5 min (one reading per node) | ~$157 per node, no monthly fee | No cell needed; readings ride the mesh | Six solar mesh relays on elevators and water towers each carry a particulate (PM2.5/PM10) sensor and a temperature and humidity sensor. Placed downwind (north) of the highest-risk feeders and towns. A smoke jump counts as one signal, so it pairs with a line fault to page without sending anyone. The humidity reading replaces the gridded forecast near the event. Six point sensors won't smell every fire in the district; they cover the spots where fires start. |
 | **Burn notices** | Before the burn | Same | Yes | Keyword `BURN` registers a burn area and day. This is a *negative* signal that cuts false alarms; many Kansas counties already expect a call to dispatch before a burn. |
 | **Weather and fire danger** | Hourly | Free | Server-side | Not a detection. It gates the others: a line fault on a humid day is an outage, not a fire. |
 | **Phase 3: camera on a tall structure** | 1–5 min (stills) | ~$1.5–4k per node + ~$20–40/mo data (rough) | Stills fit on one bar | A grain elevator or water tower sees smoke 10–15 miles out on flat ground. 2–3 nodes for 450 sq mi. Next step, not this weekend. |
@@ -118,13 +120,15 @@ An event's level comes from explicit, tunable rules over its signals. The ML mod
 
 | Level | Rule (initial, tuned per district) | Who hears about it |
 |---|---|---|
-| **Escalate** | Two independent signals agree (any two of: satellite score ≥ 40 or an NGFS detection, line fault on a fire-weather day, texted report, neighbor reply "1", camera smoke), **or** satellite score ≥ 70, **or** a line fault inside the district on a day with an active NWS Red Flag Warning (alone; fails closed if the warning data is stale or missing) | Duty officer gets a PAGE / NO text |
-| **Investigate** | Any one signal: satellite score ≥ 40, an NGFS detection, line fault with fire danger High or above, a texted report | Duty officer gets an FYI text; Firewatch asks the neighbors |
+| **Escalate** | Two independent signals agree (any two of: satellite score ≥ 40 or an NGFS detection, line fault on a fire-weather day, texted report, neighbor reply "1", camera smoke, smoke sensor), **or** satellite score ≥ 70, **or** a line fault inside the district on a day with an active NWS Red Flag Warning (alone; fails closed if the warning data is stale or missing) | Duty officer gets a PAGE / NO text |
+| **Investigate** | Any one signal: satellite score ≥ 40, an NGFS detection, line fault with fire danger High or above, a texted report, a smoke sensor | Duty officer gets an FYI text; Firewatch asks the neighbors |
 | **Monitor** | Anything else, including a detection inside a registered burn on its day (unless it escapes: a report from anyone, a neighbor "1" from someone other than the burner, or fire outside the notice area; extreme fire danger alone sends one quiet FYI at Investigate, never a page) | Nobody; shown on the console and in an optional evening digest |
 
 **NGFS rule.** NOAA NGFS (beta, unconfirmed) adds one signal per tracked feature, only when its type is `Possible Wildland Fire` (missing fails closed), it appears in at least two separate scans, and no registered burn covers it. It is the same source class as a satellite detection: NGFS plus VIIRS is one source, NGFS plus a line fault or a text report is two. It is never a strong detection, so NGFS alone stops at Investigate, and its FYI text says it is an unconfirmed NOAA beta satellite detection. It never reaches the model.
 
 **Ask the neighbor** is the cheapest confirmation there is. At Investigate, Firewatch texts up to three signed-up contacts within 3 miles: "Firewatch: possible fire near Rd 40 & Hwy 177. See smoke? Reply 1 yes, 2 no, 3 it's my burn." People who are already there answer in minutes, and nobody drives out. "3" from the registered burner's own number drops the event to Monitor.
+
+**Smoke sensors, and their two false alarms:** a sensor raises a signal when PM2.5 climbs at least 50 µg/m³ over that node's own 3-hour median. Wind-blown dust and harvest chaff are coarse particles, so a PM2.5/PM10 ratio under 0.6 is ignored. Flint Hills burn-season haze raises every sensor at once, so a jump that most sensors more than 15 km away are also seeing is ignored. All sensors together count as one source: two sensors under one plume still only reach Investigate. Thresholds are per district.
 
 **Public imagery:** the alert links the latest GOES visible loop for the area, so the duty officer can look for a plume in daylight (free, 5-minute refresh).
 
@@ -137,11 +141,12 @@ An event's level comes from explicit, tunable rules over its signals. The ML mod
 3. **Targeted texts, before Brush 1 arrives.** The spread estimate picks who is downwind within 60 minutes: ranchers (move stock, open gates), the lease water-truck driver, and disc owners. Example: `FIREWATCH: grass fire 3 mi S of you, wind S 16 mph, could reach your place in ~35 min. Can you disc a line? Reply 1 yes 2 no. Only if safe.`
 4. **Mutual aid, prefilled.** If fewer than 2 volunteers reply "responding" within 5 min, or the 60-minute footprint is bigger than 2+1 trucks can hold, the chief gets a ready-to-send request for the neighboring district and county EM.
 5. **Updates as evidence arrives.** New satellite passes and replies update the event; recipients get a follow-up only when the threat level or direction changes.
+6. **Mesh copy for people out of coverage.** Anyone carrying a Meshtastic radio gets the same texts over LoRa from a radio at the station, and can reply PAGE, R, or FIRE from the Meshtastic app with no cell signal. The console shows when each radio confirmed receipt, and shows volunteers and trucks at their live GPS positions: "Sam Ortiz, responding, 4.3 mi ENE of the fire."
 
 ## 5. Field reality
 
 - **Connectivity:** SMS everywhere in the field; the carrier stores and retries messages. Optional links open a text-only page (< 50 KB, static map image). The 3D console is for the station, the county EOC, and the pitch.
-- **Power:** none needed in the district in phases 1–2. Camera nodes (phase 3) are sized for 3 cloudy days on battery.
+- **Power:** none needed in the district in phase 1. Tower sensor relays (phase 1b) run on a small solar panel and two 18650 cells; the particulate sensor's fan is the main draw, so it samples for 30 s every 5 minutes. That power budget still needs checking on a real node through a cloudy week. Camera nodes (phase 3) are sized for 3 cloudy days on battery.
 - **False alarms:** the burn registry, two-signal rule, weather gating, and ML suppression of Flint Hills burns and refinery flares (section 11). Investigate is a text, not a page. Batching: one Investigate digest per 15 min at most; one page per 30 min per area unless a new independent signal arrives. Every dismissal is logged and reviewed monthly.
 - **People:** the escalation ladder never depends on one person; mutual aid triggers on missing replies, not on someone remembering.
 
@@ -149,7 +154,10 @@ An event's level comes from explicit, tunable rules over its signals. The ML mod
 
 | Failure | What Firewatch does | What the district does |
 |---|---|---|
-| Duty officer has no signal | Carrier retries; after 3 min with no reply the ladder moves on (chief, then county dispatch by voice call) | Nothing new; 911 still works |
+| Duty officer has no signal | Carrier retries; the mesh copy reaches their radio if they carry one and shows "delivered"; after 3 min with no reply the ladder moves on (chief, then county dispatch by voice call) | Nothing new; 911 still works |
+| Station mesh radio unplugged or out of range | The console marks MESH down; SMS carries on unchanged | Plug it back in; the server reconnects within 30 s |
+| Dust storm, harvest, or regional burn smoke | Coarse dust fails the PM2.5/PM10 check; district-wide haze fails the distant-sensor check; sensors alone never page | Nothing |
+| Tower sensor node dies or loses its position | The node's map label goes grey after 30 min; a node with no fixed position records readings but raises no signals | Replace the battery or panel at the next tower visit |
 | Firewatch server down | An external uptime monitor texts the chief within 5 min: "Firewatch offline — 911 is your only detection" | Same as today |
 | A source goes quiet (satellite feed late, co-op feed silent, camera offline) | Per-source health; a 7 am health text during burn season; the console says "no data," never "no fire" | Knows which eyes are closed |
 | False-alarm storm (calm March afternoon, 30 hotspots) | Registered burns suppressed; satellite-only events can't page below 70; rate limits and batching | Gets one digest, not 30 texts |
@@ -164,6 +172,7 @@ Rough figures before vendor quotes. We will say "rough" on the slide.
 | Phase | What | Cash cost | Who realistically pays | Time to stand up |
 |---|---|---|---|---|
 | 1 | Cloud server, SMS number and messages, satellites, weather, texted reports, burn registry, ask-the-neighbor, targeted texts | ~$10–25/mo server + ~$5–20/mo SMS ≈ **$300–500/yr** | District operating budget (mill levy), or **$0 if the Kansas Forest Service hosts one instance for all districts** (one server handles the state) | **About a week:** day 1 boundary, roster import, thresholds; days 2–5 sign-ups by text at a district meeting and through the co-op newsletter; one drill page |
+| 1b | Mesh and sensors, **under $1,500 per county**: a station radio (~$45, USB to the station PC); 6 solar tower relays with smoke, temperature, and humidity sensors in a vented shield (~$157 each, $942); one duty-officer radio (SenseCAP T1000-E, $51, optional). Volunteers need nothing new: SMS still reaches them | **~$1,040 hardware, ~$1,140 with 10% spares**, no monthly fees; the district's share is **~$450–550** after the VFA grant and a joint purchase (rough; [pricing report](research/hardware-pricing.txt)) | VFA grant 50/50 cost share (apply before buying: purchases dated before the application aren't reimbursed); the co-op for nodes near its lines; tower mounting rides on the elevator and water tower agreements that phase 3 needs anyway | A weekend: flash and set a private channel, set each tower's fixed position, mount 6 nodes |
 | 2 | Co-op fault and outage feed | $0 hardware; staff time | The co-op: line-caused ignitions are its liability, and a wildfire mitigation plan wants this | 1–3 months (data-sharing agreement) |
 | 3 | 2–3 camera nodes on elevators or towers | ~$1.5–4k each + ~$20–40/mo data | Kansas Forest Service Volunteer Fire Assistance grant (cost share), the oil-lease operator, the co-op | Next grant cycle, 6–12 months |
 | Optional | Thermal drone + FAA Part 107 certificate | ~$2–7k + ~$175 test | VFA grant or FEMA Assistance to Firefighters | Weeks |
@@ -192,6 +201,8 @@ Rough figures before vendor quotes. We will say "rough" on the slide.
 4. An **SMS outbox and inbox** (simulated in sample mode, Twilio in live mode) and the **response planner**: who gets which text, using spread arrival times for each contact.
 5. A **scenario clock** in the console: minutes since ignition, the baseline timeline beside the Firewatch timeline, and fire size at each point.
 6. Same afternoon, a registered burn 6 miles away that never pages anyone.
+7. **Meshtastic bridge** (built Friday night): the same texts go to linked radios as acknowledged direct messages; radio replies run through the SMS parser; GPS positions put volunteers and trucks on the map and on each alert. It's tested against the real `meshtastic` library's packet handling, but not yet over the air with the team's two T1000-E radios.
+8. **Sensor telemetry** (built Friday night): temperature, humidity, and PM2.5/PM10 from tower nodes are stored and shown on the map; the smoke rule above raises a smoke-sensor signal that joins a line fault within 8 km. Humidity and temperature from a sensor within 15 km replace the forecast on live events. Tested with simulated packets; no sensor hardware is on hand yet.
 
 Not yet built from this list: phone mockups, contacts drawn on the map and in 3D, and the text-only field page. Twilio sending and signature checks are written but have not been tried against a real number.
 
