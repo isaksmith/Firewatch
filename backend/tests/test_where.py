@@ -13,7 +13,7 @@ NOW = parse_iso("2026-03-14T18:50:00Z")
 
 @pytest.mark.parametrize("text,bearing,miles", [
     ("N 5", 0, 5), ("NW 5", 315, 5), ("5 MI NW", 315, 5), ("5 MILES NORTHWEST", 315, 5),
-    ("NORTH 5", 0, 5), ("1.5 MI E", 90, 1.5), ("n 5", 0, 5), ("smoke SE 2", 135, 2),
+    ("NORTH 5", 0, 5), ("1.5 MI E", 90, 1.5), ("n 5", 0, 5),
     ("south west 3", None, None), ("25 MI W", 270, 25), ("WEST 0.5 MILE", 270, 0.5),
 ])
 def test_accepted_forms(text, bearing, miles):
@@ -27,6 +27,7 @@ def test_accepted_forms(text, bearing, miles):
 @pytest.mark.parametrize("text", [
     "", None, "NEAR THE HOUSE", "NO SMOKE", "N", "NORTH", "5", "5 MI", "26 MI N", "0 N",
     "N 5 E 3", "2 BARNS N", "SNOW 5", "WINDOW 5 N5X",
+    "smoke SE 2", "KITTLE'S 5 ACRES", "HWY 160 W 5", "E85", "S 5 ACRES ON FIRE",
 ])
 def test_rejected_forms(text):
     assert parse_where(text) is None
@@ -78,3 +79,29 @@ def test_report_without_bearing_behaves_as_before():
     assert (sig["lat"], sig["lon"]) == far
     assert a["event_id"] != b["event_id"], "7 km apart stays two events without a bearing"
     assert b["reply"] == "Firewatch: report received. The duty officer is being told."
+
+
+def _fyi(conn):
+    return conn.execute("SELECT * FROM messages WHERE direction = 'out' AND purpose = 'duty_fyi'").fetchall()
+
+
+def test_report_outside_the_district_goes_to_the_duty_officer_directly():
+    far = (45.0, -90.0)  # well outside the district
+    with connect() as conn:
+        sync_roster(conn)
+        r = notify.handle_inbound(conn, "+13165559992", "FIRE 5 MI N", NOW, at=far, is_sample=True)
+        fyi = _fyi(conn)
+    assert len(fyi) == 1
+    body = fyi[0]["body"]
+    assert "FIRE 5 MI N" in body and "45.0000" in body and len(body) <= notify.SMS_MAX
+    assert "duty officer is being told" in r["reply"] and len(r["reply"]) <= notify.SMS_MAX
+
+
+def test_outside_report_reply_is_honest_when_nobody_can_be_told():
+    far = (45.0, -90.0)
+    with connect() as conn:
+        sync_roster(conn)
+        conn.execute("UPDATE contacts SET ladder_rank = NULL")
+        r = notify.handle_inbound(conn, "+13165559992", "FIRE 5 MI N", NOW, at=far, is_sample=True)
+        assert _fyi(conn) == []
+    assert "being told" not in r["reply"] and "911" in r["reply"] and len(r["reply"]) <= notify.SMS_MAX

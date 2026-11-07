@@ -3,6 +3,8 @@
 import csv
 import json
 import sqlite3
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -36,21 +38,29 @@ def _dir(slug: str) -> Path:
     return DISTRICTS_DIR / slug
 
 
-# Per-scenario settings overrides (for example a baseline run at the old 3 mile ask). Merged outside the
-# lru_cache so the cached District is never mutated; set and cleared by scenario.py.
-_OVERRIDES: dict = {}
+# Per-scenario settings overrides (for example a baseline run at the old 3 mile ask). Held in a ContextVar so
+# only code running inside the scenario's own context sees them (asyncio.to_thread and create_task copy that
+# context; a caller in another context does not). Merged outside the lru_cache so the cached District is never
+# mutated.
+_OVERRIDES: ContextVar[dict] = ContextVar("district_overrides", default={})
 
 
-def set_overrides(settings: dict | None) -> None:
-    _OVERRIDES.clear()
-    _OVERRIDES.update(settings or {})
+@contextmanager
+def overrides(settings: dict | None):
+    """Apply settings overrides for the current context, always reset on exit."""
+    token = _OVERRIDES.set(dict(settings or {}))
+    try:
+        yield
+    finally:
+        _OVERRIDES.reset(token)
 
 
 def load_district(slug: str | None = None) -> District:
     d = _load_district(slug)
-    if not _OVERRIDES:
+    ov = _OVERRIDES.get()
+    if not ov:
         return d
-    return District(d.slug, {**d.settings, **_OVERRIDES}, d.rings)
+    return District(d.slug, {**d.settings, **ov}, d.rings)
 
 
 @lru_cache(maxsize=4)

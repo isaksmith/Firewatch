@@ -38,7 +38,8 @@ def add_signal(
 
     Neighbor replies pass the `event_id` they answer. Locating signals join an open event with a detection
     or signal within 3 km and 6 h, or open a new event. `join_radius_km` overrides that radius (estimated
-    reports pass ESTIMATE_JOIN_KM).
+    reports pass ESTIMATE_JOIN_KM). With it set the signal attaches to the nearest open event only and
+    never merges events; a dismissed event is not a target.
     """
     if kind not in KINDS:
         raise ValueError(f"unknown signal kind {kind!r}")
@@ -49,7 +50,12 @@ def add_signal(
         radius = join_radius_km or (SENSOR_JOIN_KM if kind in SENSOR_SIGNALS else SIGNAL_RADIUS_KM)
         matched = signal_matches(conn, lat, lon, parse_iso(observed_at), flag, radius)
         matched |= _detection_matches(conn, lat, lon, observed_at, flag, radius)
-        event_id = join_or_create(conn, sorted(matched), lat, lon, observed_at, flag)
+        if join_radius_km:
+            event_id = _nearest_open(conn, matched, lat, lon)
+            if event_id is None:
+                event_id = join_or_create(conn, [], lat, lon, observed_at, flag)
+        else:
+            event_id = join_or_create(conn, sorted(matched), lat, lon, observed_at, flag)
     conn.execute(
         "INSERT INTO signals(event_id, kind, lat, lon, observed_at, source, value, contact_id, is_sample, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -57,6 +63,19 @@ def add_signal(
     )
     refresh_event_geometry(conn, event_id)
     return event_id
+
+
+def _nearest_open(conn: sqlite3.Connection, matched: set[int], lat: float, lon: float) -> int | None:
+    """The matched event nearest the point, ignoring dismissed and closed ones. Never merges events."""
+    best, best_km = None, None
+    for eid in sorted(matched):
+        row = conn.execute("SELECT lat, lon, status FROM events WHERE id = ?", (eid,)).fetchone()
+        if row is None or row["status"] in ("closed", "dismissed"):
+            continue
+        km = haversine_km(lat, lon, row["lat"], row["lon"])
+        if best_km is None or km < best_km:
+            best, best_km = eid, km
+    return best
 
 
 def _detection_matches(

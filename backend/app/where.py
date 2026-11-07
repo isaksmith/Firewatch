@@ -1,6 +1,6 @@
 """Read a bearing and distance out of the text after FIRE ("5 MI NW", "N 5") and place the report there.
 
-Pure functions. Whole tokens only, so "NEAR THE HOUSE" and "NO SMOKE" never read as a direction. A direction
+Pure functions. The whole text must be the pair, so "NEAR THE HOUSE" and "S 5 ACRES ON FIRE" never place a report. A direction
 with no distance is not placed: a distance is never guessed.
 """
 
@@ -22,8 +22,13 @@ _DIRECTIONS = {
     "W": 270.0, "WEST": 270.0,
     "NW": 315.0, "NORTHWEST": 315.0,
 }
-_UNITS = {"MI", "MILE", "MILES"}
-_TOKEN = re.compile(r"\d+(?:\.\d+)?|[A-Z]+")
+_DIR = "|".join(sorted(_DIRECTIONS, key=len, reverse=True))
+_NUM = r"\d+(?:\.\d+)?"
+_UNIT = r"(?:\s*(?:MILES|MILE|MI))?"
+# The whole trimmed text, nothing else: "<dir> <num>[ unit]" or "<num>[ unit] <dir>".
+_PATTERN = re.compile(
+    rf"(?:(?P<d1>{_DIR})\s+(?P<n1>{_NUM}){_UNIT}|(?P<n2>{_NUM}){_UNIT}\s+(?P<d2>{_DIR}))"
+)
 
 
 @dataclass(frozen=True)
@@ -39,26 +44,18 @@ class Where:
 def parse_where(text: str | None) -> Where | None:
     """Parse the text after FIRE into a bearing and distance, or None when it has no usable pair.
 
-    The distance must sit next to the direction (an optional MI/MILES between), either side.
+    The whole text must be a direction and a distance, either order, with an optional MI/MILES unit after
+    the number. Any other word means no parse.
     """
     if not text:
         return None
-    toks = _TOKEN.findall(text.upper())
-    dirs = [i for i, t in enumerate(toks) if t in _DIRECTIONS]
-    nums = [i for i, t in enumerate(toks) if t[0].isdigit()]
-    if len(dirs) != 1 or len(nums) != 1:
+    m = _PATTERN.fullmatch(text.strip().upper())
+    if not m:
         return None
-    d, n = dirs[0], nums[0]
-    if n < d:  # "5 MI NW"
-        between = toks[n + 1:d]
-    else:  # "NW 5"
-        between = toks[d + 1:n]
-    if len(between) > 1 or (between and between[0] not in _UNITS):
-        return None
-    miles = float(toks[n])
+    miles = float(m["n1"] or m["n2"])
     if not 0 < miles <= MAX_MILES:
         return None
-    return Where(_DIRECTIONS[toks[d]], miles)
+    return Where(_DIRECTIONS[m["d1"] or m["d2"]], miles)
 
 
 def point_from(lat: float, lon: float, w: Where) -> tuple[float, float]:

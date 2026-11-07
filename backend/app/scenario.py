@@ -11,7 +11,7 @@ from functools import lru_cache
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, iso, loads, parse_iso
-from .district import load_district, set_overrides, sync_roster
+from .district import load_district, overrides, sync_roster
 from .fire_weather import default_curing, gfdi, gfdi_band
 from .notify import handle_inbound, tick
 from .pipeline import process_detections
@@ -83,11 +83,8 @@ def _pre_steps(sc: dict) -> list[int]:
 @contextmanager
 def _district_settings(sc: dict):
     """Apply the scenario's optional `settings` block over the district's for the length of a run."""
-    set_overrides(sc.get("settings"))
-    try:
+    with overrides(sc.get("settings")):
         yield
-    finally:
-        set_overrides(None)
 
 
 def run_now(slug: str, until: int | None = None) -> None:
@@ -105,28 +102,28 @@ def run_now(slug: str, until: int | None = None) -> None:
 async def _replay(slug: str, seconds_per_minute: float) -> None:
     sc = load_scenario(slug)
     await asyncio.to_thread(clear, slug)
-    set_overrides(sc.get("settings"))
+    # Entered here so every to_thread worker below copies a context that carries the overrides.
+    with _district_settings(sc):
 
-    def setup():
-        with connect() as conn:
-            sync_roster(conn, sc["district"])
-            for t in _pre_steps(sc):
-                _minute(conn, sc, t)
-
-    await asyncio.to_thread(setup)
-    _clock.update(slug=slug, t_min=-1, running=True)
-    try:
-        for t in range(sc["duration_min"] + 1):
-            def step(t=t):
-                with connect() as conn:
+        def setup():
+            with connect() as conn:
+                sync_roster(conn, sc["district"])
+                for t in _pre_steps(sc):
                     _minute(conn, sc, t)
 
-            await asyncio.to_thread(step)
-            _clock["t_min"] = t
-            await asyncio.sleep(seconds_per_minute)
-    finally:
-        _clock["running"] = False
-        set_overrides(None)
+        _clock.update(slug=slug, t_min=-1, running=True)
+        try:
+            await asyncio.to_thread(setup)
+            for t in range(sc["duration_min"] + 1):
+                def step(t=t):
+                    with connect() as conn:
+                        _minute(conn, sc, t)
+
+                await asyncio.to_thread(step)
+                _clock["t_min"] = t
+                await asyncio.sleep(seconds_per_minute)
+        finally:
+            _clock["running"] = False
     log.info("scenario %s finished", slug)
 
 
@@ -178,7 +175,7 @@ def status(slug: str) -> dict:
 
     cfg = {**load_district(sc["district"]).settings, **sc.get("settings", {})}
     turnout, drive = cfg.get("turnout_min", 13), cfg.get("drive_min", 18)
-    events, firewatch = [], []
+    events, firewatch, fw_at = [], [], None
     with connect() as conn:
         rows = conn.execute("SELECT * FROM events WHERE sample_slug = ? ORDER BY first_seen", (slug,)).fetchall()
         n_out = conn.execute(
@@ -195,7 +192,10 @@ def status(slug: str) -> dict:
                     "SELECT COUNT(*) n FROM messages WHERE event_id = ? AND direction = 'out'", (ev["id"],)
                 ).fetchone()["n"],
             })
-            if state.get("investigate_at"):
+            # The earliest event across the scenario wins; a registered burn is suppressed and never counts.
+            earlier = fw_at is None or state.get("investigate_at", "") < fw_at
+            if state.get("investigate_at") and ev["suppression"] != "registered_burn" and earlier:
+                fw_at = state["investigate_at"]
                 page_t = minutes(state.get("page_at"))
                 firewatch = [
                     {"key": "signal", "t": minutes(ev["first_seen"]), "label": "First signal"},

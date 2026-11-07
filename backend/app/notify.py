@@ -536,6 +536,14 @@ def handle_inbound(
             eid = add_signal(conn, "report", *at_pt, iso(now), f"{channel}:{phone}", rest or None,
                              contact["id"] if contact else None, is_sample, join_radius_km=join_km)
             evaluate_event(conn, eid, None, now)
+            if not d.contains(*at_pt):
+                # The ladder only alerts for in-district events, so tell the duty officer directly.
+                duty = _ladder(conn)[:1]
+                if duty:
+                    fyi = f"FIREWATCH report outside district from {phone} at {here[0]:.4f},{here[1]:.4f}: {body.strip()}"
+                    send(conn, duty[0], fyi[:SMS_MAX], "duty_fyi", eid, now, is_sample)
+                else:
+                    reply = "Firewatch: report received but no duty officer could be reached. Call 911 if anyone is in danger."
             out.update(action="report", event_id=eid, reply=reply)
         else:
             duty = _ladder(conn)[:1]
