@@ -1,4 +1,5 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { Attribution } from '../components/Attribution'
 import { ArrowUp, ChevronLeft, Pause, Play, RotateCcw } from 'lucide-react'
 import type { GeoJSONSource } from 'maplibre-gl'
 import { useEffect, useRef, useState } from 'react'
@@ -99,6 +100,7 @@ export function Spread3D() {
         >
           ESTIMATE · NOT AN OPERATIONAL PREDICTION
         </span>
+        <Attribution placement="header" />
       </header>
 
       <div className="relative min-h-0 flex-1">
@@ -113,7 +115,7 @@ export function Spread3D() {
           mapStyle={IMAGERY_TERRAIN_STYLE}
           maxPitch={80}
           style={{ width: '100%', height: '100%' }}
-          attributionControl={{ compact: true }}
+          attributionControl={false}
         >
           {s && (
             <Source id="iso" type="geojson" data={s.isochrones}>

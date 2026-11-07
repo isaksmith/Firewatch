@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { SCENARIO, api } from '../api'
+import { Attribution } from '../components/Attribution'
 import { AlertDrawer } from '../components/AlertDrawer'
 import { AlertList } from '../components/AlertList'
 import { MapView } from '../components/MapView'
@@ -114,6 +115,9 @@ export function Dashboard() {
         </span>
         <span className="ml-auto hidden xl:inline 2xl:ml-0">PUBLIC DATA ONLY</span>
         {alerts.data && <span className="ml-auto xl:ml-0">SYNC {alerts.data.generated_at.slice(11, 19)}Z</span>}
+        <span className="ml-auto shrink-0 2xl:ml-0">
+          <Attribution />
+        </span>
       </footer>
     </div>
   )
