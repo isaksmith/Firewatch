@@ -55,7 +55,7 @@ PARAMS = {
     "budget_usd": None,
 }
 COSTS = {"bare": 175, "rich": 240, "relay": 105, "station": 45}
-CUSTOM_PCB = {"bare": 130.5, "rich": 197.5}  # midpoints of the README's ~100-unit estimates
+CUSTOM_PCB = {"bare": 136.44, "rich": 203.60}  # low-end ~100-unit budgets in sensors/README.md
 SPARES = 0.10
 
 WEIGHTS = {"history": 0.30, "burns": 0.25, "lines": 0.25, "people": 0.20}

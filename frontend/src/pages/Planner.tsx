@@ -751,8 +751,8 @@ export function Planner() {
                   <span className="num text-text">{usd(p.bom.total)}</span>
                 </div>
                 <p className="mt-1.5 text-[11px] leading-snug text-dim">
-                  With the custom carrier board at ~100 units: about {usd(p.bom.custom_pcb_hardware)} before spares. Excludes tax, shipping, labor, and the
-                  site survey.
+                  Low-end hardware estimate using custom nodes priced at bulk quantities (~100 units): about {usd(p.bom.custom_pcb_hardware)} before spares.
+                  Node estimates cover electronics and enclosure. Excludes deployment mounts, tax, shipping, field labor, and the site survey.
                 </p>
               </div>
 

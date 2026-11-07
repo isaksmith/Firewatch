@@ -231,16 +231,54 @@ Use a common **FireWatch carrier PCB** and a small replaceable **BME688 sensor b
 
 Use the RAK schematic and footprint data to map pin numbers before routing. Confirm the exact BME688 settings and telemetry fields against the deployed firmware. [RAK4630 documentation](https://docs.rakwireless.com/product-categories/wisduo/rak4630-module/overview/) · [TI BQ24074](https://www.ti.com/product/BQ24074) · [RAK12039 adapter](https://docs.rakwireless.com/product-categories/wisblock/rak12039/datasheet/) · [Bosch BME688](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme688-ds000.pdf).
 
-### Cost at approximately 100 units
+### Preliminary costed BOM at approximately 100 units
 
-The custom assembly replaces **$88.81** in the existing BOM: the radio kit, environmental module and extension, charger, and boost converter. Plan for **$40–$55 per node** for the carrier, populated sensor head, antenna, and cable. About **$15** is the listed RAK4630 module price and **$7** is the listed BME688 price at 100 pieces. The remaining **$18–$33** is an allowance for power components, connectors, PCB fabrication, and assembly. The rich-node estimate assumes the cost of the retained particulate assembly stays the same. [RAK module pricing](https://store.rakwireless.com/products/rak4630-nrf52840-sx1262-lora-bluetooth-module-for-lorawan) · [DigiKey BME688 pricing](https://www.digikey.com/en/products/detail/bosch-sensortec/BME688/13681261) · [JLCPCB assembly fees](https://jlcpcb.com/help/article/pcb-assembly-price).
+Price check: November 7, 2026. Costs are USD per node and use the low end of the planning allowances for a run of approximately 100 nodes. Use published 100-piece prices where available. Quantity breaks apply to each SKU, so a mixed bare/rich batch may pay more for tier-specific parts. The carrier and gas head still need a routed design, and fabrication, assembly, and programming are budgeting allowances.
 
-| Complete node | Stocked modules | Custom-board estimate | Parts savings |
-|---|---:|---:|---:|
-| Bare | $172.11 | **$123–$138** | **$34–$49** |
-| Rich | $238.63 | **$190–$205** | **$34–$49** |
+| Custom electronics item | Candidate part or scope | Quantity per bare / rich | Cost per bare node | Cost per rich node |
+|---|---|---:|---:|---:|
+| US915 radio and MCU | [DigiKey RAK4630-9-SM-I](https://www.digikey.com/en/products/detail/rakwireless-technology-limited/RAK4630-9-SM-I/17138014), US915 MHF variant, quantity-100 price | 1 / 1 | $25.99 | $25.99 |
+| Gas and environment IC | [Bosch BME688](https://www.digikey.com/en/products/detail/bosch-sensortec/BME688/13681261), mounted on the replaceable gas head. Quantity-100 Digi-Reel price includes the prorated reeling fee. | 1 / 1 | $7.70 | $7.70 |
+| Solar charger IC | [TI BQ24074RGTR](https://www.lcsc.com/product-detail/C54313.html), 1S charger with power path | 1 / 1 | $1.78 | $1.78 |
+| 3.3 V converter IC | [TI TPS63031DSKR](https://www.digikey.com/en/products/detail/texas-instruments/TPS63031DSKR/2048021), candidate pending rich-node startup and low-battery load verification | 1 / 1 | $1.46 | $1.46 |
+| LoRa antenna | [RAK MHF-1 PCB antenna, 902–928 MHz option](https://store.rakwireless.com/products/pcb-antenna-for-lora-mhf-1) | 1 / 1 | $3.00 | $3.00 |
+| BLE antenna | [RAK MHF-1 PCB antenna, SKU 920091](https://store.rakwireless.com/products/2-4ghz-wifi-ble-pcb-antenna-mhf-1) | 1 / 1 | $3.00 | $3.00 |
+| Gas-head board sockets | [JST SM04B-SRSS-TB](https://www.digikey.com/en/products/detail/jst-sales-america-inc/SM04B-SRSS-TB/926710), one at each end | 2 / 2 | $0.74 | $0.74 |
+| Gas-head cable | [Adafruit 4210, 100 mm JST-SH cable](https://www.adafruit.com/product/4210), listed at $0.76 at 100 but out of stock at price check. Budget uses the $0.95 retail price as an allowance. Verify fit and pin order. | 1 / 1 | $0.95 | $0.95 |
+| Converter passives | Inductor and input/output capacitors, allowance | 1 set / 1 set | $1.00 | $1.00 |
+| Charger, sensing and protection passives | Charger set resistors, decoupling, pack voltage divider, I²C pull-ups, and input protection, allowance | 1 set / 1 set | $1.00 | $1.00 |
+| Other board connectors | Panel input, battery, and thermistor connectors, allowance. SWD uses test pads. | 1 set / 1 set | $1.00 | $1.00 |
+| PM load switch | [TI TPS22918DBVR](https://www.digikey.com/en/products/detail/texas-instruments/TPS22918DBVR/5994601), candidate with controlled turn-on. Listing showed backorder at the price check. | 0 / 1 | — | $0.30 |
+| PM adapter socket | [RAK FBB04004-F40S1003K6M](https://store.rakwireless.com/products/wisconnector), 40-pin female. Allowance pending confirmation of the 40-pin variant price. | 0 / 1 | — | $0.75 |
+| PM switch support | Ramp and decoupling parts plus adapter fasteners, allowance | 0 / 1 set | — | $0.50 |
+| PCB fabrication | Carrier and gas-head boards, allowance | 2 / 2 | $4.00 | $4.00 |
+| SMT assembly | Placement on both boards, including allocated stencil, setup and feeder fees, allowance | 1 set / 1 set | $5.00 | $5.00 |
+| Board programming and functional check | Flash and bench-check the rails, radio and sensor interfaces, allowance | 1 / 1 | $2.00 | $2.00 |
+| **Custom PCB assembly subtotal** | Includes both boards, antennas, programming, and bench checks. Rich includes the PM socket and switch. | | **$58.62** | **$60.17** |
 
-The custom figures retain the battery, solar panel, enclosure, mounting, and rich node’s PM module. They exclude design, board revisions, validation, and compliance work. At 90 nodes, the estimated hardware savings are approximately **$3,000–$4,400** before those expenses. At $40 savings per node, an illustrative $4,000 development cost breaks even at 100 units. Get assembly quotes from the actual BOM and placement files before using the savings in a county proposal.
+DigiKey is the radio source for this budget. Verify the 3.3 V converter under low-battery conditions with the rich node’s PM adapter boosting to 5 V while the radio transmits. The charger, switch, and connectors remain candidate parts until schematic review. [TI converter specifications](https://www.ti.com/product/TPS63031) · [RAK12039 supply and pinout](https://docs.rakwireless.com/product-categories/wisblock/rak12039/datasheet/) · [JLCPCB assembly fee schedule](https://jlcpcb.com/help/article/pcb-assembly-price).
+
+The table below covers the remaining electronics and enclosure for [CAD Revision 2](cad/REVISION2.md). The RAK12039 includes the PMSA003I and its flex cable. The protected 4,400 mAh bare pack measures 69 × 37 × 18 mm and the protected 6,600 mAh rich pack measures 69 × 54 × 18 mm. Both are priced as specified. Update the shared 68 × 45 × 20 mm CAD placeholder to check the two pack envelopes, retention, and lead clearance.
+
+| Electronics and enclosure item | Part | Bare | Rich |
+|---|---|---:|---:|
+| Battery temperature probe | [Adafruit 372](https://www.adafruit.com/product/372), quantity 100+ | $3.20 | $3.20 |
+| Protected battery | [Adafruit 354](https://www.adafruit.com/product/354), 4,400 mAh / [Adafruit 353](https://www.adafruit.com/product/353), 6,600 mAh, quantity 100+ per SKU | $15.96 | $19.60 |
+| Solar panel | [Adafruit 5366](https://www.adafruit.com/product/5366), 2 W / [Adafruit 5367](https://www.adafruit.com/product/5367), 5 W, listed unit prices | $20.95 | $34.95 |
+| Panel adapter | [Adafruit 4287](https://www.adafruit.com/product/4287), quantity 100+ | $1.20 | $1.20 |
+| Electronics box | [Adafruit 905 via DigiKey](https://www.digikey.com/en/products/detail/adafruit-industries-llc/905/10669794), 175 × 125 × 75 mm, listed unit price | $19.95 | $19.95 |
+| Cable gland | [Adafruit 761](https://www.adafruit.com/product/761), quantity 100+ | $1.56 | $1.56 |
+| Internal wiring and enclosure parts | Allowance for wiring, backplate, standoffs, pack restraint, sensor hood and seals. Rich also includes the PM chamber. | $15.00 | $25.00 |
+| Particulate assembly | [Rokland RAK12039, SKU 110098](https://store.rokland.com/collections/rakwireless-products/products/particle-matter-sensor-plantower-pmsa003i-rak12039) | — | $37.97 |
+| **Remaining electronics and enclosure subtotal** | | **$77.82** | **$143.43** |
+
+| Per-node budget at approximately 100 units | Bare | Rich |
+|---|---:|---:|
+| Custom PCB assembly | $58.62 | $60.17 |
+| Remaining electronics and enclosure | $77.82 | $143.43 |
+| **Total** | **$136.44** | **$203.60** |
+
+These are low-end planning budgets. The DigiKey BME688 and enclosure listings and the Rokland RAK12039 listing showed fewer than 100 on hand at review. The $19.95 enclosure budget uses DigiKey’s listed price. Adafruit’s lower $15.96 bulk tier depends on restock. Totals cover the node electronics, solar panel, and enclosure, excluding deployment mounts, shipping, taxes, duty, final enclosure assembly labor, engineering, and validation. Confirm part availability and get a fabrication and assembly quote using the routed files before ordering.
 
 ### Planned KiCad-to-Blender engineering workflow
 
