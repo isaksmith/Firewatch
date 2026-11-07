@@ -472,7 +472,7 @@ export interface BoardPost {
   created_at: string
   author: string | null
   confirms: number
-  notes: string[] | null
+  notes: number | null
   badge: string | null
   held?: boolean
   event_status?: string | null
@@ -524,7 +524,7 @@ export async function ensureDevice(): Promise<void> {
 
 export const boardApi = {
   me: () => boardRequest<BoardMe>('/me'),
-  posts: () => boardRequest<BoardPost[] | { items: BoardPost[] }>('/posts'),
+  posts: () => boardRequest<BoardPost[]>('/posts'),
   post: (b: { category: BoardCategory; body: string; lat: number | null; lon: number | null }) =>
     boardRequest<PostResult>('/posts', { method: 'POST', body: JSON.stringify(b) }),
   confirm: (id: number, b: { kind: ConfirmKind; lat: number | null; lon: number | null }) =>

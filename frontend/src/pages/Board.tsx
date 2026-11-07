@@ -247,12 +247,10 @@ function PostCard({
         <span className="text-text">{seeText(post.confirms)}</span>
       </p>
 
-      {Array.isArray(post.notes) && post.notes.length > 0 && (
-        <ul className="mt-2 space-y-1 text-[12px] text-muted">
-          {post.notes.map((n, i) => (
-            <li key={i}>{typeof n === 'string' ? n : JSON.stringify(n)}</li>
-          ))}
-        </ul>
+      {typeof post.notes === 'number' && post.notes > 0 && (
+        <p className="mt-2 text-[12px] text-muted">
+          {post.notes} other {post.notes === 1 ? 'answer' : 'answers'}
+        </p>
       )}
 
       {open && (
@@ -329,10 +327,7 @@ export function Board() {
   })
   const posts = useQuery({
     queryKey: ['board-posts'],
-    queryFn: async () => {
-      const r = await boardApi.posts()
-      return Array.isArray(r) ? r : r.items
-    },
+    queryFn: boardApi.posts,
     refetchInterval: 15_000,
   })
 
