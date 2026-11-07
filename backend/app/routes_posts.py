@@ -5,6 +5,7 @@ import secrets
 import threading
 from datetime import timedelta
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Header, HTTPException, Request, Response
@@ -14,7 +15,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from . import notify, posts, scenario
 from .config import get_settings
 from .db import connect, iso, parse_iso, utcnow
-from .confirm import evaluate_event
+from .confirm import burn_late, evaluate_event
+from .geo import haversine_km
 from .district import LADDER_ROLES, load_district
 from .keywords import classify
 from .ratelimit import LIMITS, client_ip
@@ -198,6 +200,63 @@ def admin_posts():
     now, is_sample = _clock()
     with connect() as conn:
         return _list(conn, now, is_sample, True)
+
+
+CENTRAL = ZoneInfo("America/Chicago")
+BURN_NEAR_KM = 1.0
+
+
+def _clock_time(dt) -> str:
+    local = dt.astimezone(CENTRAL)
+    return f"{local.hour % 12 or 12}:{local.minute:02d} {'AM' if local.hour < 12 else 'PM'}"
+
+
+def _burns(conn, now, is_sample: bool, admin: bool):
+    """Today's burn notices (Central date of the board clock), newest first, at most 100. The public view
+    is rounded to 2 decimals and carries no identity; `reports_nearby` is worked out here from exact points."""
+    today = now.astimezone(CENTRAL).date().isoformat()
+    rows = conn.execute(
+        "SELECT b.*, c.name FROM burn_notices b JOIN contacts c ON c.id = b.contact_id "
+        "WHERE b.burn_date = ? AND b.is_sample = ? AND b.created_at <= ? ORDER BY b.created_at DESC, b.id DESC LIMIT 100",
+        (today, int(is_sample), iso(now)),
+    ).fetchall()
+    posts_ = conn.execute(
+        "SELECT p.lat, p.lon FROM posts p LEFT JOIN posts par ON par.id = p.parent_id "
+        "LEFT JOIN events e ON e.id = COALESCE(p.event_id, par.event_id) "
+        "WHERE p.created_at >= ? AND p.is_sample = ? AND p.lat IS NOT NULL AND p.lon IS NOT NULL "
+        "AND p.category IN ('fire', 'smoke') " + PUBLIC_WHERE,
+        (iso(now - timedelta(hours=24)), int(is_sample)),
+    ).fetchall()
+    out = []
+    for b in rows:
+        near = any(haversine_km(b["lat"], b["lon"], p["lat"], p["lon"]) <= b["radius_km"] + BURN_NEAR_KM for p in posts_)
+        row = {
+            "lat": b["lat"] if admin else round(b["lat"], 2),
+            "lon": b["lon"] if admin else round(b["lon"], 2),
+            "radius_km": b["radius_km"],
+            "registered_at": _clock_time(parse_iso(b["created_at"])),
+        }
+        if admin:
+            row["name"] = b["name"]
+            row["late"] = burn_late(conn, dict(b))
+        row["reports_nearby"] = near
+        out.append(row)
+    return out
+
+
+@public_router.get("/board/burns")
+def burns(request: Request):
+    _limit(request, "read")
+    now, is_sample = _clock()
+    with connect() as conn:
+        return _burns(conn, now, is_sample, False)
+
+
+@admin_router.get("/board/admin/burns")
+def admin_burns():
+    now, is_sample = _clock()
+    with connect() as conn:
+        return _burns(conn, now, is_sample, True)
 
 
 @public_router.post("/board/posts")

@@ -100,7 +100,7 @@ from app import public_app
 from app.ratelimit import Limiter, client_ip
 
 ALLOWED = {
-    ("GET", "/api/board/me"), ("POST", "/api/board/device"), ("GET", "/api/board/posts"), ("POST", "/api/board/posts"),
+    ("GET", "/api/board/me"), ("GET", "/api/board/burns"), ("POST", "/api/board/device"), ("GET", "/api/board/posts"), ("POST", "/api/board/posts"),
     ("POST", "/api/board/posts/{post_id}/confirm"), ("POST", "/api/board/posts/{post_id}/station"),
     ("GET", "/api/board/posts/{post_id}/photo"), ("POST", "/api/board/posts/{post_id}/photo"),
     ("GET", "/"), ("GET", "/board"), ("GET", "/favicon.svg"), ("GET", "/icons.svg"),
@@ -140,7 +140,7 @@ def test_route_inventory_is_allow_list():
 def test_schema_lists_only_the_board_routes():
     """Catches a route added straight onto the public app, which the router walk above cannot see."""
     from app import public_app
-    assert set(public_app.app.openapi()["paths"]) == {"/api/board/device", "/api/board/me", "/api/board/posts",
+    assert set(public_app.app.openapi()["paths"]) == {"/api/board/burns", "/api/board/device", "/api/board/me", "/api/board/posts",
                                                        "/api/board/posts/{post_id}/confirm", "/api/board/posts/{post_id}/station",
                                                        "/api/board/posts/{post_id}/photo"}
 
