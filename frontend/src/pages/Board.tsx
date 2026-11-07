@@ -1,6 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
 import {
   boardApi,
   BoardError,
@@ -390,9 +389,6 @@ export function Board() {
           <Mark size={16} />
           <span className="num text-[13px] font-semibold tracking-[0.28em]">FIREWATCH</span>
           <span className="label">Community board</span>
-          <Link to="/" className="num ml-auto inline-flex min-h-11 items-center text-[10px] tracking-[0.14em] text-dim uppercase hover:text-muted">
-            Console
-          </Link>
         </div>
         <p className="border-t border-escalate/60 bg-escalate px-4 py-2 text-center text-[14px] font-semibold text-white">
           Call 911 first if anyone is in danger.
