@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>System Health</title>
+<meta name="viewport" content="width=1600">
+<link rel="stylesheet" href="../shared/fonts.css"><link rel="stylesheet" href="../shared/tokens.css">
+<style>
+html,body{background:#ECEFEC;width:1600px;height:900px;overflow:hidden}
+.screen{position:relative;width:1600px;height:900px;padding:34px 48px 0;background:var(--chalk)}
+h1{font:800 36px/1.1 var(--display);margin:0 0 6px;letter-spacing:-.2px}
+.sub{font-size:19px;color:var(--ink-2);margin:0;line-height:1.35}
+.foot{position:absolute;left:48px;bottom:16px;font-size:15px;color:var(--ink-2)}
+.chip{display:inline-block;font:600 15px/1 var(--sans);padding:6px 10px;border-radius:5px;border:2px solid}
+.chip.ok{color:#1d6e49;border-color:var(--ok)}
+.chip.watch{color:#8a5d00;border-color:var(--watch);border-style:dashed}
+
+.board{position:absolute;left:48px;top:136px;width:700px}
+.bh{font:800 22px/1.2 var(--display);margin:0 0 4px}
+.bs{font-size:16px;color:var(--ink-2);margin:0 0 14px}
+.banner{background:#E9E5FA;border:2px solid var(--gap);border-left-width:10px;padding:16px 20px;font-size:20px;line-height:1.35;margin-bottom:16px}
+.banner b{display:block;font:800 22px/1.2 var(--display);margin-bottom:4px;color:#3f2fa5}
+.fr{display:flex;align-items:center;gap:16px;background:#fff;border:1px solid var(--rule);border-left:8px solid var(--ok);height:76px;padding:0 20px;margin-bottom:10px}
+.fr b{font:600 21px/1 var(--sans);width:200px;flex:none}
+.fr .st{font-size:20px}
+.fr .ic{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:600;color:#fff;background:var(--ok);flex:none}
+.fr.late{border-left-color:var(--gap);background:#F4F2FC}.fr.late .ic{background:var(--gap)}.fr.late .st{color:#4b3bb0;font-weight:600}
+.fr.off{border-left-color:#9aa3a8;background:#E4E7E5;color:#6b767c}.fr.off b{color:#6b767c}.fr.off .ic{background:#9aa3a8}.fr.off .st{color:#6b767c}
+.tbl{position:absolute;left:800px;top:136px;width:752px}
+.ft{background:#fff;border:1px solid var(--rule);padding:12px 18px;margin-bottom:10px;display:grid;grid-template-columns:1fr 1fr;column-gap:20px}
+.ft h3{grid-column:1/3;font:800 19px/1.2 var(--display);margin:0 0 6px}
+.ft div{font-size:16.5px;line-height:1.35}.ft i{display:block;font-style:normal;font-weight:600;font-size:14.5px;color:var(--ink-2);margin-bottom:2px}
+.ft .c3{border-left:3px solid var(--ok);padding-left:14px}
+</style></head><body><div class="screen"><h1>What it does when something fails</h1>
+<p class="sub">A missing feed shows up as a gap, never as "no fire".</p>
+<div class="board"><p class="bh">Feed health, as dispatch sees it</p><p class="bs">Example of a bad moment, not the whole afternoon.</p>
+<div class="banner"><b>Satellite is late.</b>No new data is not the same as no fire. 911 is still your main alarm.</div><div class="fr late"><span class="ic">&#9680;</span><b>Satellite</b><span class="st">Late, last scan 22 min ago</span></div><div class="fr off"><span class="ic">&#8211;</span><b>Co-op line faults</b><span class="st">Offline since <span class='t'>1:20</span></span></div><div class="fr ok"><span class="ic">&#10003;</span><b>Weather</b><span class="st">OK, Coldwater airport 6 min ago</span></div><div class="fr ok"><span class="ic">&#10003;</span><b>Burn log</b><span class="st">OK, 2 burns today</span></div><div class="fr ok"><span class="ic">&#10003;</span><b>Text messages</b><span class="st">OK</span></div><div class="fr ok"><span class="ic">&#10003;</span><b>Radio pager</b><span class="st">OK</span></div></div>
+<div class="tbl"><p class="bh">Five things that can go wrong</p><p class="bs">What you see, and what keeps working.</p><div class="ft"><h3>The satellite is late or down</h3><div class="c2"><i>What you see</i>A banner with the age of the data, and a gap on the map. Never "no fire".</div><div class="c3"><i>What still works</i>911 is still your main alarm. Line faults, weather and reports still count.</div></div><div class="ft"><h3>The co-op feed is down</h3><div class="c2"><i>What you see</i>Line fault input greyed out</div><div class="c3"><i>What still works</i>The satellite and public reports still score.</div></div><div class="ft"><h3>The burn log misses an entry</h3><div class="c2"><i>What you see</i>The alert says "no burn logged here"</div><div class="c3"><i>What still works</i>Dispatch dismisses it in one tap. Each dismissal is logged.</div></div><div class="ft"><h3>No cell signal in the field</h3><div class="c2"><i>What you see</i>Short texts, under 160 characters</div><div class="c3"><i>What still works</i>Offline map, the radio pager, and LoRa mesh.</div></div><div class="ft"><h3>The score is wrong</h3><div class="c2"><i>What you see</i>A score with its reasons</div><div class="c3"><i>What still works</i>A person decides. Every override is logged.</div></div></div>
+<div class="foot">Concept screen. Sample data from the Cottonwood Creek scenario.</div></div></body></html>

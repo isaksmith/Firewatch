@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Today dispatch console</title>
+<link rel="stylesheet" href="../shared/fonts.css"><link rel="stylesheet" href="../shared/tokens.css">
+<style>
+html,body{background:#08090b;}
+body{width:1440px;height:900px;overflow:hidden;color:var(--c-text);display:grid;grid-template-rows:52px 1fr 30px;font-size:15px;line-height:1.35}
+h1,h2,h3{font-family:var(--display);margin:0;font-weight:800}
+.top{display:flex;align-items:center;justify-content:space-between;padding:0 20px;background:var(--c-panel);border-bottom:1px solid var(--c-line)}
+.brand{font-family:var(--display);font-weight:800;font-size:20px}
+.brand span{font-family:var(--sans);font-weight:400;font-size:15px;color:var(--c-muted);margin-left:14px}
+.clock{font-size:22px;font-weight:600}
+.foot{display:flex;align-items:center;padding:0 20px;background:var(--c-panel);border-top:1px solid var(--c-line);color:var(--c-muted);font-size:12.5px}
+.main{display:flex;min-height:0}
+.panel{background:var(--c-panel);border-right:1px solid var(--c-line);min-height:0}
+.ptitle{font-family:var(--display);font-weight:800;font-size:17px;padding:14px 20px;border-bottom:1px solid var(--c-line)}
+.btn{font-family:var(--sans);font-weight:600;font-size:18px;border:0;border-radius:6px;padding:0 24px;height:60px;cursor:pointer}
+.muted{color:var(--c-muted)}
+
+.main{padding:28px;gap:28px;background:var(--c-bg)}
+.col{background:var(--c-panel);border:1px solid var(--c-line);border-radius:8px}
+.log{width:380px}.log li{padding:16px 20px;border-bottom:1px solid var(--c-line);list-style:none}
+.log ul{margin:0;padding:0}
+.log .tm{color:var(--c-muted);font-size:14px}
+.call{flex:1;padding:36px 44px;display:flex;flex-direction:column}
+.call h2{font-size:34px;margin:6px 0 24px}
+.quote{font-size:30px;line-height:1.3;font-weight:500;border-left:4px solid var(--c-line);padding-left:24px;margin:0 0 30px}
+.fact{display:grid;grid-template-columns:150px 1fr;row-gap:10px;font-size:19px;margin-bottom:auto}
+.fact b{color:var(--c-muted);font-weight:400}
+.btn.big{background:var(--c-raised);border:2px solid var(--c-text);color:var(--c-text);height:84px;font-size:26px;align-self:flex-start;padding:0 48px}
+.gaps{width:340px;padding:24px 24px}
+.gaps h3{font-size:17px;margin-bottom:6px}
+.gaps p{color:var(--c-muted);margin:0 0 22px}
+.gaps dl{margin:0}.gaps dt{font-weight:600;margin-top:18px}.gaps dd{margin:2px 0 0;color:var(--c-degraded)}
+</style></head><body>
+<div class="top"><div class="brand">County dispatch<span>Cottonwood Creek Fire District, today's system</span></div><div class="clock t"><span class="t">2:21 pm</span></div></div>
+<div class="main">
+ <div class="col log"><div class="ptitle">Calls today</div><ul>
+  <li><div class="tm"><span class="t">2:21 pm</span>, just now</div><b>911 call: smoke NW of town</b></li>
+  <li><div class="tm"><span class="t">1:48 pm</span></div>Smoke reported east of town</li>
+  <li><div class="tm"><span class="t">12:20 pm</span></div>Smoke reported southwest of town</li>
+  <li><div class="tm"><span class="t">11:15 am</span></div>Burn call: Ortiz pasture</li>
+  <li><div class="tm"><span class="t">10:40 am</span></div>Burn call: Henderson pasture</li>
+ </ul></div>
+ <div class="col call">
+  <div class="muted">911 call card</div>
+  <h2>Incoming call</h2>
+  <p class="quote">Big smoke NW of town, moving fast.</p>
+  <div class="fact"><b>Caller</b><span>Propane driver</span><b>Received</b><span><span class="t">2:21 pm</span></span><b>Location</b><span>Northwest of town, no road given</span></div>
+  <button class="btn big">Page Cottonwood Creek</button>
+ </div>
+ <div class="col gaps"><h2 style="font-size:20px;margin-bottom:6px">What this screen does not show</h2>
+  <p>The dispatcher has only the call.</p>
+  <dl>
+   <dt>Where the fire is</dt><dd>No map</dd>
+   <dt>How old it is</dt><dd>Unknown. It started 31 minutes ago.</dd>
+   <dt>Which smoke is a burn</dt><dd>Two permitted burns are also being reported</dd>
+   <dt>Who is in the path</dt><dd>Nothing</dd>
+   <dt>Who has been told</dt><dd>Nobody yet</dd>
+  </dl></div>
+</div>
+<div class="foot">Concept screen. Sample data from the Cottonwood Creek scenario.</div></body></html>
