@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from . import notify, sample, scenario
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
-from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, utcnow
+from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
 from .district import boundary_geojson, load_district, sync_roster
 from .fire_weather import default_curing, gfdi_band
 from .ingest import hms, landsat_nrt, lsr, metar, nws, risk_grid, spc, wfigs
@@ -452,7 +452,7 @@ def health():
             sources[name] = {"status": "sample", "age_min": None, "last_ok": None, "last_error": None,
                              "interval_s": interval_s}
             continue
-        last_error = r["last_error"] if r else None
+        last_error = redact(r["last_error"]) if r else None
         if r is None or r["last_ok"] is None:
             status = "skipped" if name in ("firms", "landsat_nrt") and not s.firms_map_key else "down"
             sources[name] = {"status": status, "age_min": None, "last_ok": None, "last_error": last_error,

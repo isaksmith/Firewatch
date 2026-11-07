@@ -122,3 +122,21 @@ def test_mark_source_redacts_the_key(monkeypatch):
 
     db.mark_source(Conn(), "firms", ok=False, error="failed at /csv/SECRETKEY123/VIIRS")
     assert "SECRETKEY123" not in calls[0][1]
+
+
+def test_init_db_scrubs_old_errors_and_recovery_clears_them(tmp_path):
+    from app import db
+
+    path = str(tmp_path / "t.sqlite")
+    db.init_db(path)
+    with db.connect(path) as conn:
+        conn.execute(
+            "INSERT INTO source_health(source, last_error) VALUES ('firms', ?)",
+            ("403 for https://firms.modaps.eosdis.nasa.gov/api/area/csv/SECRETKEY123/VIIRS",),
+        )
+        conn.execute("INSERT INTO source_health(source, last_error) VALUES ('nws_alerts', 'timeout')")
+    db.init_db(path)
+    with db.connect(path) as conn:
+        assert conn.execute("SELECT last_error FROM source_health WHERE source='firms'").fetchone()[0] is None
+        db.mark_source(conn, "nws_alerts", ok=True)
+        assert conn.execute("SELECT last_error FROM source_health WHERE source='nws_alerts'").fetchone()[0] is None

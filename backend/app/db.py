@@ -192,6 +192,8 @@ def init_db(path: str | None = None) -> None:
             for col, decl in cols.items():
                 if col not in have:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+        # Errors stored before keys were redacted can hold a FIRMS URL with the key in it.
+        conn.execute("UPDATE source_health SET last_error = NULL WHERE last_error LIKE '%/api/area/csv/%'")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:
@@ -202,15 +204,20 @@ def loads(s: str | None, default=None):
     return json.loads(s) if s else default
 
 
+def redact(text: str | None) -> str | None:
+    """Health is unauthenticated, so a key must never be stored or served."""
+    key = get_settings().firms_map_key
+    return text.replace(key, "***") if text and key else text
+
+
 def mark_source(conn: sqlite3.Connection, source: str, ok: bool, error: str | None = None) -> None:
     now = iso(utcnow())
-    key = get_settings().firms_map_key
-    if error and key:
-        error = error.replace(key, "***")  # health is unauthenticated; never store a key
+    error = redact(error)
     if ok:
         conn.execute(
             "INSERT INTO source_health(source, last_ok) VALUES (?, ?) "
-            "ON CONFLICT(source) DO UPDATE SET last_ok = excluded.last_ok",
+            "ON CONFLICT(source) DO UPDATE SET last_ok = excluded.last_ok, "
+            "last_error = NULL, last_error_at = NULL",
             (source, now),
         )
     else:
