@@ -18,7 +18,14 @@ export const BUNDLED_INFOS: PackInfo[] = Object.values(BUNDLED).map((p) => ({
 
 const cache = new Map<string, Pack>();
 
+// Pack codes become file names, so only plain lowercase names are allowed (no "/", "..", or leading "-").
+const PACK_CODE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+export function isPackCode(code: unknown): code is string {
+  return typeof code === 'string' && PACK_CODE.test(code);
+}
+
 function packFile(code: string): File {
+  if (!isPackCode(code)) throw new Error('Bad pack code');
   return new File(Paths.document, 'packs', `${code}.json`);
 }
 
@@ -71,7 +78,7 @@ export async function fetchPackIndex(server: string): Promise<PackInfo[]> {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const j = await r.json();
     const list = (Array.isArray(j) ? j : j.packs) as PackInfo[];
-    return list;
+    return (Array.isArray(list) ? list : []).filter((p) => p && isPackCode(p.code));
   } finally {
     clearTimeout(timer);
   }
@@ -106,6 +113,7 @@ export async function verifyPackText(text: string, info: PackInfo): Promise<Pack
 
 /** Download one pack, check its sha256 and shape, store it. Throws PackDamaged when it is not trustworthy. */
 export async function downloadPack(server: string, info: PackInfo): Promise<void> {
+  if (!isPackCode(info.code)) throw new PackDamaged();
   const r = await fetch(`${server}/api/m/packs/${info.code}`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const text = await r.text();

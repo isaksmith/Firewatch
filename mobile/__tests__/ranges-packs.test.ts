@@ -66,3 +66,10 @@ describe('verifyPackText', () => {
     }
   });
 });
+
+describe('pack codes are safe file names', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { isPackCode } = require('../src/lib/packs');
+  it.each(['cwc', 'ks-comanche', 'a1'])('accepts %s', (c) => expect(isPackCode(c)).toBe(true));
+  it.each(['../x', 'a/b', '..', '-x', 'CWC', '', 'a'.repeat(33), 5, null])('rejects %p', (c) => expect(isPackCode(c)).toBe(false));
+});
