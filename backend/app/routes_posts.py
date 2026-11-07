@@ -19,7 +19,6 @@ admin_router = APIRouter()
 
 STATION_ROLES = ("volunteer", *LADDER_ROLES)
 BADGE = "Fire department is aware. Call 911 if you are in danger."
-EXACT = ("fire", "smoke")
 
 
 def _clock():
@@ -111,7 +110,7 @@ def me(x_firewatch_device: str = Header(default="")):
 
 
 def _item(conn, r, station: bool, now) -> dict:
-    exact = station or r["category"] in EXACT
+    exact = station
     lat, lon = r["lat"], r["lon"]
     if not exact and lat is not None:
         lat, lon = round(lat, 2), round(lon, 2)
@@ -200,7 +199,7 @@ def station_action(conn, post, action: str, by: str, role: str, now, is_sample: 
     if action in ("send", "page"):
         if action == "page" and not ladder:
             raise HTTPException(403, "Not allowed")
-        if root["status"] != "open" or root["category"] not in EXACT or root["lat"] is None:
+        if root["status"] != "open" or root["category"] not in posts.FIRE_LIKE or root["lat"] is None:
             raise HTTPException(409, "This post cannot go to alerts")
         if eid and conn.execute("SELECT status FROM events WHERE id = ?", (eid,)).fetchone()["status"] == "closed":
             raise HTTPException(409, "Event closed")

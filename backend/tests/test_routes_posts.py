@@ -117,9 +117,10 @@ def test_location_rounding():
         fr = post(c, m, "fire", "Flames in the field right now")
         pv = {i["id"]: i for i in pub(c)}
         assert (pv[hz]["lat"], pv[hz]["lon"]) == (37.77, -96.66)
-        assert (pv[fr]["lat"], pv[fr]["lon"]) == PT
+        assert (pv[fr]["lat"], pv[fr]["lon"]) == (37.77, -96.66)
         st = {i["id"]: i for i in pub(c, member("Vol", "volunteer"))}
         assert (st[hz]["lat"], st[hz]["lon"]) == PT
+        assert (st[fr]["lat"], st[fr]["lon"]) == PT
 
 
 def test_station_view_shows_hidden_flagged_first_with_name():
