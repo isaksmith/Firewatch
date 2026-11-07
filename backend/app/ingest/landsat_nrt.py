@@ -27,7 +27,7 @@ def poll() -> dict:
     if not s.firms_map_key:
         raise RuntimeError("FIRMS_MAP_KEY not set")
     w, so, e, n = s.bbox_tuple
-    url = AREA_URL.format(key=s.firms_map_key, source="LANDSAT_NRT", bbox=f"{w},{so},{e},{n}", days=1)
+    url = AREA_URL.format(key=s.firms_map_key, source="LANDSAT_NRT", bbox=f"{w},{so},{e},{n}", days=s.firms_days)
     text = fetch_text(url, "LANDSAT_NRT")
     if "latitude" not in text[:300] and text.strip():
         raise ValueError(text.strip()[:120])  # FIRMS returns plain-text errors with HTTP 200

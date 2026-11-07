@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     poll_rtma_ru_s: int = 900
     poll_landsat_nrt_s: int = 300  # only polled when a FIRMS key is set
     firms_sources: str = "VIIRS_SNPP_NRT,VIIRS_NOAA20_NRT,VIIRS_NOAA21_NRT,MODIS_NRT"
+    # FIRMS counts days by UTC date, so 1 is empty after 6 pm Central until the next pass. dedupe_key absorbs the overlap.
+    firms_days: int = 2
     scorer: str = "auto"  # auto (model if present, else rules) | model | rules
     threshold_escalate: int = 70
     threshold_investigate: int = 40
