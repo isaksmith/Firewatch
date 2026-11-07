@@ -1,0 +1,123 @@
+{
+  "slug": "cottonwood-creek-packet-no-fault",
+  "title": "Cottonwood Creek (packet, phase 1): no line fault",
+  "story": "Same packet fire with no co-op line-fault feed, which is what the $300 to $500 a year buys. Only the propane driver's report (minute 27) and the afternoon satellite pass see it.",
+  "district": "cottonwood-creek",
+  "synthetic": true,
+  "t0": "2026-03-17T18:50:00Z",
+  "t0_local": "1:50 pm CDT, Tue Mar 17 2026",
+  "duration_min": 62,
+  "ignition": {
+    "lat": 37.77,
+    "lon": -96.66,
+    "cause": "downed distribution line"
+  },
+  "weather": {
+    "wind_kmh": 56,
+    "gust_kmh": 90,
+    "wind_dir_deg": 180,
+    "rh_pct": 11,
+    "temp_c": 25.6,
+    "precip_72h_mm": 0,
+    "thunder_24h": 0
+  },
+  "baseline": {
+    "source": "Challenge packet (today's chain, no Firewatch): propane driver sees smoke at 27, 911 at 31, district paged at 33",
+    "milestones": [
+      {
+        "key": "visual",
+        "t": 27,
+        "label": "First visual (rancher)"
+      },
+      {
+        "key": "call",
+        "t": 31,
+        "label": "911 call"
+      },
+      {
+        "key": "roll",
+        "t": 44,
+        "label": "Trucks roll"
+      },
+      {
+        "key": "on_scene",
+        "t": 62,
+        "label": "On scene"
+      }
+    ]
+  },
+  "timeline": [
+    {
+      "t": -230,
+      "type": "sms",
+      "from": "+13165550135",
+      "body": "BURN",
+      "note": "Gary Pruitt registers a pasture burn for today"
+    },
+    {
+      "t": 27,
+      "type": "signal",
+      "kind": "report",
+      "lat": 37.77,
+      "lon": -96.66,
+      "source": "sms:+13165550199",
+      "value": "smoke",
+      "note": "Propane driver (4+ mi away, unregistered) sees smoke; located at the fire for matching"
+    },
+    {
+      "t": 38,
+      "type": "detections",
+      "note": "VIIRS NOAA-20 afternoon pass sees the fire and the registered burn",
+      "detections": [
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.7776,
+          "lon": -96.6565,
+          "brightness_k": 352.1,
+          "frp_mw": 28.4,
+          "confidence": "nominal",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        },
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.7844,
+          "lon": -96.6534,
+          "brightness_k": 367.0,
+          "frp_mw": 61.7,
+          "confidence": "high",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        },
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.7912,
+          "lon": -96.6503,
+          "brightness_k": 359.8,
+          "frp_mw": 44.2,
+          "confidence": "high",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        },
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.7512,
+          "lon": -96.5462,
+          "brightness_k": 331.4,
+          "frp_mw": 7.5,
+          "confidence": "nominal",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        }
+      ]
+    }
+  ]
+}

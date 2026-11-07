@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app import notify, scenario
@@ -250,3 +252,26 @@ def test_scenario_and_decision_api():
         r = client.post("/api/sms/simulate", json={"from": "+13165559999", "body": "hello"})
         assert r.status_code == 200 and "FIRE" in r.json()["reply"]
         assert client.get("/api/district").json()["settings"]["capacity_ha_60min"] == 150
+
+
+def _first_out_minute(conn, slug: str, purpose: str, t0: str):
+    row = conn.execute(
+        "SELECT MIN(m.created_at) AS t FROM messages m JOIN events e ON e.id = m.event_id "
+        "WHERE e.sample_slug = ? AND m.direction = 'out' AND m.purpose = ?",
+        (slug, purpose),
+    ).fetchone()
+    return None if row["t"] is None else round((parse_iso(row["t"]) - parse_iso(t0)).total_seconds() / 60)
+
+
+@pytest.mark.parametrize("slug,fyi", [("cottonwood-creek-packet", 0), ("cottonwood-creek-packet-no-fault", 27)])
+def test_packet_scenarios_report_the_worse_number(slug, fyi):
+    # Findings, not tuning: the packet baseline pages the district at 33; Firewatch escalates at 38.
+    # One scenario per DB: a second replay in the same DB loses its duty_fyi (finding, not fixed here).
+    t0 = "2026-03-17T18:50:00Z"
+    scenario.run_now(slug)
+    with connect() as conn:
+        assert _first_out_minute(conn, slug, "duty_fyi", t0) == fyi
+        assert _first_out_minute(conn, slug, "duty_escalate", t0) == 38
+        assert _first_out_minute(conn, slug, "ladder_dispatch", t0) == 47
+    fw = {m["key"]: m["t"] for m in scenario.status(slug)["firewatch"]}
+    assert fw["escalate"] == 38 and fw["page"] is None
