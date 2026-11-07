@@ -12,7 +12,7 @@ from app.district import sync_roster
 from app.main import app
 from app.signals import add_signal
 
-T0 = parse_iso("2026-03-14T18:50:00Z")
+T0 = parse_iso("2026-03-17T18:50:00Z")
 FIRE = (37.3821, -99.4681)
 WEATHER = {"wind_kmh": 26, "gust_kmh": 45, "wind_dir_deg": 200, "rh_pct": 18, "temp_c": 24, "precip_72h_mm": 0, "thunder_24h": 0}
 DUTY, WES, SAM = "+13165550101", "+13165550131", "+13165550111"
