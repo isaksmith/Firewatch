@@ -1,5 +1,11 @@
 # FireWatch sensor nodes
 
+The interactive hardware viewer is in [`viewer/`](viewer/README.md), separate
+from the main FireWatch application. Run `python sensors/viewer/serve.py` from
+the repository root and open http://127.0.0.1:5174. Blender models, generation
+scripts and deployment renders are in [`cad/`](cad/README.md); see
+[`cad/REVISION2.md`](cad/REVISION2.md) for the latest design and mount variants.
+
 Prototype build guide for Kansas deployments
 
 **Revision 0.1 · First design iteration · November 6, 2026 at 9:44 p.m. CST (America/Chicago)**
