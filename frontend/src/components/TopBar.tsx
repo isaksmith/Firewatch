@@ -72,7 +72,7 @@ const SCENARIO_LABEL: Record<string, string> = {
   'cottonwood-creek-packet-ngfs': 'Packet: no fault, NGFS',
 }
 
-const Divider = () => <span className="h-4 w-px bg-line-2" />
+const Divider = () => <span className="h-4 w-px shrink-0 bg-line-2" />
 
 export function TopBar({
   onRunScenario,
@@ -115,20 +115,10 @@ export function TopBar({
       <div className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden">
       <div className="flex shrink-0 items-center gap-2.5 text-text">
         <Mark size={16} />
-        <span className="num text-[13px] font-semibold tracking-[0.28em]">FIREWATCH</span>
+        <span className="num hidden text-[13px] font-semibold tracking-[0.28em] md:inline">FIREWATCH</span>
       </div>
-      {threeDId != null && (
-        <Link
-          to={`/alerts/${threeDId}/3d`}
-          className="btn !h-6 shrink-0 !border-investigate/60 !text-investigate"
-          title={threeDSelected ? 'Open the 3D spread view for the selected alert' : 'Open the 3D spread view for the top alert. Select another alert first to see its own.'}
-        >
-          <Box size={12} /> 3D view
-          <span className="hidden text-[10px] font-normal tracking-normal text-muted 2xl:inline">{threeDSelected ? 'selected alert' : 'top alert'}</span>
-        </Link>
-      )}
       <Divider />
-      <nav className="flex items-center gap-1">
+      <nav className="flex shrink-0 items-center gap-1">
         {(
           [
             ['/', 'Console'],
@@ -149,6 +139,16 @@ export function TopBar({
         ))}
       </nav>
       <Divider />
+      {threeDId != null && (
+        <Link
+          to={`/alerts/${threeDId}/3d`}
+          className="btn !h-6 shrink-0 !border-investigate/60 !text-investigate"
+          title={threeDSelected ? 'Open the 3D spread view for the selected alert' : 'Open the 3D spread view for the top alert. Select another alert first to see its own.'}
+        >
+          <Box size={12} /> 3D view
+          <span className="hidden text-[10px] font-normal tracking-normal text-muted 2xl:inline">{threeDSelected ? 'selected alert' : 'top alert'}</span>
+        </Link>
+      )}
       <span className="label hidden 2xl:inline">Kansas AOI · Confirmation Layer</span>
       {mode === 'sample' && (
         <span className="num border border-sample/50 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-sample">
@@ -173,16 +173,17 @@ export function TopBar({
           aria-checked={lowData}
           onClick={() => setLowData(!lowData)}
           className={`btn !h-6 ${lowData ? '!border-degraded !text-degraded' : ''}`}
-          title="Use less data: no map pictures, slower updates"
+          aria-label={`Low data ${lowData ? 'on' : 'off'}`}
+          title={`Low data ${lowData ? 'on' : 'off'}. Use less data: no map pictures, slower updates`}
         >
-          <Wifi size={11} /> Low data {lowData ? 'on' : 'off'}
+          <Wifi size={11} /> <span className="hidden lg:inline">Low data {lowData ? 'on' : 'off'}</span>
         </button>
         {onBurnLog && (
-          <button onClick={onBurnLog} aria-pressed={burnOpen} className={`btn !h-6 ${burnOpen ? '!border-text' : ''}`}>
-            <ClipboardList size={11} /> Burn log
+          <button onClick={onBurnLog} aria-pressed={burnOpen} aria-label="Burn log" title="Burn log" className={`btn !h-6 ${burnOpen ? '!border-text' : ''}`}>
+            <ClipboardList size={11} /> <span className="hidden 2xl:inline">Burn log</span>
           </button>
         )}
-        <div className="hidden items-center gap-4 md:flex">
+        <div className="hidden items-center gap-4 min-[1800px]:flex">
           <Clock />
           <Divider />
           <label className="flex items-center gap-2">
@@ -199,7 +200,7 @@ export function TopBar({
             title="Community board"
             className={`btn !h-6 ${boardOpen ? '!border-sample !text-sample' : ''}`}
           >
-            <MessageSquare size={11} /> <span className="hidden md:inline">Board</span>
+            <MessageSquare size={11} /> <span className="hidden 2xl:inline">Board</span>
           </button>
         )}
         {onRunScenario && scenarios && scenarios.length > 1 && (
@@ -209,7 +210,7 @@ export function TopBar({
             disabled={scenarioRunning}
             aria-label="Scenario to replay"
             title={scenarios.find((s) => s.slug === scenarioSlug)?.story}
-            className="field hidden !h-6 max-w-44 md:block"
+            className="field hidden !h-6 max-w-44 xl:block"
           >
             {scenarios.map((s) => (
               <option key={s.slug} value={s.slug}>
@@ -225,12 +226,18 @@ export function TopBar({
             aria-label={scenarioRunning ? 'Scenario running' : 'Run scenario'}
             className="btn btn-danger !h-6"
           >
-            <Flame size={11} /> <span className="hidden md:inline">{scenarioRunning ? 'Scenario running' : 'Run scenario'}</span>
+            <Flame size={11} /> <span className="hidden 2xl:inline">{scenarioRunning ? 'Scenario running' : 'Run scenario'}</span>
           </button>
         )}
         {mode === 'sample' && (
-          <button onClick={() => replay.mutate()} disabled={replay.isPending || health.data?.replay_running} className="btn !h-6">
-            <Play size={11} /> {health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}
+          <button
+            onClick={() => replay.mutate()}
+            disabled={replay.isPending || health.data?.replay_running}
+            aria-label={health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}
+            title={health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}
+            className="btn !h-6"
+          >
+            <Play size={11} /> <span className="hidden 2xl:inline">{health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}</span>
           </button>
         )}
         {mode === 'live' && (
