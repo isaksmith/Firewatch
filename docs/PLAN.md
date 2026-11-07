@@ -112,10 +112,11 @@ backend/
     scoring/model.py     load model, predict, per-feature contributions
     sim/spread.py        arrival-time grid + isochrones
   data/                  cached GeoJSON layers, sample events, model artifact
-ml/
-  build_dataset.py       FIRMS history + WFIGS labels + weather -> training table
-  train.py               train, calibrate, evaluate, export model
-  report.md              metrics and feature importance for the pitch
+  ml/
+    download.py          FIRMS yearly Kansas archive + WFIGS incidents
+    build_dataset.py     replay history through the app pipeline, labels, features -> training table
+    train.py             train, calibrate, evaluate, export model
+    report.md            metrics and feature importance for the pitch
 frontend/
   src/
     api.ts
@@ -223,7 +224,7 @@ Freeze 8–10 events to JSON, each with detections, weather, and expected outcom
 | Dec 15, 2021 wind event fires, central Kansas | Escalate | Winter fire, very high gusts |
 | 2–3 Flint Hills April prescribed burns | Monitor / Investigate | The false-alarm story |
 | Refinery or ethanol plant hotspot | Monitor | Static source suppression |
-| Synthetic ignition beside a 345 kV line | Escalate (guardrail) | Utility persona |
+| Synthetic ignition beside a 230 kV line | Escalate (guardrail) | Utility persona |
 | Synthetic low-FRP single detection, humid day | Monitor | Low-confidence contrast |
 
 Exact dates and coordinates are confirmed from FIRMS archive and WFIGS during data prep. A "replay" button streams these events in over ~60 seconds so the map fills up live during the pitch.

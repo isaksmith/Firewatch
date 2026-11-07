@@ -388,7 +388,7 @@ runs offline:
   Dec 15, 2021 wind-event fires, central Kansas      -> Escalate
   2-3 Flint Hills April prescribed burns             -> Monitor/Investigate
   Refinery or ethanol plant hotspot                  -> Monitor
-  Synthetic ignition beside a 345 kV line            -> Escalate (guardrail)
+  Synthetic ignition beside a 230 kV line            -> Escalate (guardrail)
   Synthetic single low-FRP detection, humid day      -> Monitor
 
 Exact dates, coordinates, and weather to be confirmed from the FIRMS

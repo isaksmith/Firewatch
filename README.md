@@ -38,10 +38,10 @@ No paid services or map tokens are required. The only key is a free [FIRMS MAP_K
 ## Repository layout
 
 ```
-backend/    FastAPI app: ingestion, clustering, enrichment, scoring, spread simulation
-ml/         Training-set builder, model training, evaluation report
-frontend/   React dashboard and 3D spread preview
-docs/       Plan and design
+backend/app/   FastAPI app: ingestion, clustering, enrichment, scoring, spread simulation
+backend/ml/    Historical download, training-set builder, model training, evaluation report
+frontend/      React dashboard and 3D spread preview
+docs/          Plan and design
 ```
 
 ## Getting started
@@ -66,13 +66,29 @@ The Vite dev server proxies `/api` to `http://127.0.0.1:8000` (override with `AP
 
 `MODE=sample` replays historical and synthetic Kansas events through the full pipeline offline, so it's the default for development and demos. On first start the backend loads all fixtures from `backend/data/samples/`; **Replay sample** in the top bar re-feeds them pass by pass over 60 seconds. Fixture weather was backfilled from the Open-Meteo archive with `.venv/bin/python -m scripts.backfill_sample_weather`.
 
-The power lines, substations, and refineries in `backend/data/layers/` are hand-drawn placeholders, not real infrastructure.
+On macOS, XGBoost needs OpenMP: `brew install libomp`.
+
+### Map layers and the scorer
+
+`backend/data/layers/` holds real Kansas data: transmission lines ≥ 115 kV, transmission substations, and towns from OpenStreetMap (counties from Census boundaries), plus persistent industrial heat sources derived from ten years of FIRMS detections. `backend/data/model/` holds the trained scorer. Both are committed, so the app runs without rebuilding them. To rebuild:
+
+```bash
+cd backend
+.venv/bin/pip install -r requirements-ml.txt
+.venv/bin/python -m scripts.fetch_osm_layers          # OSM lines, substations, towns (~1 min)
+.venv/bin/python -m ml.download                        # FIRMS Kansas archive 2016–2025 + WFIGS incidents (~5 min)
+.venv/bin/python -m ml.build_dataset --rebuild-history # replay history, derive heat sources, label, build features (~15 min)
+.venv/bin/python -m ml.train                           # evaluate, export data/model/, write ml/report.md
+```
+
+Results are in [backend/ml/report.md](backend/ml/report.md). `SCORER=auto` (default) uses the model when it's present and weather is available, and falls back to the rules scorer otherwise.
 
 | Path | What it is |
 |---|---|
 | `backend/app/ingest/` | FIRMS CSV fetch and parse, Open-Meteo weather |
 | `backend/app/features/` | Event clustering (2 km / 12 h) and feature enrichment |
-| `backend/app/scoring/` | Rules scorer v0, guardrails, suppression reasons |
+| `backend/app/scoring/` | XGBoost scorer v1 with per-alert reasons, rules fallback, guardrails, suppression reasons |
+| `backend/ml/` | Training pipeline and evaluation report |
 | `backend/app/sim/` | Grass-fire spread estimate (arrival-time grid → isochrones, impacts) |
 | `backend/app/main.py` | FastAPI routes: alerts, actions, simulate, layers, health, sample replay |
 | `frontend/src/pages/Dashboard.tsx` | Alert list, map, detail drawer, actions |

@@ -73,7 +73,7 @@ export function Spread3D() {
     return <div className="label flex h-full items-center justify-center">{alert.isError ? 'Alert not found' : 'Loading…'}</div>
   }
 
-  const impactedNow = new Set((s?.impacts ?? []).filter((i) => i.minutes <= t).map((i) => i.name))
+  const impactedNow = new Set((s?.impacts ?? []).filter((i) => i.minutes <= t).map((i) => i.id))
   const area = s?.isochrones.features.filter((f) => f.properties.minutes <= Math.max(t, 5)).at(-1)?.properties.area_ha ?? 0
   const togglePlay = () => {
     if (t >= DURATION) setT(0)
@@ -146,8 +146,8 @@ export function Spread3D() {
                 id="lines"
                 type="line"
                 paint={{
-                  'line-color': ['case', ['in', ['get', 'name'], ['literal', [...impactedNow]]], '#ff4b2b', '#e6e8eb'],
-                  'line-width': ['case', ['in', ['get', 'name'], ['literal', [...impactedNow]]], 3, 1.5],
+                  'line-color': ['case', ['in', ['get', 'id'], ['literal', [...impactedNow]]], '#ff4b2b', '#e6e8eb'],
+                  'line-width': ['case', ['in', ['get', 'id'], ['literal', [...impactedNow]]], 3, 1.5],
                 }}
               />
             </Source>
@@ -157,9 +157,10 @@ export function Spread3D() {
             const [lon, lat] = (f.geometry as GeoJSON.Point).coordinates
             if (Math.abs(lat - a.lat) > 0.25 || Math.abs(lon - a.lon) > 0.3) return null
             const name = f.properties?.name as string
-            const hit = impactedNow.has(name)
+            const fid = (f.properties?.id as string | undefined) ?? name
+            const hit = impactedNow.has(fid)
             return (
-              <Marker key={name} longitude={lon} latitude={lat} anchor="bottom">
+              <Marker key={fid} longitude={lon} latitude={lat} anchor="bottom">
                 <div className="flex flex-col items-center">
                   <div
                     className={`num px-1.5 py-[2px] text-[10px] tracking-[0.1em] uppercase ${hit ? 'bg-escalate text-white' : 'hud text-text'}`}
@@ -307,7 +308,7 @@ function SidePanel({ s, t, override, setOverride, shownWind, setWind, fetching }
         {(s?.impacts ?? []).map((i) => {
           const hit = i.minutes <= t
           return (
-            <li key={`${i.kind}-${i.name}`} className="flex items-center justify-between gap-3">
+            <li key={i.id} className="flex items-center justify-between gap-3">
               <span className={`min-w-0 truncate text-[12px] ${hit ? 'text-escalate' : 'text-text'}`}>{i.name}</span>
               <span className={`num shrink-0 text-[11px] ${hit ? 'text-escalate' : 'text-muted'}`}>
                 {hit ? 'REACHED' : `T+${String(i.minutes).padStart(2, '0')}`}
@@ -336,7 +337,7 @@ function SidePanel({ s, t, override, setOverride, shownWind, setWind, fetching }
   )
 }
 
-function Timeline({ t, impacts, onScrub }: { t: number; impacts: { name: string; minutes: number }[]; onScrub: (v: number) => void }) {
+function Timeline({ t, impacts, onScrub }: { t: number; impacts: { id: string; name: string; minutes: number }[]; onScrub: (v: number) => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const fromEvent = (clientX: number) => {
     const r = ref.current!.getBoundingClientRect()
@@ -374,7 +375,7 @@ function Timeline({ t, impacts, onScrub }: { t: number; impacts: { name: string;
         </div>
       ))}
       {impacts.map((i) => (
-        <div key={i.name} className="absolute top-0" style={{ left: pct(i.minutes) }} title={`${i.name} · T+${i.minutes} min`}>
+        <div key={i.id} className="absolute top-0" style={{ left: pct(i.minutes) }} title={`${i.name} · T+${i.minutes} min`}>
           <div className={`h-2 w-2 -translate-x-1/2 rotate-45 ${i.minutes <= t ? 'bg-escalate' : 'border border-escalate bg-void'}`} />
         </div>
       ))}

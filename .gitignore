@@ -19,6 +19,7 @@ dist/
 # Data (large raw downloads stay local)
 **/data/raw/
 **/data/cache/
+backend/ml/data/
 *.sqlite
 *.db
 

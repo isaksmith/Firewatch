@@ -150,7 +150,7 @@ For each new detection `d`:
 
 1. Candidate events: status not `closed`, `last_seen` within 12 h of `d.acq_time`.
 2. Match radius `r = max(2 km, 0.5 × max(scan_km, track_km) + 1 km)`, which widens to ~2.5 km for GOES pixels.
-3. If any detection of a candidate event lies within `r` of `d` (haversine), join it. If `d` matches several events, merge them into the oldest.
+3. If any detection of a candidate event lies within `r` of `d` (haversine) **and within 12 h of `d`**, join it. If `d` matches several events, merge them into the oldest. Requiring the time match per detection keeps a week of neighboring Flint Hills pasture burns from chaining into one event.
 4. Otherwise create a new event.
 5. Recompute centroid (FRP-weighted), `first_seen`, `last_seen`, and place label.
 
@@ -251,19 +251,22 @@ Start at 30, add points, clip to 0–100. Each line becomes a reason.
 
 ### 5.3 Model (v1)
 
-- **Target:** `1` = matched to a WFIGS `WF` incident; `0` = matched to `RX` or inside the static-source mask. Unmatched events excluded (see PLAN section 5).
-- **Model:** `xgboost.XGBClassifier`, shallow trees (`max_depth` 3–4, ~200 rounds), class weights for imbalance; logistic regression baseline for comparison.
-- **Calibration:** isotonic or Platt on a validation fold; `score = round(100 × p)`.
-- **Split:** train on events through 2022, validate on 2023, test on 2024.
-- **Reasons:** `booster.predict(dmatrix, pred_contribs=True)` gives log-odds contributions per feature. Convert to score points by distributing `score − base_score` across features in proportion to their log-odds contributions, then map feature values to human labels.
-- **Artifact:** `backend/data/model/xgb-v1.json` + `features.json` (ordered feature list, fallbacks, training medians) + `metrics.json`.
+Built by `backend/ml/` (`download` → `build_dataset` → `train`); results in `backend/ml/report.md`.
+
+- **Target:** `1` = matched to a WFIGS `WF` incident; `0` = matched to `RX`, or an unreported Flint Hills fire in March–April (weak label, weighted so the weak set counts as much as the reported burns). Other unmatched events are excluded.
+- **Heat sources are not a model input.** Training on them with `dist_static_km` as a feature taught the model "far from a refinery = wildfire". They're handled by the guardrail below and only used to evaluate the full pipeline.
+- **Model:** `xgboost.XGBClassifier`, `max_depth` 3, 300 rounds, learning rate 0.05, weighted for class balance; logistic regression and rules-v0 as baselines on the same rows.
+- **Calibration:** Platt scaling on grouped out-of-fold margins, to an even wildfire/burn prior; `score = round(100 × p)`.
+- **Split:** train ≤ 2022, test 2023–2025; plus leave-one-year-out over the training years as a second view.
+- **Reasons:** `booster.predict(dmatrix, pred_contribs=True)` gives log-odds contributions per feature. Each is shown as points = contribution × Platt slope × 25 (the sigmoid's slope at 50), so one point ≈ one score point mid-scale. `doy_sin` + `doy_cos` are merged into one "time of year" reason.
+- **Artifact:** `backend/data/model/xgb_v1.json` + `meta.json` (ordered features, Platt a/b, evaluation, importance). `SCORER=auto|model|rules`; `auto` uses the model when present and the event isn't degraded.
 
 ### 5.4 Guardrails (applied after the model)
 
 | Rule | Effect |
 |---|---|
 | `dist_town_km` ≤ 1 or `dist_line_km` ≤ 0.5, and not a static source | Floor at `investigate` |
-| `dist_static_km` ≤ 0.5 and `frp_growth` < 2 | Cap at `monitor` |
+| `dist_static_km` ≤ 1 and `frp_growth` < 2 | Cap at `monitor` |
 | Event degraded (weather missing) | Score from rules scorer; badge "degraded" |
 
 When a guardrail changes the recommendation, `guardrail` is set and shown in the UI ("Raised to Investigate: within 1 km of Ashland").
@@ -289,8 +292,8 @@ Output:
     {"type": "Feature", "properties": {"minutes": 5, "area_ha": 12.4}, "geometry": {"type": "Polygon", "coordinates": []}}
   ]},
   "impacts": [
-    {"kind": "town", "name": "Ashland", "minutes": 38, "distance_km": 3.9},
-    {"kind": "power_line", "name": "345 kV", "minutes": 22}
+    {"kind": "power_line", "id": "way/171460121", "name": "Post Rock - South Hays", "minutes": 22},
+    {"kind": "town", "id": "node/151906796", "name": "Ashland", "minutes": 38}
   ],
   "wind_vector": {"from_deg": 200, "kmh": 48}
 }

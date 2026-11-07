@@ -4,7 +4,7 @@ import sqlite3
 from datetime import timedelta
 
 from ..db import iso, parse_iso, utcnow
-from ..geo import haversine_km
+from ..geo import KM_PER_DEG_LAT, haversine_km, km_per_deg_lon
 from ..layers import place_label
 
 WINDOW = timedelta(hours=12)
@@ -21,20 +21,24 @@ def assign_detection(conn: sqlite3.Connection, det_id: int) -> int:
     d = conn.execute("SELECT * FROM detections WHERE id = ?", (det_id,)).fetchone()
     t = parse_iso(d["acq_time"])
     radius = match_radius_km(d["scan_km"], d["track_km"])
+    dlat = radius / KM_PER_DEG_LAT
+    dlon = radius / km_per_deg_lon(d["lat"])
 
-    candidates = conn.execute(
-        "SELECT id, first_seen, last_seen FROM events WHERE status != 'closed' AND is_sample = ?",
-        (d["is_sample"],),
+    # Join an event if one of its detections is within `radius` and WINDOW of this one. Matching on
+    # detections (not the event's whole span) stops a week of neighboring pasture burns chaining into one event.
+    lo, hi = iso(t - WINDOW), iso(t + WINDOW)
+    rows = conn.execute(
+        "SELECT d.event_id, d.lat, d.lon FROM events e JOIN detections d ON d.event_id = e.id "
+        "WHERE e.status != 'closed' AND e.is_sample = ? AND e.last_seen >= ? AND e.first_seen <= ? "
+        "AND d.acq_time BETWEEN ? AND ? AND d.lat BETWEEN ? AND ? AND d.lon BETWEEN ? AND ?",
+        (
+            d["is_sample"], lo, hi, lo, hi,
+            d["lat"] - dlat, d["lat"] + dlat, d["lon"] - dlon, d["lon"] + dlon,
+        ),
     ).fetchall()
-    matched: list[int] = []
-    for ev in candidates:
-        if not (parse_iso(ev["first_seen"]) - WINDOW <= t <= parse_iso(ev["last_seen"]) + WINDOW):
-            continue
-        rows = conn.execute(
-            "SELECT lat, lon FROM detections WHERE event_id = ?", (ev["id"],)
-        ).fetchall()
-        if any(haversine_km(d["lat"], d["lon"], r["lat"], r["lon"]) <= radius for r in rows):
-            matched.append(ev["id"])
+    matched = sorted({
+        r["event_id"] for r in rows if haversine_km(d["lat"], d["lon"], r["lat"], r["lon"]) <= radius
+    })
 
     if not matched:
         now = iso(utcnow())

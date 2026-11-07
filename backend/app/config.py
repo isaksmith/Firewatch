@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     bbox: str = "-102.05,36.99,-94.59,40.00"
     poll_minutes: int = 5
     firms_sources: str = "VIIRS_SNPP_NRT,VIIRS_NOAA20_NRT,VIIRS_NOAA21_NRT,MODIS_NRT"
+    scorer: str = "auto"  # auto (model if present, else rules) | model | rules
     threshold_escalate: int = 70
     threshold_investigate: int = 40
     curing_pct_override: float | None = None

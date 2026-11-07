@@ -9,7 +9,7 @@ import numpy as np
 
 from ..fire_weather import head_ros_kmh, length_to_breadth
 from ..geo import KM_PER_DEG_LAT, km_per_deg_lon
-from ..layers import load_layer
+from ..layers import point_index, segment_index
 from ..terrain import TerrainUnavailable, elevation_grid
 
 GRID_N = 200
@@ -142,32 +142,42 @@ def _isochrones(arrival: np.ndarray, lats: np.ndarray, lons: np.ndarray, minutes
     return {"type": "FeatureCollection", "features": features}
 
 
-def _arrival_at(arrival: np.ndarray, lats: np.ndarray, lons: np.ndarray, lat: float, lon: float) -> float | None:
-    if not (lats[0] <= lat <= lats[-1] and lons[0] <= lon <= lons[-1]):
-        return None
-    i = int(np.abs(lats - lat).argmin())
-    j = int(np.abs(lons - lon).argmin())
-    return float(arrival[i, j])
+def _arrival_many(arrival: np.ndarray, lats: np.ndarray, lons: np.ndarray, plat: np.ndarray, plon: np.ndarray) -> np.ndarray:
+    """Arrival minutes at many points (nearest cell); inf outside the grid. Assumes evenly spaced axes."""
+    i = np.rint((plat - lats[0]) / (lats[1] - lats[0])).astype(int)
+    j = np.rint((plon - lons[0]) / (lons[1] - lons[0])).astype(int)
+    ok = (i >= 0) & (i < len(lats)) & (j >= 0) & (j < len(lons))
+    out = np.full(plat.shape, np.inf)
+    out[ok] = arrival[i[ok], j[ok]]
+    return out
 
 
 def _impacts(arrival: np.ndarray, lats: np.ndarray, lons: np.ndarray, minutes: int) -> list[dict]:
     out = []
     for kind, layer in (("town", "towns"), ("substation", "substations")):
-        for feat in load_layer(layer)["features"]:
-            lon, lat = feat["geometry"]["coordinates"]
-            t = _arrival_at(arrival, lats, lons, lat, lon)
-            if t is not None and t <= minutes:
-                out.append({"kind": kind, "name": feat["properties"]["name"], "minutes": round(t)})
-    for feat in load_layer("power_lines")["features"]:
-        geom = feat["geometry"]
-        lines = [geom["coordinates"]] if geom["type"] == "LineString" else geom["coordinates"]
-        best = math.inf
-        for coords in lines:
-            for (x1, y1), (x2, y2) in zip(coords, coords[1:]):
-                for s in np.linspace(0, 1, 200):
-                    t = _arrival_at(arrival, lats, lons, y1 + s * (y2 - y1), x1 + s * (x2 - x1))
-                    if t is not None:
-                        best = min(best, t)
-        if best <= minutes:
-            out.append({"kind": "power_line", "name": feat["properties"]["name"], "minutes": round(best)})
+        idx = point_index(layer)
+        if len(idx.lons) == 0:
+            continue
+        t = _arrival_many(arrival, lats, lons, idx.lats, idx.lons)
+        for k in np.nonzero(t <= minutes)[0]:
+            props = idx.props[k]
+            out.append({"kind": kind, "id": props.get("id", props["name"]), "name": props["name"], "minutes": round(float(t[k]))})
+
+    seg = segment_index()
+    lo_x, hi_x, lo_y, hi_y = lons[0], lons[-1], lats[0], lats[-1]
+    near = (
+        (np.maximum(seg.ax, seg.bx) >= lo_x) & (np.minimum(seg.ax, seg.bx) <= hi_x)
+        & (np.maximum(seg.ay, seg.by) >= lo_y) & (np.minimum(seg.ay, seg.by) <= hi_y)
+    )
+    if near.any():
+        s = np.linspace(0, 1, 200)[None, :]
+        ax, ay, bx, by = (v[near][:, None] for v in (seg.ax, seg.ay, seg.bx, seg.by))
+        t = _arrival_many(arrival, lats, lons, ay + s * (by - ay), ax + s * (bx - ax)).min(axis=1)
+        best: dict[int, float] = {}
+        for owner, tt in zip(seg.owner[near], t):
+            best[owner] = min(best.get(owner, math.inf), float(tt))
+        for owner, tt in best.items():
+            if tt <= minutes:
+                props = seg.props[owner]
+                out.append({"kind": "power_line", "id": props.get("id", props["name"]), "name": props["name"], "minutes": round(tt)})
     return sorted(out, key=lambda a: a["minutes"])

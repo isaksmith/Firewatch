@@ -79,7 +79,7 @@ export interface SimulationResult {
   head_ros_kmh: number
   length_to_breadth: number
   isochrones: GeoJSON.FeatureCollection<GeoJSON.MultiPolygon, { minutes: number; area_ha: number }>
-  impacts: { kind: string; name: string; minutes: number }[]
+  impacts: { kind: string; id: string; name: string; minutes: number }[]
   wind_vector: { from_deg: number; kmh: number }
   observed_wind: { from_deg: number; kmh: number }
   overridden: boolean
