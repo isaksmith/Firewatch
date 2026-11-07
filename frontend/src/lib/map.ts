@@ -44,3 +44,10 @@ export const IMAGERY_TERRAIN_STYLE: StyleSpecification = {
   terrain: { source: 'dem', exaggeration: 1.5 },
   sky: {},
 }
+
+/** Low data mode: no tiles at all, just a dark background under the local Kansas layers. */
+export const BLANK_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {},
+  layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#0a0c0f' } }],
+}

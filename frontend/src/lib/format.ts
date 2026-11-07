@@ -51,7 +51,8 @@ export function centralTime(iso: string, withDate = false): string {
 
 /** Sample events carry their historical timestamps, so show the date instead of elapsed time. */
 export function seenLabel(iso: string, isSample: boolean): string {
-  return isSample ? centralTime(iso, true) : timeAgo(iso)
+  if (isSample) return centralTime(iso, true)
+  return Date.now() - new Date(iso).getTime() > 86_400_000 ? plainDate(iso) : timeAgo(iso)
 }
 
 export function latLon(lat: number, lon: number): string {
@@ -79,4 +80,51 @@ export function sourcesLabel(sources: Record<string, number>, signals: Record<st
 export function tPlus(iso: string, t0: string): string {
   const m = Math.round((new Date(iso).getTime() - new Date(t0).getTime()) / 60000)
   return `T${m < 0 ? '−' : '+'}${String(Math.abs(m)).padStart(2, '0')}`
+}
+
+/** "3:05 pm" in the district's own time. */
+export function clock12(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase()
+}
+
+/** "Mar 17, 1:50 pm" in the district's own time. */
+export function plainDate(iso: string): string {
+  const day = new Date(iso).toLocaleDateString('en-US', { timeZone: 'America/Chicago', month: 'short', day: 'numeric' })
+  return `${day}, ${clock12(iso)}`
+}
+
+const CENTRAL_PARTS = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Chicago',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+})
+
+/** Minutes Central time is ahead of UTC at this instant (negative: -360 in winter, -300 in summer). */
+function centralOffsetMin(ms: number): number {
+  const g = (t: string) => Number(CENTRAL_PARTS.formatToParts(new Date(ms)).find((p) => p.type === t)?.value)
+  const asUtc = Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute'), g('second'))
+  return Math.round((asUtc - Math.floor(ms / 1000) * 1000) / 60000)
+}
+
+/** Value for a datetime-local input showing Central time. */
+export function centralInput(d: Date): string {
+  const off = centralOffsetMin(d.getTime())
+  return new Date(d.getTime() + off * 60000).toISOString().slice(0, 16)
+}
+
+/** "2026-11-07T11:00" typed in a datetime-local box means 11:00 Central. Returns ISO with the offset, e.g. ...-06:00. */
+export function centralToIso(local: string): string {
+  const guess = Date.parse(`${local}:00Z`)
+  let off = centralOffsetMin(guess)
+  off = centralOffsetMin(guess - off * 60000)
+  const sign = off < 0 ? '-' : '+'
+  const a = Math.abs(off)
+  const hh = String(Math.floor(a / 60)).padStart(2, '0')
+  const mm = String(a % 60).padStart(2, '0')
+  return `${local}:00${sign}${hh}:${mm}`
 }

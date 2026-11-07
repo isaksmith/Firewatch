@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Box, Flame, Play, RefreshCw } from 'lucide-react'
+import { Box, ClipboardList, Flame, Play, RefreshCw, Wifi } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { api, type ScenarioSummary, type SourceHealth } from '../api'
+import { setLowData, useLowData } from '../lib/lowData'
 import { setOperator, useOperator } from '../lib/operator'
 import { Mark } from './ui'
 
@@ -81,6 +82,8 @@ export function TopBar({
   onPickScenario,
   threeDId,
   threeDSelected,
+  burnOpen,
+  onBurnLog,
 }: {
   onRunScenario?: () => void
   scenarioRunning?: boolean
@@ -89,10 +92,13 @@ export function TopBar({
   onPickScenario?: (slug: string) => void
   threeDId?: number | null
   threeDSelected?: boolean
+  burnOpen?: boolean
+  onBurnLog?: () => void
 }) {
+  const { on: lowData } = useLowData()
   const qc = useQueryClient()
   const operator = useOperator()
-  const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 15_000 })
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: lowData ? 60_000 : 15_000 })
   const replay = useMutation({
     mutationFn: api.replay,
     onSuccess: () => setTimeout(() => qc.invalidateQueries(), 500),
@@ -152,11 +158,25 @@ export function TopBar({
       <div className="hidden items-center gap-5 min-[1400px]:flex">
         <Divider />
         {health.data && <SourceChips sources={health.data.sources} />}
-        {health.isError && <span className="num text-[10px] tracking-[0.12em] text-escalate">BACKEND UNREACHABLE</span>}
+        {health.isError && <span className="num text-[10px] tracking-[0.12em] text-escalate">Can't reach the Firewatch server. Showing the last update.</span>}
       </div>
       </div>
 
       <div className="flex shrink-0 items-center gap-4">
+        <button
+          role="switch"
+          aria-checked={lowData}
+          onClick={() => setLowData(!lowData)}
+          className={`btn !h-6 ${lowData ? '!border-degraded !text-degraded' : ''}`}
+          title="Use less data: no map pictures, slower updates"
+        >
+          <Wifi size={11} /> Low data {lowData ? 'on' : 'off'}
+        </button>
+        {onBurnLog && (
+          <button onClick={onBurnLog} aria-pressed={burnOpen} className={`btn !h-6 ${burnOpen ? '!border-text' : ''}`}>
+            <ClipboardList size={11} /> Burn log
+          </button>
+        )}
         <div className="hidden items-center gap-4 md:flex">
           <Clock />
           <Divider />

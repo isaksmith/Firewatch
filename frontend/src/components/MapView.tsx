@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Map, { Layer, Marker, NavigationControl, ScaleControl, Source, useMap, type MapRef } from 'react-map-gl/maplibre'
 import { api, type AlertSummary, type MeshNode, type SensorReadings } from '../api'
 import { REC_META, latLon, trackId } from '../lib/format'
-import { AOI_BBOX, BASEMAP_STYLE, KANSAS_VIEW, ringPolygon } from '../lib/map'
+import { useLowData } from '../lib/lowData'
+import { AOI_BBOX, BASEMAP_STYLE, BLANK_STYLE, KANSAS_VIEW, ringPolygon } from '../lib/map'
 import { FEEDS, LiveLayers, LiveToggles, useLiveFeeds, type FeedKey } from './LiveFeeds'
 import { TrackGlyph } from './ui'
 import { FireForecastLayer, ForecastSlider } from './FireForecast'
@@ -19,6 +20,7 @@ interface Props {
 
 const SIZE = { escalate: 18, investigate: 14, monitor: 9 }
 const RINGS_KM = [5, 10]
+const HEAVY_OFF = { flint_hills: false, distribution_lines: false, dry_grid: false, wind_lines: false, fire_forecast: false }
 
 const AOI: GeoJSON.Feature = {
   type: 'Feature',
@@ -97,7 +99,8 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
   useEffect(() => {
     if (selectedId != null) setPanelOpen(false)
   }, [selectedId])
-  const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
+  const { on: lowData } = useLowData()
+  const [layersWanted, setLayers] = useState<Record<LayerKey, boolean>>({
     power_lines: true,
     static_sources: true,
     flint_hills: false,
@@ -109,11 +112,14 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
     mesh: true,
     fire_forecast: true,
   })
-  const [liveOn, setLiveOn] = useState<Record<FeedKey, boolean>>(() => Object.fromEntries(FEEDS.map((f) => [f.key, false])) as Record<FeedKey, boolean>)
+  // Low data mode switches the heavy layers off without forgetting what the person picked.
+  const layers = lowData ? { ...layersWanted, ...HEAVY_OFF } : layersWanted
+  const [liveWanted, setLiveOn] = useState<Record<FeedKey, boolean>>(() => Object.fromEntries(FEEDS.map((f) => [f.key, false])) as Record<FeedKey, boolean>)
+  const liveOn = lowData ? (Object.fromEntries(FEEDS.map((f) => [f.key, false])) as Record<FeedKey, boolean>) : liveWanted
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, retry: false })
   const keyConfigured = !!health.data?.firms_key_configured
   const feeds = useLiveFeeds(liveOn, keyConfigured)
-  const meshNodes = useQuery({ queryKey: ['mesh-nodes'], queryFn: api.meshNodes, refetchInterval: 10_000 })
+  const meshNodes = useQuery({ queryKey: ['mesh-nodes'], queryFn: api.meshNodes, refetchInterval: lowData ? 60_000 : 10_000, })
   const placed = (meshNodes.data ?? []).filter((n) => n.lat != null && n.lon != null)
   const district = useQuery({ queryKey: ['district'], queryFn: api.district, retry: false })
   const lines = useQuery({ queryKey: ['layer', 'power_lines'], queryFn: () => api.layer('power_lines') })
@@ -121,7 +127,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
   const dist = useQuery({ queryKey: ['layer', 'distribution_lines'], queryFn: () => api.layer('distribution_lines'), enabled: layers.distribution_lines })
   const grid = useQuery({ queryKey: ['risk', 'grid'], queryFn: () => api.riskGrid(), enabled: layers.dry_grid })
   const windLines = useQuery({ queryKey: ['risk', 'wind'], queryFn: () => api.linesUnderWind(), enabled: layers.wind_lines })
-  const flint = useQuery({ queryKey: ['layer', 'flint_hills'], queryFn: () => api.layer('flint_hills') })
+  const flint = useQuery({ queryKey: ['layer', 'flint_hills'], queryFn: () => api.layer('flint_hills'), enabled: layers.flint_hills })
 
   const selected = alerts.find((a) => a.id === selectedId)
   // Slider position belongs to one alert; selecting another starts it back at "now".
@@ -156,7 +162,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
       <Map
         ref={mapRef}
         initialViewState={{ bounds: [AOI_BBOX[0], AOI_BBOX[1], AOI_BBOX[2], AOI_BBOX[3]], fitBoundsOptions: { padding: 40 } }}
-        mapStyle={BASEMAP_STYLE}
+        mapStyle={lowData ? BLANK_STYLE : BASEMAP_STYLE}
         style={{ width: '100%', height: '100%' }}
         attributionControl={{ compact: true }}
         onLoad={() => {
@@ -275,6 +281,9 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
         <CursorReadout />
       </Map>
 
+      {lowData && (
+        <div className="hud num pointer-events-none absolute top-4 left-4 px-2 py-1 text-[10.5px] text-degraded">Low data: map pictures are off</div>
+      )}
       <div className="pointer-events-none absolute inset-3 brackets" style={{ ['--b' as string]: '#3a414b' }} />
       {layers.fire_forecast && selectedId != null && (
         <ForecastSlider fire={fire} aheadMin={aheadMin} setAheadMin={setAheadMin} loading={fireForecast.isFetching} />
@@ -306,7 +315,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
                 ] as const
               ).map(([k, label]) => (
                 <label key={k} className="flex cursor-pointer items-center gap-2.5 text-[11.5px] text-muted hover:text-text">
-                  <input type="checkbox" checked={layers[k]} onChange={(e) => setLayers((l) => ({ ...l, [k]: e.target.checked }))} />
+                  <input type="checkbox" disabled={lowData && k in HEAVY_OFF} checked={layers[k]} onChange={(e) => setLayers((l) => ({ ...l, [k]: e.target.checked }))} />
                   <span className="flex-1">{label}</span>
                   <span className="flex w-4 items-center justify-center">
                     <span className={SWATCH[k]} />
@@ -314,7 +323,10 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
                 </label>
               ))}
             </div>
-            <LiveToggles feeds={feeds} on={liveOn} setOn={(k, v) => setLiveOn((o) => ({ ...o, [k]: v }))} keyConfigured={keyConfigured} />
+            {lowData && <p className="border-t border-line px-3 pt-3 text-[11px] text-degraded">Low data is on, so live data and extra layers are off.</p>}
+            <div className={lowData ? 'pointer-events-none opacity-40' : ''} aria-disabled={lowData}>
+              <LiveToggles feeds={feeds} on={liveOn} setOn={(k, v) => setLiveOn((o) => ({ ...o, [k]: v }))} keyConfigured={keyConfigured} />
+            </div>
             <div className="flex h-7 items-center border-t border-b border-line px-3">
               <span className="label">Symbology</span>
             </div>

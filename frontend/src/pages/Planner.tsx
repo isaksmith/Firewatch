@@ -5,7 +5,8 @@ import Map, { Layer, Marker, NavigationControl, ScaleControl, Source, type MapRe
 import { api, type Climatology, type PlanParams, type PlanSite, type RegionPlan, type RiskFactor, type TierPower } from '../api'
 import { TopBar } from '../components/TopBar'
 import { KV, SectionHeader } from '../components/ui'
-import { BASEMAP_STYLE, KANSAS_VIEW } from '../lib/map'
+import { useLowData } from '../lib/lowData'
+import { BASEMAP_STYLE, BLANK_STYLE, KANSAS_VIEW } from '../lib/map'
 
 const DEFAULT_REGION = 'district:cottonwood-creek'
 const MONTHS = 'JFMAMJJASOND'
@@ -300,6 +301,7 @@ function PlanMap({
   const [hovered, setHover] = useState<{ id: number; plan: RegionPlan; props: CellProps } | null>(null)
   const hover = hovered?.plan === plan ? hovered : null
   const [legendOpen, setLegendOpen] = useState(true)
+  const { on: lowData } = useLowData()
   const lines = useQuery({ queryKey: ['layer', 'power_lines'], queryFn: () => api.layer('power_lines') })
   const fires = useQuery({ queryKey: ['layer', 'wildfire_history'], queryFn: () => api.layer('wildfire_history') })
   const key = plan?.region.key
@@ -324,7 +326,7 @@ function PlanMap({
       <Map
         ref={mapRef}
         initialViewState={KANSAS_VIEW}
-        mapStyle={BASEMAP_STYLE}
+        mapStyle={lowData ? BLANK_STYLE : BASEMAP_STYLE}
         style={{ width: '100%', height: '100%' }}
         attributionControl={{ compact: true }}
         onLoad={() => setReady(true)}

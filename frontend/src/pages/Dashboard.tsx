@@ -1,17 +1,31 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { SCENARIO, api } from '../api'
 import { Attribution } from '../components/Attribution'
 import { AlertDrawer } from '../components/AlertDrawer'
+import { BurnLog } from '../components/BurnLog'
 import { AlertList } from '../components/AlertList'
 import { MapView } from '../components/MapView'
 import { ScenarioStrip } from '../components/ScenarioStrip'
 import { TopBar } from '../components/TopBar'
-import { SUPPRESSION_LABEL } from '../lib/format'
+import { SUPPRESSION_LABEL, clock12 } from '../lib/format'
+import { dismissAutoBanner, noteFetchFailure, noteFetchTime, setLowData, useLowData } from '../lib/lowData'
 import { filterQueue, type QueueTab } from '../lib/queue'
 
+const subscribeOnline = (cb: () => void) => {
+  window.addEventListener('online', cb)
+  window.addEventListener('offline', cb)
+  return () => {
+    window.removeEventListener('online', cb)
+    window.removeEventListener('offline', cb)
+  }
+}
+
 export function Dashboard() {
+  const online = useSyncExternalStore(subscribeOnline, () => navigator.onLine)
+  const { on: lowData, auto: autoLowData } = useLowData()
+  const [burnOpen, setBurnOpen] = useState(false)
   const params = useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -30,10 +44,33 @@ export function Dashboard() {
   })
   const running = scenario.data?.running ?? false
   const alerts = useQuery({
-    queryKey: ['alerts'],
-    queryFn: () => api.alerts(true),
-    refetchInterval: running ? 1_500 : 5_000,
+    queryKey: ['alerts', lowData ? 'lite' : 'full'],
+    queryFn: lowData
+      ? api.liteAlerts
+      : async () => {
+          const t0 = performance.now()
+          try {
+            const r = await api.alerts(true)
+            noteFetchTime(performance.now() - t0)
+            return r
+          } catch (e) {
+            noteFetchFailure()
+            throw e
+          }
+        },
+    placeholderData: keepPreviousData,
+    // While the server is down, retry every 10 s so the list comes back quickly (not after a 60 s lite poll).
+    refetchInterval: (q) => (q.state.status === 'error' ? 10_000 : lowData ? 60_000 : running ? 1_500 : 5_000),
   })
+  // Keep the last good list in component state, whatever the query key does, so an outage or the
+  // full/lite switch never empties the screen.
+  const [last, setLast] = useState<{ at: number; data: NonNullable<typeof alerts.data> } | null>(null)
+  if (alerts.data && !alerts.isPlaceholderData && alerts.dataUpdatedAt && alerts.dataUpdatedAt !== last?.at) {
+    setLast({ at: alerts.dataUpdatedAt, data: alerts.data })
+  }
+  const shown = alerts.data ?? last?.data
+  const offline = !online || alerts.isError
+  const loading = shown == null && !alerts.isError
   // Follow the scenario's fire once it appears, so the drawer shows the texts as they go out.
   const autoSelected = useRef(false)
   const runScenario = useMutation({
@@ -53,8 +90,8 @@ export function Dashboard() {
     }
   }, [running, fireId, navigate])
 
-  const all = alerts.data?.alerts ?? []
-  const suppressed = alerts.data?.suppressed
+  const all = shown?.alerts ?? []
+  const suppressed = shown?.suppressed
   const onMap = tab === 'suppressed' ? all : filterQueue(all, tab)
   const close = useCallback(() => navigate('/'), [navigate])
   const showStrip = !scenarioHidden && scenario.data && scenario.data.t_min != null
@@ -74,7 +111,25 @@ export function Dashboard() {
         onPickScenario={setSlug}
         threeDId={selectedId ?? onMap[0]?.id ?? null}
         threeDSelected={selectedId != null}
+        burnOpen={burnOpen}
+        onBurnLog={() => setBurnOpen((o) => !o)}
       />
+      {offline && (
+        <div role="status" className="flex shrink-0 items-center gap-3 border-b border-line bg-investigate/10 px-4 py-1.5 text-[12.5px] text-investigate">
+          Offline. {last ? `Last updated ${clock12(new Date(last.at).toISOString())}` : 'No data yet'}
+        </div>
+      )}
+      {lowData && autoLowData && (
+        <div role="status" className="flex shrink-0 items-center gap-4 border-b border-line bg-degraded/10 px-4 py-1.5 text-[12.5px]">
+          <span>Low data mode is on because your connection looks slow.</span>
+          <button onClick={() => setLowData(false)} className="btn !h-7">
+            Undo
+          </button>
+          <button onClick={dismissAutoBanner} className="text-dim hover:text-text">
+            Keep it
+          </button>
+        </div>
+      )}
       {showStrip && (
         <ScenarioStrip
           s={scenario.data!}
@@ -88,19 +143,21 @@ export function Dashboard() {
           alerts={all}
           tab={tab}
           setTab={setTab}
+          suppressed={suppressed}
+          lowData={lowData}
+          loading={loading}
           selectedId={selectedId}
           hoveredId={hoveredId}
           onSelect={(id) => navigate(`/alerts/${id}`)}
           onHover={setHoveredId}
         />
         <MapView alerts={onMap} selectedId={selectedId} hoveredId={hoveredId} onSelect={(id) => navigate(`/alerts/${id}`)} onHover={setHoveredId} />
-        {selectedId != null && <AlertDrawer id={selectedId} onClose={close} />}
+        {burnOpen ? <BurnLog onClose={() => setBurnOpen(false)} /> : selectedId != null && <AlertDrawer id={selectedId} onClose={close} />}
       </div>
 
       <footer className="num flex h-7 shrink-0 items-center gap-5 overflow-hidden border-t border-line bg-void px-4 text-[10px] tracking-[0.08em] whitespace-nowrap text-dim">
-        {alerts.isError ? (
-          <span className="text-escalate">BACKEND UNREACHABLE AT /API. IS UVICORN RUNNING ON 127.0.0.1:8000?</span>
-        ) : (
+        {alerts.isError && <span className="text-escalate">Can't reach the Firewatch server. Showing the last update.</span>}
+        {shown && (
           <>
             <span>
               <span className="text-escalate">{String(counts.escalate).padStart(2, '0')}</span> ESC
@@ -125,7 +182,7 @@ export function Dashboard() {
           <span className="text-muted">D</span> DISMISS · <span className="text-muted">V</span> 3D · <span className="text-muted">ESC</span> CLOSE
         </span>
         <span className="ml-auto hidden xl:inline 2xl:ml-0">PUBLIC DATA ONLY</span>
-        {alerts.data && <span className="ml-auto xl:ml-0">SYNC {alerts.data.generated_at.slice(11, 19)}Z</span>}
+        {shown && <span className="ml-auto xl:ml-0">SYNC {shown.generated_at.slice(11, 19)}Z</span>}
         <span className="ml-auto shrink-0 2xl:ml-0">
           <Attribution />
         </span>

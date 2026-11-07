@@ -441,19 +441,125 @@ export interface RegionPlan {
   warnings: string[]
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export interface Burn {
+  id: number
+  lat: number
+  lon: number
+  start: string
+  end: string
+  called_in: string
+  caller: string
+  label: string | null
+}
+
+export interface NewBurn {
+  caller: string
+  lat: number
+  lon: number
+  start: string
+  end: string
+  called_in?: string
+  label?: string
+}
+
+/** What /api/lite/alerts sends: short keys, plus a count of quiet detections. */
+interface LiteResponse {
+  t: string
+  alerts: { id: number; score: number | null; level: 'escalate' | 'investigate'; data_at?: string | null; label: string; lat: number; lon: number; why: string | null; status: Status; seen: string }[]
+  quiet?: Partial<Record<Suppression | 'logged_burn' | 'total', number>>
+}
+
+function quietCounts(q: LiteResponse['quiet']): AlertsResponse['suppressed'] {
+  const n = (v: number | undefined) => v ?? 0
+  const out = {
+    static_source: n(q?.static_source),
+    likely_prescribed: n(q?.likely_prescribed),
+    registered_burn: n(q?.registered_burn) + n(q?.logged_burn),
+    low_signal: n(q?.low_signal),
+  }
+  return { total: q?.total ?? out.static_source + out.likely_prescribed + out.registered_burn + out.low_signal, ...out }
+}
+
+let liteEtag: string | null = null
+let liteCache: AlertsResponse | null = null
+
+/** The small alert list. Sends If-None-Match and treats 304 as no change. Reshaped to look like /alerts. */
+async function liteAlerts(): Promise<AlertsResponse> {
+  const headers: Record<string, string> = {}
+  if (liteEtag && liteCache) headers['If-None-Match'] = liteEtag
+  const res = await fetch(`${BASE}/lite/alerts`, { headers })
+  if (res.status === 304 && liteCache) return liteCache
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  const d = (await res.json()) as LiteResponse
+  const out: AlertsResponse = {
+    mode: 'live',
+    generated_at: d.t,
+    alerts: d.alerts.map(
+      (a) =>
+        ({
+          id: a.id,
+          lat: a.lat,
+          lon: a.lon,
+          place_label: a.label,
+          county: null,
+          first_seen: a.seen,
+          last_seen: a.seen,
+          status: a.status,
+          score: a.score,
+          recommendation: a.level,
+          score_trend: a.score == null ? [] : [a.score],
+          degraded: false,
+          guardrail: null,
+          suppression: null,
+          reraised: false,
+          sources: {},
+          signals: {},
+          top_reason: a.why,
+          level_reason: null,
+          evidence: [],
+          response: null,
+          is_sample: false,
+          sample_slug: null,
+        }) as AlertSummary,
+    ),
+    suppressed: quietCounts(d.quiet),
+  }
+  liteEtag = res.headers.get('ETag')
+  liteCache = out
+  return out
+}
+
+const TOKEN = import.meta.env.VITE_API_TOKEN as string | undefined
+
+/** Plain words for the errors people can actually hit, instead of raw codes. */
+function plainError(res: Response, detail: unknown): string {
+  if (res.status === 401) return "This computer isn't signed in to do that."
+  if (res.status === 429) {
+    const secs = Number(res.headers.get('Retry-After'))
+    return secs > 0 ? `Please wait ${Math.ceil(secs)} seconds and try again.` : 'Please wait a moment and try again.'
+  }
+  return typeof detail === 'string' ? detail : `${res.status} ${res.statusText}`
+}
+
+async function request<T>(path: string, init?: RequestInit, unauthorized?: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: { 'Content-Type': 'application/json', ...(TOKEN ? { 'X-Firewatch-Token': TOKEN } : {}), ...init?.headers },
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new Error(body.detail ?? `${res.status} ${res.statusText}`)
+    throw new Error(res.status === 401 && unauthorized ? unauthorized : plainError(res, body.detail))
   }
   return res.json() as Promise<T>
 }
 
 export const api = {
+  liteAlerts,
+  burns: async (): Promise<{ burns: Burn[] }> => {
+    const r = await request<Burn[] | { burns: Burn[] }>('/burns')
+    return Array.isArray(r) ? { burns: r } : r
+  },
+  logBurn: (b: NewBurn, keepalive = false) => request<Burn>('/burns', { method: 'POST', body: JSON.stringify(b), keepalive }, "Burn not saved: this computer isn't signed in to log burns."),
   alerts: (includeMonitor: boolean) =>
     request<AlertsResponse>(`/alerts?include_monitor=${includeMonitor}`),
   alert: (id: number) => request<AlertDetail>(`/alerts/${id}`),

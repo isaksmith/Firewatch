@@ -8,7 +8,8 @@ import { Link, useParams } from 'react-router-dom'
 import { api, type SimulationResult } from '../api'
 import { KV, RecTag, ScoreReadout } from '../components/ui'
 import { compass, pad3, trackId } from '../lib/format'
-import { IMAGERY_TERRAIN_STYLE } from '../lib/map'
+import { useLowData } from '../lib/lowData'
+import { BLANK_STYLE, IMAGERY_TERRAIN_STYLE } from '../lib/map'
 
 const DURATION = 60
 const PLAY_SECONDS_AT_1X = 15
@@ -24,6 +25,7 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export function Spread3D() {
+  const { on: lowData } = useLowData()
   const id = Number(useParams().id)
   const alert = useQuery({ queryKey: ['alert', id], queryFn: () => api.alert(id) })
   const [override, setOverride] = useState(false)
@@ -113,7 +115,7 @@ export function Spread3D() {
             pitch: 62,
             bearing: ((a.weather.wind_dir_deg ?? 0) + 180) % 360,
           }}
-          mapStyle={IMAGERY_TERRAIN_STYLE}
+          mapStyle={lowData ? BLANK_STYLE : IMAGERY_TERRAIN_STYLE}
           maxPitch={80}
           style={{ width: '100%', height: '100%' }}
           attributionControl={false}
