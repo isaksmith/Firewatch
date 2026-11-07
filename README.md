@@ -36,7 +36,7 @@ Humans decide every page. Every signal, text, and decision is logged on the even
 | 3D | MapLibre terrain (AWS Terrain Tiles) + deck.gl overlays |
 | Data | NASA FIRMS, Open-Meteo, NWS, NIFC WFIGS, OpenStreetMap |
 
-No paid services or map tokens are required. The only key is a free [FIRMS MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/).
+Every data source is free and needs no map token. The only data key is a free [FIRMS MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/). Twilio is the one paid service (about 1 cent per text), used only for live texting; sample mode and the scenario use a simulated outbox.
 
 ## Repository layout
 
@@ -110,33 +110,41 @@ Results are in [backend/ml/report.md](backend/ml/report.md); the full analysis o
 
 ## Data sources and APIs
 
-Every source is free with no paid tier. "Fresh" figures are single readings taken on 2026-11-07 unless noted, not guarantees. Status is `live` (wired into the app), `training only` (used by `backend/ml` or build scripts) or `planned` (not wired yet; a row flips to `live` in the commit that wires it).
+Every data source is free with no paid tier. "Fresh" figures are single readings taken on 2026-11-07 unless noted, not guarantees. Twilio is the one paid service, but it is a texting service, not a data source (see the last row).
+
+Status values:
+- `on map`: fetched and shown behind a toggle in the Layers panel.
+- `background`: used by the app, no toggle.
+- `needs key`: built but off until a free FIRMS MAP_KEY is set.
+- `script`: fetched once by a script in `backend/scripts`, not polled.
+- `training only`: used by `backend/ml` or build scripts.
+- `planned`: not wired yet.
 
 | API | What it provides | Why we use it | How fresh | Key needed | Cost and license | Status |
 |---|---|---|---|---|---|---|
-| NASA FIRMS Area API | VIIRS and MODIS fire detections (plus `LANDSAT_NRT` and the real-time `*_RT` feeds) | Core detection stream | Real time, under 60 seconds after overpass (NASA figure) | Yes (free MAP_KEY) | Free, NASA open data | live |
+| NASA FIRMS Area API | VIIRS and MODIS fire detections (plus `LANDSAT_NRT` and the real-time `*_RT` feeds) | Core detection stream | Real time, under 60 seconds after overpass (NASA figure) | Yes (free MAP_KEY) | Free, NASA open data | needs key |
 | NASA FIRMS yearly CSVs | US detections back to 2016 | Model training history | Yearly | No | Free, NASA open data | training only |
-| Open-Meteo forecast | Hourly wind, humidity, temperature, gusts, dew point, pressure, VPD | Fire weather for alerts and the dry-air grid | Hourly model run, about 2 hours behind | No | Free tier is non-commercial only, CC BY 4.0. A sold product would self-host it (AGPLv3) | live |
+| Open-Meteo forecast | Hourly wind, humidity, temperature, gusts, dew point, pressure, VPD | Fire weather for alerts and the dry-air grid | Hourly model run, about 2 hours behind | No | Free tier is non-commercial only, CC BY 4.0. A sold product would self-host it (AGPLv3) | on map |
 | Open-Meteo archive | Historical hourly weather | Model training features | Days behind | No | Same as above | training only |
-| AWS Terrain Tiles | Terrarium elevation tiles | Terrain, slope, 3D view | Static | No | Free, open data (USGS and other sources) | live |
-| OSM Overpass (`overpass-api.de` and `overpass.kumi.systems`) | Power lines, substations, towns, distribution lines | Line exposure and context layers | Fetched once by script | No | Free, ODbL, (c) OpenStreetMap contributors | live (script) |
-| Plotly counties GeoJSON | US county boundaries (Census) | County names | Static | No | Free, public domain Census data | live (script) |
+| AWS Terrain Tiles | Terrarium elevation tiles | Terrain, slope, 3D view | Static | No | Free, open data (USGS and other sources) | background |
+| OSM Overpass (`overpass-api.de` and `overpass.kumi.systems`) | Power lines, substations, towns, distribution lines | Line exposure and context layers | Fetched once by script | No | Free, ODbL, (c) OpenStreetMap contributors | script |
+| Plotly counties GeoJSON | US county boundaries (Census) | County names | Static | No | Free, public domain Census data | script |
 | NIFC WFIGS incident locations (training copy) | Historical reported wildfires and prescribed burns | Training labels | Static download | No | Free, public domain | training only |
-| OpenFreeMap | Dark vector basemap | Base map | Continuous | No | Free, no limits, OpenStreetMap data (ODbL) | live |
-| USGS Imagery Only (The National Map) | Aerial imagery tiles | 3D view imagery | Imagery 2017 to 2021, zoom 16 max | No | Free, public domain | live |
-| NASA FIRMS Landsat NRT (`LANDSAT_NRT`) | 30 m fire detections from Landsat overpasses | Fine-resolution cross-check | A few hours after overpass | Yes (same free MAP_KEY) | Free, NASA open data | live (untested live, no key) |
-| OSM distribution lines (`power=minor_line`) | Lower-voltage lines, partial coverage in Kansas | Context layer only, never used for the model's line distance | Fetched once by script | No | Free, ODbL, (c) OpenStreetMap contributors | live (script) |
-| NWS alerts (`api.weather.gov`) | Fire, wind, smoke and dust warnings for Kansas | Official hazard alerts | Real time | No (User-Agent required) | Free, US government | live |
-| Iowa Mesonet storm reports (LSR) | Human reports of fires and downed lines or poles | Ground truth hints | As issued | No | Free | live |
-| NIFC WFIGS incidents, current | Currently known incident points | New known incidents | Last edit 14 min old when sampled | No | Free, public domain | live |
-| NIFC WFIGS perimeters, current | Known fire footprints | Avoid re-alerting on known fires | Last edit 38 min old when sampled | No | Free, public domain | live |
-| METAR via aviationweather.gov (backup: Iowa Mesonet ASOS) | Temperature, dew point, pressure, wind at 54 Kansas stations | Measured humidity | Hourly plus specials, about 6 min old when sampled | No | Free, US government | live |
-| NOAA SPC fire weather outlooks | Official dry thunderstorm and wind/RH risk areas | Official risk areas | A few issues a day | No | Free, NOAA does not endorse this app | live |
-| NOAA HMS fire points | Analyst-checked fire detections | Cross-check detections | Last update 80 min old when sampled | No | Free, NOAA open data | live |
-| GOES-19 and GOES-18 fire detection (`ABI-L2-FDCC`, `noaa-goes19`, `noaa-goes18` on S3) | Geostationary fire pixels | Fastest free fire signal | Every 5 min, 3 min after scan | No | Free, NOAA open data | planned |
-| GOES lightning (`GLM-L2-LCFA`, `noaa-goes19`) | Lightning flashes | Near-instant ignition clue | 20-second files, about 30 seconds after | No | Free, NOAA open data | planned |
-| GOES smoke (`ABI-L2-ADPC`, `noaa-goes19`) | Smoke mask | Smoke detection, daytime only | Every 5 min, 4.4 min after scan | No | Free, NOAA open data | planned |
-| RTMA-RU 2.5 km (`noaa-rtma-pds`) | Gridded near-surface analysis | Freshest dry-air map, blends real observations | Every 15 min, about 17 min after | No | Free, NOAA open data | planned |
+| OpenFreeMap | Dark vector basemap | Base map | Continuous | No | Free, no limits, OpenStreetMap data (ODbL) | background |
+| USGS Imagery Only (The National Map) | Aerial imagery tiles | 3D view imagery | Imagery 2017 to 2021, zoom 16 max | No | Free, public domain | background |
+| NASA FIRMS Landsat NRT (`LANDSAT_NRT`) | 30 m fire detections from Landsat overpasses | Fine-resolution cross-check | A few hours after overpass | Yes (same free MAP_KEY) | Free, NASA open data | needs key |
+| OSM distribution lines (`power=minor_line`) | Lower-voltage lines, partial coverage in Kansas | Context layer only, never used for the model's line distance | Fetched once by script | No | Free, ODbL, (c) OpenStreetMap contributors | script |
+| NWS alerts (`api.weather.gov`) | Fire, wind, smoke and dust warnings for Kansas | Official hazard alerts | Real time | No (User-Agent required) | Free, US government | on map |
+| Iowa Mesonet storm reports (LSR) | Human reports of fires and downed lines or poles | Ground truth hints | As issued | No | Free | on map |
+| NIFC WFIGS incidents, current | Currently known incident points | New known incidents | Last edit 14 min old when sampled | No | Free, public domain | on map |
+| NIFC WFIGS perimeters, current | Known fire footprints | Avoid re-alerting on known fires | Last edit 38 min old when sampled | No | Free, public domain | on map |
+| METAR via aviationweather.gov (backup: Iowa Mesonet ASOS) | Temperature, dew point, pressure, wind at 54 Kansas stations | Measured humidity | Hourly plus specials, about 6 min old when sampled | No | Free, US government | on map |
+| NOAA SPC fire weather outlooks | Official dry thunderstorm and wind/RH risk areas | Official risk areas | A few issues a day | No | Free, NOAA does not endorse this app | on map |
+| NOAA HMS fire points | Analyst-checked fire detections | Most sensitive free fire source found: most of its points come from NOAA's NGFS system, which has no documented public API. Slower than raw GOES | Last update 80 min old when sampled | No | Free, NOAA open data | on map |
+| GOES-19 and GOES-18 fire detection (`ABI-L2-FDCC`, `noaa-goes19`, `noaa-goes18` on S3) | Geostationary fire pixels | Fast signal for large, hot fires. Less sensitive than NGFS: on 2026-11-06 it showed 0 Kansas pixels in about 24 sampled afternoon scans while HMS logged 7 Kansas sites, mostly from NGFS. Locations matched HMS within 0.1 km (median) | Every 5 min, 3.5 min after scan start when sampled (fetch about 1 s) | No | Free, NOAA open data | on map |
+| GOES lightning (`GLM-L2-LCFA`, `noaa-goes19`) | Lightning flashes | Near-instant ignition clue | 20-second files, 15 newest (5 min window) polled every 60 s; cold fetch about 5 s, cached 0.4 s | No | Free, NOAA open data | on map |
+| GOES smoke (`ABI-L2-ADPC`, `noaa-goes19`) | Smoke mask | Smoke detection, daytime only | Every 5 min, polled every 300 s; scan start about 4.4 min old at fetch, fetch about 1 s; night returns 0 points with a notice | No | Free, NOAA open data | on map |
+| RTMA-RU 2.5 km (`noaa-rtma-pds`) | Gridded near-surface analysis | Freshest dry-air map, blends real observations | `2dvaranl` file read by `.idx` byte range (3 messages, about 19 MB); polled every 900 s; file valid 01:45 UTC was listed by about 02:03 (about 18 min lag), fetch about 3 s; feeds `/api/risk/grid` when under 2 h old, else Open-Meteo | No | Free, NOAA open data | on map |
 | NOAA HMS smoke polygons (`satepsanone.nesdis.noaa.gov/pub/FIRE/web/HMS/Smoke_Polygons/`) | Analyst-drawn smoke, KML or shapefile | Smoke context | 1 to 2 updates a day | No | Free, NOAA open data | planned |
 | gridMET | ERC and fuel moisture, daily NetCDF | Fire danger and fuel state | Daily | No | Free, CC0 | planned |
 | US Drought Monitor | Weekly drought GeoJSON | Long-term dryness | Weekly | No | Free, credit required: "courtesy of NDMC, via https://droughtmonitor.unl.edu" | planned |
@@ -145,8 +153,9 @@ Every source is free with no paid tier. "Fresh" figures are single readings take
 | LANDFIRE fuels | Fuel type | Fuel type for spread | Versioned releases | No | Free, public domain | planned |
 | NOAA Storm Events | Reported storm and fire events, monthly CSV | Validation | 2 to 3 month lag | No | Free, US government | planned |
 | Iowa Mesonet ASOS history | Historical station CSV | Wind history for validation | Archive | No | Free | planned |
+| Twilio SMS (service, not a data source) | Sends texts to contacts | Neighbor asks, PAGE, downwind warnings | On send | Yes (account SID, token, number) | Paid, about 1 cent per message. Only used when `MODE=live` and `SMS_GATEWAY=twilio`; otherwise simulated outbox (`backend/app/notify.py` `gateway_for`) | background |
 
-Open-Meteo, METAR and the other feeds above are single readings, not continuous measurements. The free Open-Meteo tier is for non-commercial use only; a commercial product would self-host Open-Meteo (AGPLv3) instead.
+The free Open-Meteo tier is for non-commercial use only; a commercial product would self-host Open-Meteo (AGPLv3) instead.
 
 Later (all free): NEXRAD radar, HRRR-Smoke, AirNow, OpenAQ, Copernicus.
 

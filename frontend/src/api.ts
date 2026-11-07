@@ -175,7 +175,7 @@ export interface SimulationResult {
 }
 
 export interface SourceHealth {
-  status: 'ok' | 'stale' | 'down' | 'sample'
+  status: 'ok' | 'stale' | 'down' | 'sample' | 'skipped'
   age_min: number | null
   last_ok: string | null
   last_error: string | null
@@ -224,6 +224,14 @@ export interface Playbook {
   model: { key: string; value: number | Record<string, number>; source: string }[]
 }
 
+export interface FeedResponse {
+  feed: string
+  fixture: boolean
+  fetched_at: string | null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: any
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
@@ -250,6 +258,7 @@ export const api = {
     return request<SimulationResult>(`/alerts/${id}/simulate${q}`)
   },
   layer: (name: string) => request<GeoJSON.FeatureCollection>(`/layers/${name}`),
+  feed: (name: string) => request<FeedResponse>(`/feeds/${name}`),
   riskGrid: () => request<GeoJSON.FeatureCollection>('/risk/grid'),
   linesUnderWind: () => request<GeoJSON.FeatureCollection>('/risk/lines-under-wind'),
   health: () => request<Health>('/health'),

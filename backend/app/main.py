@@ -2,8 +2,9 @@ import asyncio
 import hmac
 import json
 import logging
+import math
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 from urllib.parse import parse_qsl
 
@@ -27,7 +28,7 @@ from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
 from .district import boundary_geojson, load_district, sync_roster
 from .fire_weather import default_curing, gfdi_band
-from .ingest import hms, landsat_nrt, lsr, metar, nws, risk_grid, spc, wfigs
+from .ingest import goes_fire, goes_lightning, goes_smoke, hms, landsat_nrt, lsr, metar, nws, risk_grid, rtma_ru, spc, wfigs
 from .layers import LAYER_NAMES, load_layer, nearest_assets, segment_index
 from .pipeline import poll_firms_once
 from .signals import add_signal
@@ -71,6 +72,10 @@ def poll_jobs() -> dict:
         "open_meteo": risk_grid.poll,
         "spc": spc.poll,
         "hms": hms.poll,
+        "goes_fire": goes_fire.poll,
+        "goes_lightning": goes_lightning.poll,
+        "goes_smoke": goes_smoke.poll,
+        "rtma_ru": rtma_ru.poll,
     }
     if get_settings().firms_map_key:
         jobs["landsat_nrt"] = landsat_nrt.poll
@@ -446,12 +451,52 @@ def _grid_cells() -> list[dict]:
     return get_feed("open_meteo")["data"]["cells"]
 
 
+RTMA_MAX_AGE_S = 2 * 3600  # RTMA-RU lags about 17 min; older than 2 h means the feed has stalled
+
+
+def _fresh_rtma() -> dict | None:
+    """Latest RTMA-RU snapshot, or None when absent, a fixture, or too old to prefer."""
+    if get_settings().mode == "sample":
+        return None
+    try:
+        feed = get_feed("rtma_ru")
+    except HTTPException:
+        return None
+    if feed["fixture"] or not feed["data"].get("valid_time"):
+        return None
+    age = (datetime.now(timezone.utc) - datetime.fromisoformat(feed["data"]["valid_time"])).total_seconds()
+    return feed["data"] if age <= RTMA_MAX_AGE_S else None
+
+
+def _vpd_kpa(temp_c: float, rh: float) -> float:
+    es = 0.6108 * math.exp(17.27 * temp_c / (temp_c + 237.3))
+    return round(es * (1 - rh / 100), 2)
+
+
 @api.get("/risk/grid")
 def risk_grid_route():
+    """Open-Meteo grid, with temperature, dew point, RH and VPD replaced by the
+    RTMA-RU analysis when it is fresh. Wind and forecast fields stay Open-Meteo. `source`
+    says which one the humidity came from."""
     feed = get_feed("open_meteo")
+    cells = [dict(c) for c in feed["data"]["cells"]]
+    rtma = _fresh_rtma()
+    source = "open_meteo"
+    if rtma:
+        by = {(round(p["lat"], 3), round(p["lon"], 3)): p for p in rtma["points"]}
+        hit = 0
+        for c in cells:
+            p = by.get((round(c["lat"], 3), round(c["lon"], 3)))
+            if p:
+                c.update(temp_c=p["temp_c"], dew_c=p["dew_c"], rh=p["rh"],
+                         vpd_kpa=_vpd_kpa(p["temp_c"], p["rh"]), valid_time=rtma["valid_time"])
+                hit += 1
+        if hit:
+            source = "rtma_ru"
     feats = [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [c["lon"], c["lat"]]},
-              "properties": {k: v for k, v in c.items() if k not in ("lat", "lon")}} for c in feed["data"]["cells"]]
-    return {"type": "FeatureCollection", "features": feats, "fixture": feed["fixture"], "fetched_at": feed["fetched_at"]}
+              "properties": {k: v for k, v in c.items() if k not in ("lat", "lon")}} for c in cells]
+    return {"type": "FeatureCollection", "features": feats, "fixture": feed["fixture"],
+            "fetched_at": feed["fetched_at"], "source": source}
 
 
 @api.get("/risk/lines-under-wind")

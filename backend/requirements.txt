@@ -9,3 +9,5 @@ xgboost>=3.0
 pytest>=8.3
 tifffile>=2024.8
 pyproj>=3.6
+netCDF4>=1.7
+pygrib>=2.1

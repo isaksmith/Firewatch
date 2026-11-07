@@ -12,11 +12,12 @@ const HEALTH_STYLE: Record<SourceHealth['status'], { dot: string; text: string }
   stale: { dot: 'bg-investigate', text: 'text-investigate' },
   down: { dot: 'bg-escalate blink', text: 'text-escalate' },
   sample: { dot: 'bg-sample', text: 'text-sample' },
+  skipped: { dot: 'bg-dim', text: 'text-dim' },
 }
 
 function SourceStatus({ name, h }: { name: string; h: SourceHealth }) {
   const st = HEALTH_STYLE[h.status]
-  const detail = h.status === 'sample' ? 'SAMPLE' : h.status === 'down' ? 'DOWN' : h.age_min != null ? `${h.age_min}M` : 'NO DATA'
+  const detail = h.status === 'skipped' ? 'OFF' : h.status === 'sample' ? 'SAMPLE' : h.status === 'down' ? 'DOWN' : h.age_min != null ? `${h.age_min}M` : 'NO DATA'
   const title = h.last_error ? `Last error: ${h.last_error}` : h.last_ok ? `Last OK ${h.last_ok}` : ''
   return (
     <span className="flex items-center gap-2" title={title}>

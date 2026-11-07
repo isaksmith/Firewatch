@@ -1,0 +1,11 @@
+{
+ "count": 2,
+ "total_pixels": 37,
+ "daytime": true,
+ "scan_start": "2026-07-14T21:41:18+00:00",
+ "key": "SAMPLE_ADPC_G19.nc",
+ "points": [
+  {"lon": -98.45, "lat": 38.55, "pixels": 21},
+  {"lon": -98.15, "lat": 38.35, "pixels": 16}
+ ]
+}
