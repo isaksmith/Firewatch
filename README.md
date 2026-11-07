@@ -421,6 +421,7 @@ Results are in [backend/ml/report.md](backend/ml/report.md); the full analysis o
 
 | Doc | What's in it |
 |---|---|
+| [5-minute pitch deck](docs/pitch/Firewatch-Pitch.pptx) ([PDF](docs/pitch/Firewatch-Pitch.pdf)) | Ten slides with timed speaker notes: the 31-minute problem, how it works, the console, results, false alarms, one bar of cell, the planner, status and next steps |
 | [Build plan](docs/PLAN.md) | The scenario in minutes, whole-chain design, constraints, failure modes, cost and who pays, evidence, weekend scope, next step, plus Shane's research additions and open questions |
 | [Design](docs/DESIGN.md) | Data model, pipeline, signals and confirmation rules, scoring, response planner and messaging, spread model, API, UI |
 | [How Firewatch recommends actions](docs/RECOMMENDATIONS.md) | The decision model end to end: probability of fire, acres at stake, false-alarm costs, expected loss, every weight and why, a worked example, limits |
