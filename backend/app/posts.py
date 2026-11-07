@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 FIRE_LIKE = ("fire", "smoke")
 EXPIRE_HOURS = {"fire": 6, "smoke": 6, "hazard": 24}
-KINDS = ("see", "not_seeing", "burn", "note")
+KINDS = ("see", "not_seeing", "burn")
 REPLY_KIND = {"1": "see", "2": "not_seeing", "3": "burn"}
 
 
@@ -73,6 +73,7 @@ def _parent_for(conn, category: str, pt, is_sample: bool, now: datetime):
 def create(
     conn: sqlite3.Connection, contact, phone: str, body: str, category: str, hearsay: bool, now: datetime,
     is_sample: bool = False, channel: str = "sms", at: tuple[float, float] | None = None,
+    estimated: bool = False,
 ) -> dict:
     """Store a board post from free text or the web and do what the 'What a post does' table says."""
     from .confirm import evaluate_event
@@ -83,14 +84,17 @@ def create(
     out = {"post_id": None, "event_id": None, "asked": 0, "flagged": 0, "parent_id": None}
     if category in FIRE_LIKE:
         if member and not hearsay and pt:
-            pid = _insert(conn, contact, phone, channel, category, body, pt, False, hearsay, False, None, None, is_sample, now)
-            eid = add_signal(conn, "report", *pt, iso(now), f"{channel}:post:{pid}", body, contact["id"], is_sample)
+            pid = _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, False, None, None, is_sample, now)
+            from .notify import ESTIMATE_JOIN_KM
+
+            eid = add_signal(conn, "report", *pt, iso(now), f"{channel}:post:{pid}", body, contact["id"], is_sample,
+                             join_radius_km=ESTIMATE_JOIN_KM if estimated else None)
             conn.execute("UPDATE posts SET event_id = ? WHERE id = ?", (eid, pid))
             evaluate_event(conn, eid, None, now)
             out.update(post_id=pid, event_id=eid)
             return out
         parent = _parent_for(conn, category, pt, is_sample, now)
-        pid = _insert(conn, contact, phone, channel, category, body, pt, False, hearsay, True,
+        pid = _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, True,
                       parent["id"] if parent else None, None, is_sample, now)
         out.update(post_id=pid, flagged=1, parent_id=parent["id"] if parent else None)
         if parent is None and pt:
@@ -125,7 +129,10 @@ def confirm(
     post = _post(conn, post_id)
     if post is None:
         return {"ok": False, "reason": "not_found"}
-    if post["status"] != "open":
+    if kind not in KINDS:
+        raise ValueError(f"unknown confirm kind {kind!r}")
+    ev_status = conn.execute("SELECT status FROM events WHERE id = ?", (post["event_id"],)).fetchone() if post["event_id"] else None
+    if post["status"] != "open" or (ev_status and ev_status["status"] == "closed"):
         return {"ok": False, "reason": "closed"}
     if now - parse_iso(post["created_at"]) > timedelta(hours=EXPIRE_HOURS.get(post["category"], 24)):
         return {"ok": False, "reason": "expired"}
@@ -142,8 +149,6 @@ def confirm(
     pos = (lat, lon) if lat is not None and lon is not None else (
         (contact["lat"], contact["lon"]) if contact["lat"] is not None else None)
     counted, reason = 0, None
-    if kind not in KINDS:
-        raise ValueError(f"unknown confirm kind {kind!r}")
     if kind != "see":
         reason = "note"
     elif post["category"] not in ("fire", "smoke", "hazard"):
@@ -165,7 +170,7 @@ def confirm(
     if counted and post["category"] in FIRE_LIKE:
         if eid is None:
             eid = add_signal(conn, "report", post["lat"], post["lon"], iso(now), f"{channel}:post:{post_id}", post["body"],
-                             post["contact_id"], is_sample, join_radius_km=ESTIMATE_JOIN_KM if post["estimated"] else None)
+                             None, is_sample, join_radius_km=ESTIMATE_JOIN_KM if post["estimated"] else None)
             conn.execute("UPDATE posts SET event_id = ?, updated_at = ? WHERE id = ?", (eid, iso(now), post_id))
         # The confirmer's signal sits at the post's point, never at the confirmer's.
         add_signal(conn, "report", post["lat"], post["lon"], iso(now), f"{channel}:confirm:{post_id}", None,
@@ -200,8 +205,14 @@ def _tell_duty_hazard(conn, post, now: datetime, is_sample: bool) -> None:
 
     if _sent_today(conn, "post_hazard", now, is_sample) >= _setting("post_hazard_max_day", 5):
         return
+    if post["duty_told_at"]:
+        return
     if (duty := _duty(conn)):
         send(conn, duty, t_post_duty(post, "hazard confirmed"), "post_hazard", None, now, is_sample, post_id=post["id"])
+        conn.execute("UPDATE posts SET duty_told_at = ?, updated_at = ? WHERE id = ?", (iso(now), iso(now), post["id"]))
+
+
+_GFDI_CACHE: dict = {}
 
 
 def high_danger(lat: float, lon: float, now: datetime, is_sample: bool) -> bool:
@@ -212,9 +223,13 @@ def high_danger(lat: float, lon: float, now: datetime, is_sample: bool) -> bool:
     from .fire_weather import default_curing, gfdi
     from .ingest.weather import weather_at
 
+    key = (round(lat, 1), round(lon, 1), now.strftime("%Y%m%d%H"))
+    if key in _GFDI_CACHE:
+        return _GFDI_CACHE[key] >= threshold
     try:
         w = weather_at(lat, lon, now)
         g = gfdi(default_curing(now.month), w["temp_c"], w["rh_pct"], w["wind_kmh"])
+        _GFDI_CACHE[key] = g
     except Exception as e:
         log.warning("post timer weather unavailable: %s", e)
         return True

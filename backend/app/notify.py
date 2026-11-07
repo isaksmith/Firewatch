@@ -537,6 +537,42 @@ def handle_inbound(
         ).fetchone()
         return r["event_id"] if r else None
 
+    def fire_report(rest_text: str):
+        w = parse_where(rest_text)
+        at_pt, join_km, reply = here, None, "Firewatch: report received. The duty officer is being told."
+        if w:
+            at_pt, join_km = point_from(*here, w), ESTIMATE_JOIN_KM
+            reply = f"Firewatch: placed {w.label} of you. The duty officer is being told. Wrong? Text FIRE again."
+        eid = add_signal(conn, "report", *at_pt, iso(now), f"{channel}:{phone}", rest_text or None,
+                         contact["id"] if contact else None, is_sample, join_radius_km=join_km)
+        evaluate_event(conn, eid, None, now)
+        posts_mod.record(conn, contact, phone, body, at_pt, bool(w), eid, now, is_sample, channel)
+        ev = _event(conn, eid)
+        if not d.contains(ev["lat"], ev["lon"]):
+            # The ladder only alerts for in-district events, so tell the duty officer directly.
+            # event_id=None and a purpose outside DECIDERS keep the text from being a PAGE/NO target,
+            # and nothing is written to the event. Dedupe is per sender over a window, not per event.
+            # The prefix is matched from the start of the body, so text a sender writes can never match it.
+            # A mesh row counts only once the recipient confirmed it: relayed is just a rebroadcast.
+            prefix = f"FIREWATCH report outside district from {phone} at "
+            recent = conn.execute(
+                "SELECT 1 FROM messages WHERE direction = 'out' AND purpose = 'duty_fyi_outside' "
+                "AND ((channel = 'sms' AND status = 'sent') OR status = 'delivered') "
+                "AND is_sample = ? AND created_at > ? AND created_at <= ? AND substr(body, 1, ?) = ? LIMIT 1",
+                (int(is_sample), iso(now - timedelta(minutes=OUTSIDE_FYI_WINDOW_MIN)), iso(now), len(prefix), prefix),
+            ).fetchone()
+            if recent:
+                reply = "Firewatch: your earlier report already went to the duty officer. Call 911 if anyone is in danger."
+            else:
+                fyi = f"{prefix}{here[0]:.4f},{here[1]:.4f}: {body.strip()}"
+                for c in _ladder(conn):
+                    sent = send(conn, c, fyi[:SMS_MAX], "duty_fyi_outside", None, now, is_sample)
+                    if sent and sent["status"] == "sent":
+                        break
+                else:
+                    reply = "Firewatch: report received but no duty officer could be reached. Call 911 if anyone is in danger."
+        return eid, reply
+
     if word == "STOP":
         if contact:
             conn.execute("UPDATE contacts SET opted_in = 0 WHERE id = ?", (contact["id"],))
@@ -556,13 +592,13 @@ def handle_inbound(
         kind = {"1": "see", "2": "not_seeing", "3": "burn"}[word]
         if ask[0] == "post":
             conn.execute("UPDATE post_asks SET answered_at = ? WHERE id = ?", (iso(now), ask[2]))
-            r = posts_mod.confirm(conn, ask[1], contact, kind, now, is_sample, channel)
+            r = posts_mod.confirm(conn, ask[1], contact, kind, now, is_sample, channel, *(here or (None, None)))
             out.update(action="post_confirm", event_id=r.get("event_id"), reply=_confirm_reply(r))
         else:
             eid = ask[1]
             first = conn.execute("SELECT id FROM posts WHERE event_id = ? ORDER BY id LIMIT 1", (eid,)).fetchone()
             if first and word == "1":
-                r = posts_mod.confirm(conn, first["id"], contact, "see", now, is_sample, channel)
+                r = posts_mod.confirm(conn, first["id"], contact, "see", now, is_sample, channel, *(here or (None, None)))
                 out.update(action="post_confirm", event_id=eid, reply=_confirm_reply(r))
             else:
                 if first:
@@ -593,39 +629,7 @@ def handle_inbound(
         out.update(action="responding", event_id=eid, reply=f"Firewatch: copy, {len(responders)} responding.")
     elif word == "FIRE":
         if here:
-            w = parse_where(rest)
-            at_pt, join_km, reply = here, None, "Firewatch: report received. The duty officer is being told."
-            if w:
-                at_pt, join_km = point_from(*here, w), ESTIMATE_JOIN_KM
-                reply = f"Firewatch: placed {w.label} of you. The duty officer is being told. Wrong? Text FIRE again."
-            eid = add_signal(conn, "report", *at_pt, iso(now), f"{channel}:{phone}", rest or None,
-                             contact["id"] if contact else None, is_sample, join_radius_km=join_km)
-            evaluate_event(conn, eid, None, now)
-            posts_mod.record(conn, contact, phone, body, at_pt, bool(w), eid, now, is_sample, channel)
-            ev = _event(conn, eid)
-            if not d.contains(ev["lat"], ev["lon"]):
-                # The ladder only alerts for in-district events, so tell the duty officer directly.
-                # event_id=None and a purpose outside DECIDERS keep the text from being a PAGE/NO target,
-                # and nothing is written to the event. Dedupe is per sender over a window, not per event.
-                # The prefix is matched from the start of the body, so text a sender writes can never match it.
-                # A mesh row counts only once the recipient confirmed it: relayed is just a rebroadcast.
-                prefix = f"FIREWATCH report outside district from {phone} at "
-                recent = conn.execute(
-                    "SELECT 1 FROM messages WHERE direction = 'out' AND purpose = 'duty_fyi_outside' "
-                    "AND ((channel = 'sms' AND status = 'sent') OR status = 'delivered') "
-                    "AND is_sample = ? AND created_at > ? AND created_at <= ? AND substr(body, 1, ?) = ? LIMIT 1",
-                    (int(is_sample), iso(now - timedelta(minutes=OUTSIDE_FYI_WINDOW_MIN)), iso(now), len(prefix), prefix),
-                ).fetchone()
-                if recent:
-                    reply = "Firewatch: your earlier report already went to the duty officer. Call 911 if anyone is in danger."
-                else:
-                    fyi = f"{prefix}{here[0]:.4f},{here[1]:.4f}: {body.strip()}"
-                    for c in _ladder(conn):
-                        sent = send(conn, c, fyi[:SMS_MAX], "duty_fyi_outside", None, now, is_sample)
-                        if sent and sent["status"] == "sent":
-                            break
-                    else:
-                        reply = "Firewatch: report received but no duty officer could be reached. Call 911 if anyone is in danger."
+            eid, reply = fire_report(rest)
             out.update(action="report", event_id=eid, reply=reply)
         else:
             duty = _ladder(conn)[:1]
@@ -646,18 +650,28 @@ def handle_inbound(
         text = body.strip()
         if text and word not in RESERVED:
             cat = classify(text)
-            r = posts_mod.create(conn, contact, phone, text, cat.category, cat.hearsay, now, is_sample, channel, at=here)
-            if cat.category != "other":
-                out["event_id"] = r["event_id"]
-                if r["event_id"]:
-                    out.update(action="post_report", reply="Firewatch: report received. The duty officer is being told.")
-                elif r["flagged"]:
-                    out.update(action="post_flagged", reply="Firewatch: posted. Neighbors nearby are being asked. If you see it, text FIRE with where.")
-                else:
-                    reply = "Firewatch: posted to the board."
-                    if not here and cat.category in ("fire", "smoke"):
-                        reply += " " + t_place_hint()
-                    out.update(action="post", reply=reply)
+            if (contact and contact["registered"] and not cat.hearsay and cat.category in ("fire", "smoke") and here):
+                eid, reply = fire_report(text)
+                out.update(action="report", event_id=eid, reply=reply)
+            else:
+                r = posts_mod.create(conn, contact, phone, text, cat.category, cat.hearsay, now, is_sample, channel, at=here)
+                if cat.category != "other":
+                    out["event_id"] = r["event_id"]
+                    if r["event_id"]:
+                        out.update(action="post_report", reply="Firewatch: report received. The duty officer is being told.")
+                    elif r["flagged"]:
+                        reply = "Firewatch: posted."
+                        if r["asked"] > 0:
+                            reply += " Neighbors nearby are being asked."
+                        reply += " Call 911 if anyone is in danger."
+                        out.update(action="post_flagged", reply=reply)
+                    elif cat.category == "burn":
+                        out.update(action="post", reply="Firewatch: to register a burn, text BURN. Text FIRE if it gets away.")
+                    else:
+                        reply = "Firewatch: posted to the board."
+                        if not here and cat.category in ("fire", "smoke"):
+                            reply += " " + t_place_hint()
+                        out.update(action="post", reply=reply)
 
     if out["event_id"]:
         conn.execute("UPDATE messages SET event_id = ? WHERE id = ?", (out["event_id"], msg_id))
