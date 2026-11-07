@@ -503,6 +503,7 @@ export interface PostResult {
   flagged: boolean
   asked: number
   known: boolean
+  used_home: boolean
 }
 
 export interface ConfirmResult {

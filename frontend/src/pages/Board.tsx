@@ -93,7 +93,8 @@ function NewPost({ onPosted }: { onPosted: () => void }) {
       else if (r.event_id != null) text = 'Report received. The duty officer is being told.'
       else if (category === 'burn') text = 'Posted. To register a burn, text BURN.'
       else text = 'Posted to the board.'
-      if (attach && !pos) text += ' This post has no location, because we could not get yours.'
+      if (r.used_home) text += ' We could not get your location, so we used your home address on file.'
+      else if (attach && !pos) text += ' This post has no location, because we could not get yours.'
       if (r.reissued) text += ' Your sign-in had expired, so this went in as a community post.'
       setMsg({ text })
       setBody('')

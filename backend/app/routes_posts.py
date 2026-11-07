@@ -154,10 +154,14 @@ def create_post(body: NewPost, x_firewatch_device: str = Header(default="")):
     now, is_sample = _clock()
     with connect() as conn:
         c = _need(conn, x_firewatch_device)
+        # With no GPS fix a member's report still sounds the alarm from their home, marked as an estimate: an alarm
+        # placed roughly beats no alarm. The page tells them, so they are never told it has no location.
+        used_home = body.attach_location and body.lat is None and c["lat"] is not None
         r = posts.create(conn, c, c["phone"], body.body, body.category, classify(body.body).hearsay, now, is_sample,
                          channel="web", at=(body.lat, body.lon) if body.lat is not None and body.attach_location else None,
-                         estimated=body.estimated, use_home=body.attach_location)
-    return {"post_id": r["post_id"], "event_id": r["event_id"], "flagged": r["flagged"], "asked": r["asked"], "known": r.get("known", False)}
+                         estimated=body.estimated or used_home, use_home=body.attach_location)
+    return {"post_id": r["post_id"], "event_id": r["event_id"], "flagged": r["flagged"], "asked": r["asked"], "known": r.get("known", False),
+            "used_home": used_home}
 
 
 @public_router.post("/board/posts/{post_id}/confirm")

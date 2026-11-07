@@ -749,3 +749,13 @@ def test_public_view_has_no_event_link():
         pid = post(c, member(), "fire", "Flames in the field right now")
         assert "event_id" not in {i["id"]: i for i in pub(c)}[pid]
         assert "event_id" in {i["id"]: i for i in pub(c, member("Vol", "volunteer"))}[pid]
+
+
+def test_home_fallback_is_marked_estimated_and_reported():
+    with TestClient(app) as c:
+        r = c.post("/api/board/posts", headers=hd(member()), json={"category": "fire", "body": "Flames by the road"})
+        assert r.status_code == 200 and r.json()["used_home"] is True
+        row = _row(r.json()["post_id"])
+        assert row["lat"] == 37.77 and row["estimated"] == 1
+        r = c.post("/api/board/posts", headers=hd(member("Ann")), json={"category": "fire", "body": "Flames here", "lat": PT[0], "lon": PT[1]})
+        assert r.json()["used_home"] is False and _row(r.json()["post_id"])["estimated"] == 0
