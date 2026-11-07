@@ -86,6 +86,7 @@ def _tick_live() -> None:
     with connect() as conn:
         now = utcnow()
         notify.tick(conn, now, is_sample=False)
+        notify.hold_tick(conn, now, is_sample=get_settings().mode == "sample")
         posts.tick(conn, now, is_sample=get_settings().mode == "sample")
 
 

@@ -503,6 +503,50 @@ def acknowledge(conn: sqlite3.Connection, *, event_id: int | None = None, post_i
     return {"ok": True, "level": level, "until": until, "by": by, "repeat": False, "event_id": event_id}
 
 
+BREAKERS = ("line_fault", "camera_smoke", "sensor_smoke")
+
+
+def _broken(conn, ev) -> str | None:
+    """New evidence since the ack: a detection, or a hard signal. Reports and replies never break a hold."""
+    eid = ev["id"]
+    if conn.execute("SELECT 1 FROM detections WHERE event_id = ? AND id > ?", (eid, ev["ack_mark_det"] or 0)).fetchone():
+        return "new satellite detection"
+    sig = conn.execute(
+        f"SELECT kind FROM signals WHERE event_id = ? AND id > ? AND kind IN ({','.join('?' * len(BREAKERS))})",
+        (eid, ev["ack_mark_sig"] or 0, *BREAKERS)).fetchone()
+    return f"new {sig['kind'].replace('_', ' ')}" if sig else None
+
+
+def hold_tick(conn: sqlite3.Connection, now: datetime, is_sample: bool | None = None) -> None:
+    """End holds: new evidence breaks one, the clock expires one. Then replay the level the hold swallowed."""
+    q = "SELECT * FROM events WHERE ack_until IS NOT NULL AND status != 'closed'"
+    args: tuple = ()
+    if is_sample is not None:
+        q, args = q + " AND is_sample = ?", (int(is_sample),)
+    for ev in conn.execute(q, args).fetchall():
+        why = _broken(conn, ev)
+        if why is None and now < parse_iso(ev["ack_until"]):
+            continue
+        sample = bool(ev["is_sample"])
+        duty = _ladder(conn)
+        _clear_hold(conn, ev["id"])
+        if why and duty:
+            send(conn, duty[0], t_hold_broken(ev, why), "hold_broken", ev["id"], now, sample)
+        elif ev["ack_level"] == "ladder" and duty:
+            send(conn, duty[0], t_hold_expired(ev), "hold_expired", ev["id"], now, sample)
+        conn.execute("INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, 'system', ?, ?)",
+                     (ev["id"], "hold_broken" if why else "hold_expired", why or "clock", iso(now)))
+        ev = _event(conn, ev["id"])
+        if ev["status"] in ("dismissed",) or ev["recommendation"] in (None, "monitor"):
+            continue
+        on_level(conn, ev["id"], ev["recommendation"], now)
+        state = _state(_event(conn, ev["id"]))
+        if state.pop("asks_skipped", None):
+            asked = ask_neighbors(conn, _event(conn, ev["id"]), now)
+            state["asked"] = [a["contact_id"] for a in asked]
+            _save(conn, ev["id"], state)
+
+
 def _draft_mutual_aid(conn, ev, state: dict, reason: str, now: datetime) -> None:
     d = load_district()
     state["mutual_aid"] = {"reason": reason, "drafted_at": iso(now)}

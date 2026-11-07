@@ -151,3 +151,65 @@ def test_new_texts_fit_one_sms():
               "level_reason": "x" * 300, "place_label": "y" * 90, "created_at": iso(T0)}
     for body in (notify.t_hold_expired(ev_row), notify.t_hold_broken(ev_row, "x" * 300), notify.t_ack_reply("x" * 80, 30)):
         assert len(body) <= SMS_MAX
+
+
+def _det(conn, eid, minute):
+    conn.execute(
+        "INSERT INTO detections(dedupe_key, source, lat, lon, acq_time, is_sample, ingested_at, event_id) "
+        "VALUES (?, 'VIIRS_SNPP_NRT', ?, ?, ?, 1, ?, ?)",
+        (f"k{minute}", *FIRE, iso(at(minute)), iso(at(minute)), eid))
+
+
+def test_satellite_hit_breaks_the_hold_with_one_text():
+    with connect() as conn:
+        eid = escalated(conn)
+        notify.acknowledge(conn, event_id=eid, by="Duty", role="duty_officer", now=at(9))
+        notify.hold_tick(conn, at(10), is_sample=True)
+        assert ev(conn, eid)["ack_until"] is not None and not out(conn, "hold_broken")
+        _det(conn, eid, 11)
+        notify.hold_tick(conn, at(12), is_sample=True)
+        notify.hold_tick(conn, at(13), is_sample=True)
+        assert ev(conn, eid)["ack_until"] is None
+        assert len(out(conn, "hold_broken", eid)) == 1
+
+
+def test_lapse_sends_one_text_to_duty_and_resumes_the_ladder():
+    with connect() as conn:
+        eid = escalated(conn)
+        notify.acknowledge(conn, event_id=eid, by="Duty", role="duty_officer", now=at(9))
+        notify.hold_tick(conn, at(38), is_sample=True)
+        assert not out(conn, "hold_expired")
+        notify.hold_tick(conn, at(40), is_sample=True)
+        notify.hold_tick(conn, at(41), is_sample=True)
+        assert len(out(conn, "hold_expired", eid)) == 1
+        assert ev(conn, eid)["ack_until"] is None
+        notify.tick(conn, at(45), is_sample=True)
+        assert out(conn, "ladder")
+
+
+def test_crowd_lapse_is_silent_and_runs_the_skipped_asks():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = add_signal(conn, "line_fault", *FIRE, iso(at(0)), "coop:feeder-4", "lockout", is_sample=True)
+        notify.acknowledge(conn, event_id=eid, by="Vol", role="volunteer", now=at(0))
+        evaluate_event(conn, eid, WEATHER, at(1))
+        assert not out(conn, "ask_neighbors") and not out(conn, "ask")
+        before = conn.execute("SELECT COUNT(*) c FROM messages WHERE direction = 'out' AND event_id = ?", (eid,)).fetchone()["c"]
+        notify.hold_tick(conn, at(31), is_sample=True)
+        assert not out(conn, "hold_expired")
+        after = conn.execute("SELECT COUNT(*) c FROM messages WHERE direction = 'out' AND event_id = ?", (eid,)).fetchone()["c"]
+        assert after > before
+        assert "asks_skipped" not in (loads(ev(conn, eid)["response_json"]) or {})
+
+
+def test_rise_swallowed_by_a_ladder_hold_fires_on_expiry():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = add_signal(conn, "line_fault", *FIRE, iso(at(0)), "coop:feeder-4", "lockout", is_sample=True)
+        evaluate_event(conn, eid, WEATHER, at(0))
+        assert not out(conn, "duty_escalate")
+        notify.acknowledge(conn, event_id=eid, by="Duty", role="duty_officer", now=at(1))
+        notify.handle_inbound(conn, WES, "1", at(8), is_sample=True)
+        assert not out(conn, "duty_escalate")
+        notify.hold_tick(conn, at(32), is_sample=True)
+        assert len(out(conn, "duty_escalate", eid)) == 1

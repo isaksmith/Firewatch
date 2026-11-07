@@ -13,7 +13,7 @@ from .confirm import evaluate_event
 from .db import connect, iso, loads, parse_iso
 from .district import load_district, overrides, sync_roster
 from .fire_weather import default_curing, gfdi, gfdi_band
-from .notify import handle_inbound, tick
+from .notify import handle_inbound, hold_tick, tick
 from .pipeline import process_detections
 from .signals import add_signal
 from .sim.spread import SpreadInput, growth_curve
@@ -108,6 +108,7 @@ def _minute(conn, sc: dict, t: int) -> None:
     tick(conn, now, is_sample=True)
     from . import posts
 
+    hold_tick(conn, now, is_sample=True)
     posts.tick(conn, now, is_sample=True)
 
 
