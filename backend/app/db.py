@@ -191,6 +191,10 @@ CREATE TABLE IF NOT EXISTS post_confirms (
   counted INTEGER NOT NULL DEFAULT 0, reason TEXT, created_at TEXT NOT NULL,
   UNIQUE(post_id, contact_id)
 );
+CREATE TABLE IF NOT EXISTS post_photos (
+  post_id INTEGER PRIMARY KEY REFERENCES posts(id), jpeg BLOB NOT NULL,
+  width INTEGER NOT NULL, height INTEGER NOT NULL, created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS post_devices (
   token_hash TEXT PRIMARY KEY, contact_id INTEGER NOT NULL REFERENCES contacts(id),
   created_at TEXT NOT NULL, last_seen_at TEXT

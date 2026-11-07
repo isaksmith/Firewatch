@@ -1,4 +1,5 @@
 """The public board: board routes only. The tunnel points here (port 8012), never at the main API or Vite."""
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,12 +13,14 @@ from .db import init_db
 from .ratelimit import Limiter
 
 MAX_BODY = 16 * 1024
+PHOTO_BODY = 2 * 1024 * 1024 + 4096
+PHOTO_PATH = re.compile(r"^/api/board/posts/\d+/photo$")
 DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 PUBLIC_DIR = Path(__file__).resolve().parents[2] / "frontend" / "public"
 ROOT_FILES = ("favicon.svg", "icons.svg")
 
 CSP = ("default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; "
-       "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+       "connect-src 'self'; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 HEADERS = [(b"x-content-type-options", b"nosniff"), (b"referrer-policy", b"no-referrer"),
            (b"x-frame-options", b"DENY"), (b"content-security-policy", CSP.encode())]
 
@@ -31,6 +34,7 @@ class Guard:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
+        cap = PHOTO_BODY if scope["method"] == "POST" and PHOTO_PATH.match(scope["path"]) else MAX_BODY
         api = scope["path"].startswith("/api")
         started = False
         blocked = False
@@ -53,7 +57,7 @@ class Guard:
         declared = dict(scope["headers"]).get(b"content-length")
         if declared is not None:
             try:
-                if int(declared) > MAX_BODY:
+                if int(declared) > cap:
                     return await too_big()
             except ValueError:
                 return await too_big()
@@ -65,7 +69,7 @@ class Guard:
             msg = await receive()
             if msg["type"] == "http.request" and not blocked:
                 seen += len(msg.get("body", b""))
-                if seen > MAX_BODY:
+                if seen > cap:
                     if not started:
                         await too_big()
                     blocked = True

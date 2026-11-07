@@ -58,6 +58,7 @@ def list_scenarios() -> list[dict]:
 
 def _clear_posts(conn, where: str, args: tuple = ()) -> None:
     sub = f"SELECT id FROM posts WHERE {where}"
+    conn.execute(f"DELETE FROM post_photos WHERE post_id IN ({sub})", args)
     conn.execute(f"DELETE FROM post_confirms WHERE post_id IN ({sub})", args)
     conn.execute(f"DELETE FROM post_asks WHERE post_id IN ({sub})", args)
     conn.execute(f"DELETE FROM posts WHERE {where}", args)

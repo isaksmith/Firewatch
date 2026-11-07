@@ -1,15 +1,17 @@
 """The public board API. Device token only: main.py mounts the token-guarded admin_router, never this module."""
 import hashlib
+import io
 import secrets
 from datetime import timedelta
 from typing import Literal
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request, Response
+from PIL import Image, ImageOps
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from . import notify, posts, scenario
 from .config import get_settings
-from .db import connect, iso, utcnow
+from .db import connect, iso, parse_iso, utcnow
 from .confirm import evaluate_event
 from .district import LADDER_ROLES, load_district
 from .keywords import classify
@@ -19,6 +21,10 @@ public_router = APIRouter()
 admin_router = APIRouter()
 
 STATION_ROLES = ("volunteer", *LADDER_ROLES)
+MAX_PHOTO = 2 * 1024 * 1024
+PHOTO_TYPES = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
+PHOTO_SIDE = 1600
+Image.MAX_IMAGE_PIXELS = 40_000_000
 BADGE = "Fire department is aware. Call 911 if you are in danger."
 
 
@@ -143,7 +149,9 @@ def _item(conn, r, station: bool, now) -> dict:
            "estimated": bool(r["estimated"]), "hearsay": bool(r["hearsay"]), "flagged": bool(r["flagged"]),
            "status": r["status"], "parent_id": r["parent_id"], "created_at": r["created_at"],
            "author": author, "confirms": r["n_counted"], "notes": r["n_notes"], "badge": BADGE if held else None,
-           "unconfirmed": not member and not r["n_counted"]}
+           "unconfirmed": not member and not r["n_counted"],
+           "has_photo": bool(r["has_photo"]), "thread_size": r["thread_size"],
+           "age_min": max(0, int((now - parse_iso(r["created_at"])).total_seconds() // 60))}
     if station:  # the alert routes behind event_id are not public, so the public view has no link to them
         out["held"] = held
         out["event_id"] = r["event_id"]
@@ -154,7 +162,9 @@ def _item(conn, r, station: bool, now) -> dict:
 def _list(conn, now, is_sample: bool, station: bool) -> list[dict]:
     q = ("SELECT p.*, c.registered a_registered, c.name a_name, "
          "e.status e_status, (SELECT COUNT(*) FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 1) n_counted, "
-         "(SELECT COUNT(*) FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 0) n_notes "
+         "(SELECT COUNT(*) FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 0) n_notes, "
+         "EXISTS(SELECT 1 FROM post_photos ph WHERE ph.post_id = p.id) has_photo, "
+         "(SELECT COUNT(*) FROM posts t WHERE t.id = COALESCE(p.parent_id, p.id) OR t.parent_id = COALESCE(p.parent_id, p.id)) thread_size "
          "FROM posts p LEFT JOIN contacts c ON c.id = p.contact_id "
          "LEFT JOIN posts par ON par.id = p.parent_id LEFT JOIN events e ON e.id = COALESCE(p.event_id, par.event_id) WHERE p.created_at >= ? AND p.is_sample = ? ")
     if not station:
@@ -197,6 +207,79 @@ def create_post(body: NewPost, request: Request, x_firewatch_device: str = Heade
                          estimated=body.estimated or used_home, use_home=body.attach_location)
     return {"post_id": r["post_id"], "flagged": r["flagged"], "asked": r["asked"], "known": r.get("known", False),
             "used_home": used_home, "alerted": r["event_id"] is not None}
+
+
+def _reencode(raw: bytes, ctype: str) -> tuple[bytes, int, int]:
+    try:
+        with Image.open(io.BytesIO(raw)) as img:
+            if img.format != PHOTO_TYPES[ctype]:
+                raise ValueError("format mismatch")
+            img = ImageOps.exif_transpose(img).convert("RGB")
+            img.thumbnail((PHOTO_SIDE, PHOTO_SIDE))
+            out = io.BytesIO()
+            img.save(out, "JPEG", quality=75)
+            return out.getvalue(), img.width, img.height
+    except Exception:  # decompression bombs, truncated or foreign bytes: all the same refusal
+        raise HTTPException(415, "Not a readable image of that type")
+
+
+@public_router.post("/board/posts/{post_id}/photo")
+async def add_photo(post_id: int, request: Request, x_firewatch_device: str = Header(default="")):
+    now, _ = _clock()
+    ctype = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_PHOTO:
+        raise HTTPException(413, "Photo too large")
+    raw = await request.body()
+    with connect() as conn:
+        c = _need(conn, x_firewatch_device)
+        _limit(request, "photo", c)
+        post = conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
+        if post is None:
+            raise HTTPException(404, "No such post")
+        if post["contact_id"] != c["id"] and c["role"] not in STATION_ROLES:
+            raise HTTPException(403, "Not your post")
+        if post["status"] != "open" or conn.execute("SELECT 1 FROM post_photos WHERE post_id = ?", (post_id,)).fetchone():
+            raise HTTPException(409, "This post cannot take a photo")
+        if len(raw) > MAX_PHOTO:
+            raise HTTPException(413, "Photo too large")
+        if ctype not in PHOTO_TYPES:
+            raise HTTPException(415, "Use a JPEG, PNG or WebP photo")
+        jpeg, w, h = _reencode(raw, ctype)
+        conn.execute("INSERT INTO post_photos(post_id, jpeg, width, height, created_at) VALUES (?,?,?,?,?)",
+                     (post_id, jpeg, w, h, iso(now)))
+    return {"ok": True, "width": w, "height": h}
+
+
+def _photo_response(jpeg: bytes) -> Response:
+    return Response(jpeg, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff"})
+
+
+def _photo(conn, post_id: int):
+    row = conn.execute("SELECT jpeg FROM post_photos WHERE post_id = ?", (post_id,)).fetchone()
+    if row is None:
+        raise HTTPException(404, "No photo")
+    return row["jpeg"]
+
+
+@public_router.get("/board/posts/{post_id}/photo")
+def get_photo(post_id: int, request: Request):
+    _limit(request, "read")
+    with connect() as conn:
+        visible = conn.execute(
+            "SELECT 1 FROM posts p LEFT JOIN posts par ON par.id = p.parent_id "
+            "LEFT JOIN events e ON e.id = COALESCE(p.event_id, par.event_id) "
+            "WHERE p.id = ? AND p.status = 'open' AND (e.id IS NULL OR e.status NOT IN ('dismissed', 'closed'))", (post_id,)).fetchone()
+        if visible is None:
+            raise HTTPException(404, "No photo")
+        return _photo_response(_photo(conn, post_id))
+
+
+@admin_router.get("/board/admin/posts/{post_id}/photo")
+def admin_photo(post_id: int):
+    with connect() as conn:
+        return _photo_response(_photo(conn, post_id))
 
 
 @public_router.post("/board/posts/{post_id}/confirm")
