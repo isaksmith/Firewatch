@@ -14,6 +14,32 @@ FireWatch's proposed sensor network uses two types of ground node on the same US
 
 The same radio, enclosure, and sensing architecture supports both builds. The rich node adds one distinct measurement rather than several experimental sensors. This is a module-based prototype design with a path to a custom PCB. Firmware integration, power autonomy, enclosure performance, and fire detection distance still require bench and field validation.
 
+## FireWatch sensor network pitch
+
+Rural fire districts can have large areas to watch and few places with reliable cell service. FireWatch uses risk modeling to identify priority wildfire hotspots, then surveys those sites to decide where a small ground network can add useful observations. A county can start with one hotspot and expand to additional sites as the network demonstrates value.
+
+**Detect → confirm → respond.** Bare nodes measure gas resistance, temperature, humidity, and pressure. Rich nodes add optical particulate measurements and are intended to generate a local pre-warning when readings warrant a closer look. FireWatch’s planned confirmation workflow combines those readings with independent evidence such as utility line-fault reports, public reports, satellite detections, and NOAA weather and Red Flag forecasts. The app gives the duty officer the evidence behind a warning and supports coordination with county dispatch. See the [FireWatch system overview](../README.md).
+
+**The sensors also help carry the data.** Solar-powered field nodes use a shared US915 Meshtastic LoRa mesh. When configured to relay and awake, a sensor can forward nearby nodes’ packets as well as send its own. That can reduce the need for dedicated repeaters and lets field nodes communicate without cell service. A station bridge connects the mesh to FireWatch through an existing station computer and internet connection where available. The planner budgets **$45 for the bridge radio** and **$105 per dedicated relay**. A radio survey determines which sites need elevated relays or additional backhaul. [Meshtastic device roles](https://meshtastic.org/docs/configuration/radio/device/) · [FireWatch planner assumptions](../backend/app/planner.py)
+
+### Cost per priority hotspot
+
+The example puts seven Bare nodes and two Rich nodes on a 15-acre priority plot. Both tiers use the same radio, and the two Rich nodes add particulate sensing at selected positions. The low-end bulk estimates are **$136.44 per Bare node** and **$203.60 per Rich node**, including electronics, battery, solar panel, and enclosure. [Custom PCB parts and pricing](#preliminary-costed-bom-at-approximately-100-units)
+
+| Example deployment | Estimated hardware cost |
+| --- | ---: |
+| One 15-acre hotspot, seven Bare and two Rich nodes at bulk pricing | **$1,362** in node hardware, about **$91 per acre of the example plot** |
+| One-off pilot with stocked modules, a station bridge, and zero or one dedicated relay | **$1,727–$1,832** |
+| Ten selected county hotspots, 70 Bare and 20 Rich nodes at bulk pricing, five relays, and one station bridge | **$14,193** |
+
+The mixed layout saves **about $470 per hotspot, or 26% in node hardware**, compared with placing Rich nodes at all nine positions. These are planning estimates. Bulk prices assume a run of about 100 units and depend on part availability, order mix, and assembly quotes. The estimates exclude mounts, survey and installation labor, shipping, and ongoing service. The 15-acre layout illustrates the budget for one selected plot. Detection depends on where the plume travels, when the sensors sample, and whether the mesh can deliver the readings. The county example prices ten selected hotspots within a county.
+
+### What the county pays for
+
+The website, apps, and model are free to use. A county, fire district, or utility partner pays for the site assessment, placement plan, hardware, installation, and commissioning. The deployment quote also identifies who monitors outages, handles maintenance, and replaces failed hardware. A first project can use the stocked modules and document warning lead time, missed events, nuisance alerts, and packet delivery before the county commits to more sites. See [bring-up and site acceptance](#bring-up-and-site-acceptance).
+
+FireWatch’s cost case comes from concentrating hardware on priority sites, sharing the radio network across both tiers, and reusing station infrastructure where possible. Comparing it with Dryad or another provider requires quotes for the same sites, detection objectives, and service scope. The custom board and the contribution of its readings to early warning still need field validation.
+
 ## Current designs and implementation status
 
 Two hardware implementations are documented here. They share the two-tier idea but use different environmental sensors and power paths:
