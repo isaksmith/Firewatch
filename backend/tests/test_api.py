@@ -38,6 +38,6 @@ def test_health_lists_every_source_with_interval():
     with TestClient(app) as client:
         h = client.get("/api/health").json()
         for name in ("firms", "nws_alerts", "lsr", "wfigs_incidents", "wfigs_perimeters",
-                     "metar", "open_meteo", "spc", "hms"):
+                     "metar", "open_meteo", "spc", "hms", "ngfs"):
             assert name in h["sources"], name
             assert h["sources"][name]["interval_s"] > 0

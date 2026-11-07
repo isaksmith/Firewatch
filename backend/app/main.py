@@ -28,7 +28,7 @@ from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
 from .district import boundary_geojson, load_district, sync_roster
 from .fire_weather import default_curing, gfdi_band
-from .ingest import goes_fire, goes_lightning, goes_smoke, hms, landsat_nrt, lsr, metar, nws, risk_grid, rtma_ru, spc, wfigs
+from .ingest import goes_fire, goes_lightning, goes_smoke, hms, landsat_nrt, lsr, metar, ngfs, nws, risk_grid, rtma_ru, spc, wfigs
 from .layers import LAYER_NAMES, load_layer, nearest_assets, segment_index
 from .pipeline import poll_firms_once
 from .signals import add_signal
@@ -71,6 +71,7 @@ def poll_jobs() -> dict:
         "spc": spc.poll,
         "hms": hms.poll,
         "goes_fire": goes_fire.poll,
+        "ngfs": ngfs.poll,
         "goes_lightning": goes_lightning.poll,
         "goes_smoke": goes_smoke.poll,
         "rtma_ru": rtma_ru.poll,

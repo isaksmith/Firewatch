@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     poll_spc_s: int = 1800
     poll_hms_s: int = 1800
     poll_goes_fire_s: int = 60
+    poll_ngfs_s: int = 60
     poll_goes_lightning_s: int = 60
     poll_goes_smoke_s: int = 300
     poll_rtma_ru_s: int = 900
@@ -72,6 +73,7 @@ class Settings(BaseSettings):
             "spc": self.poll_spc_s,
             "hms": self.poll_hms_s,
             "goes_fire": self.poll_goes_fire_s,
+            "ngfs": self.poll_ngfs_s,
             "goes_lightning": self.poll_goes_lightning_s,
             "goes_smoke": self.poll_goes_smoke_s,
             "rtma_ru": self.poll_rtma_ru_s,
