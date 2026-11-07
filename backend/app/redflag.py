@@ -14,6 +14,8 @@ from .layers import _point_in_ring
 
 # A scenario replay sets this from its explicit "red_flag" field; None means read the live feed.
 replay_red_flag: ContextVar[bool | None] = ContextVar("replay_red_flag", default=None)
+# The replay scenario's forecast Red Flag day, for the phone feed's flag (the confirmation rules may ignore it).
+replay_forecast_red_flag: ContextVar[bool] = ContextVar("replay_forecast_red_flag", default=False)
 STALE_INTERVALS = 3  # same cut-off the status page uses for "stale"
 
 

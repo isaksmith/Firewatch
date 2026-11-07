@@ -24,10 +24,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from . import cap, climate, livesend, mesh, notify, planner, playbook, sample, scenario
+from . import cap, climate, fw1_feed, livesend, mesh, notify, planner, playbook, sample, scenario
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
+from .mobile import router as mobile_router
 from .district import boundary_geojson, load_district, sync_roster
 from .fire_weather import default_curing, gfdi_band
 from .geo import compass
@@ -373,6 +374,7 @@ def act_on_alert(event_id: int, body: ActionIn):
             (event_id, body.action, body.operator, body.note, now),
         )
         conn.execute("UPDATE events SET status = ?, updated_at = ? WHERE id = ?", (new_status, now, event_id))
+        fw1_feed.sync_event(conn, event_id, parse_iso(now))
     return get_alert(event_id)
 
 
@@ -1005,6 +1007,7 @@ async def load_scenario_now(slug: str):
 
 app.include_router(api)
 app.include_router(lite_router)
+app.include_router(mobile_router)
 
 
 @app.get("/")

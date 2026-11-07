@@ -8,6 +8,7 @@ import httpx
 
 from .config import get_settings
 from .confirm import evaluate_event, fetch_weather
+from . import fw1_feed
 from .db import connect, iso, mark_source, utcnow
 from .features.cluster import assign_detection
 from .ingest import firms
@@ -128,7 +129,11 @@ def poll_firms_once() -> dict:
 
 def close_stale_events(conn: sqlite3.Connection, hours: int = 24) -> None:
     cutoff = iso(utcnow() - timedelta(hours=hours))
+    stale = [r["id"] for r in conn.execute(
+        "SELECT id FROM events WHERE is_sample = 0 AND status != 'closed' AND last_seen < ?", (cutoff,))]
     conn.execute(
         "UPDATE events SET status = 'closed' WHERE is_sample = 0 AND status != 'closed' AND last_seen < ?",
         (cutoff,),
     )
+    for eid in stale:
+        fw1_feed.sync_event(conn, eid, utcnow())

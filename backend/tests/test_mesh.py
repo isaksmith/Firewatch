@@ -227,3 +227,49 @@ def test_no_radio_plugged_in_is_mesh_down_not_exit(monkeypatch):
     assert mesh.start() is False
     h = mesh.health()
     assert h["status"] == "down" and "no Meshtastic radio" in h["last_error"]
+
+
+def _report(conn, text, num=DUTY_RADIO):
+    return mesh.handle_packet(conn, {**_packet(num, "TEXT_MESSAGE_APP", to=0xFFFFFFFF, text=text), "channel": 0}, GATEWAY)
+
+
+def test_phone_fire_report_with_coordinates_uses_them(radio):
+    with connect() as conn:
+        mesh.handle_packet(conn, _position(DUTY_RADIO, 37.30, -99.30), GATEWAY)  # node position is elsewhere
+        assert _report(conn, "FIRE 37.3821,-99.4681") == "channel_text"
+        s = conn.execute("SELECT lat, lon, kind FROM signals ORDER BY id DESC LIMIT 1").fetchone()
+        assert (s["kind"], s["lat"], s["lon"]) == ("report", 37.3821, -99.4681)
+
+
+def test_phone_fire_report_without_coordinates_uses_node_position(radio):
+    with connect() as conn:
+        mesh.handle_packet(conn, _position(DUTY_RADIO, 37.30, -99.30), GATEWAY)
+        assert _report(conn, "FIRE smoke by the road") == "channel_text"
+        s = conn.execute("SELECT lat, lon FROM signals ORDER BY id DESC LIMIT 1").fetchone()
+        assert (s["lat"], s["lon"]) == (37.30, -99.30)
+
+
+@pytest.mark.parametrize("where", ["40.0001,-80.5", "0.0,0.0"])
+def test_phone_fire_report_outside_the_box_is_rejected(radio, where):
+    with connect() as conn:
+        mesh.handle_packet(conn, _position(DUTY_RADIO, 37.30, -99.30), GATEWAY)
+        assert _report(conn, f"FIRE {where}") == "channel_text"
+        assert conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0] == 0
+        reply = conn.execute("SELECT body, channel FROM messages WHERE direction = 'out' AND purpose = 'reply'").fetchone()
+        assert reply["channel"] == "mesh" and "outside the district" in reply["body"]
+    assert any("outside the district" in s["text"] for s in radio.sent)
+
+
+def test_fw1_code_goes_to_the_channel_once_per_change(radio):
+    from app import fw1
+    with connect() as conn:
+        eid = _escalated_event(conn)
+        codes = [r["code"] for r in conn.execute("SELECT code FROM fw1_feed WHERE event_id = ? ORDER BY seq", (eid,))]
+        assert codes and all(fw1.decode(c, (37.2689, -99.3268))["id"] == eid for c in codes)
+        posts = [s["text"] for s in radio.sent if s["to"] == mesh.BROADCAST_ID and s["text"].startswith("FW1.")]
+        assert posts == codes, "each change is posted once, as the bare code"
+        assert all(len(p.encode()) <= mesh.MESH_MAX_BYTES for p in posts)
+        rows = conn.execute("SELECT body, channel, is_sample FROM messages WHERE purpose = 'fw1'").fetchall()
+        assert [r["body"] for r in rows] == codes and {r["channel"] for r in rows} == {"mesh"} and rows[0]["is_sample"] == 1
+        evaluate_event(conn, eid, WEATHER, T0 + timedelta(minutes=9))  # nothing changed: nothing new
+        assert conn.execute("SELECT COUNT(*) FROM fw1_feed").fetchone()[0] == len(codes)

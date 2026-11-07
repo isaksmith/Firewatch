@@ -10,7 +10,7 @@ from functools import lru_cache
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, iso, loads, parse_iso, utcnow
-from .redflag import replay_red_flag
+from .redflag import replay_forecast_red_flag, replay_red_flag
 from .district import load_district, sync_roster
 from .fire_weather import default_curing, gfdi, gfdi_band
 from .ngfs_signal import add_ngfs_signals
@@ -56,6 +56,7 @@ def clear() -> None:
             f"SELECT id FROM events WHERE is_sample = 1 AND (sample_slug IS NULL OR sample_slug IN ({','.join('?' * len(slugs))}))",
             slugs,
         )]
+        conn.executemany("DELETE FROM fw1_feed WHERE event_id = ?", [(i,) for i in ids])  # ids are reused; seq is not
         for table in ("scores", "actions", "detections", "signals", "messages"):
             conn.executemany(f"DELETE FROM {table} WHERE event_id = ?", [(i,) for i in ids])
         conn.executemany("DELETE FROM events WHERE id = ?", [(i,) for i in ids])
@@ -98,6 +99,7 @@ def _minute(conn, sc: dict, t: int, skip: tuple[dict, ...] = ()) -> None:
     t0 = parse_iso(sc["t0"])
     now = t0 + timedelta(minutes=t)
     token = replay_red_flag.set(_replay_red_flag(sc))
+    forecast_token = replay_forecast_red_flag.set(bool(sc.get("red_flag", False)))
     try:
         for step in sc["timeline"]:
             if step["t"] == t and not any(step is s for s in skip):
@@ -105,6 +107,7 @@ def _minute(conn, sc: dict, t: int, skip: tuple[dict, ...] = ()) -> None:
         tick(conn, now, is_sample=True)
     finally:
         replay_red_flag.reset(token)
+        replay_forecast_red_flag.reset(forecast_token)
 
 
 def _live_radio_steps(conn, sc: dict, t: int) -> list[tuple[dict, dict]]:

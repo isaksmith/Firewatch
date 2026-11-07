@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import numpy as np
 
-from . import livesend, mesh
+from . import fw1_feed, livesend, mesh
 from .config import get_settings
 from .db import iso, loads, parse_iso
 from .district import LADDER_ROLES, NEIGHBOR_ROLES, VOLUNTEER_ROLES, load_district
@@ -33,6 +33,8 @@ HA_PER_ACRE = 0.404686
 HELPER_ROLES = ("water_truck", "disc")
 HELPER_RADIUS_KM = 10.0
 PLAN_MINUTES = 60
+# The chief and responder texts; contacts who use the phone app get the firewatch:// link as a second text.
+APP_LINK_PURPOSES = ("duty_fyi", "duty_escalate", "ladder", "page", "mutual_aid_draft")
 DECIDERS = ("duty_fyi", "duty_escalate", "ladder", "mutual_aid_draft")
 
 
@@ -208,6 +210,10 @@ def send(
             (event_id, contact["id"], to, purpose, body, status, gid, int(is_sample), iso(now), channel),
         )
         first = first or {"id": cur.lastrowid, "to": contact["name"], "purpose": purpose, "body": body, "status": status, "channel": channel}
+    if first and purpose in APP_LINK_PURPOSES and event_id and "app" in contact.keys() and contact["app"] and "sms" in channels:
+        row = conn.execute("SELECT code FROM fw1_feed WHERE event_id = ? ORDER BY seq DESC LIMIT 1", (event_id,)).fetchone()
+        if row:
+            send(conn, contact, f"Firewatch app: firewatch://a/{row['code']}", "app_link", event_id, now, is_sample, channels=("sms",))
     return first
 
 
@@ -408,16 +414,20 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
         (event_id, {"page": "escalate", "no": "dismiss", "send": "escalate"}[action], by, f"{action.upper()} via Firewatch", iso(now)),
     )
     _save(conn, event_id, state)
+    fw1_feed.sync_event(conn, event_id, now)
     return state
 
 
 def _draft_mutual_aid(conn, ev, state: dict, reason: str, now: datetime) -> None:
     d = load_district()
     state["mutual_aid"] = {"reason": reason, "drafted_at": iso(now)}
+    _save(conn, ev["id"], state)
+    fw1_feed.sync_event(conn, ev["id"], now)  # the mutual-aid flag goes in the code the chief's app link carries
     chief = next((c for c in _ladder(conn) if c["role"] == "chief"), None)
     if chief:
         send(conn, chief, t_mutual_aid_draft(reason, d.neighbor_district), "mutual_aid_draft", ev["id"], now, bool(ev["is_sample"]))
     _save(conn, ev["id"], state)
+    fw1_feed.sync_event(conn, ev["id"], now)
 
 
 def plan_response(conn: sqlite3.Connection, ev, now: datetime) -> dict:

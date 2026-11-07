@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from . import scenario
+from . import fw1_feed, scenario
 from .config import get_settings
 from .db import connect, iso, parse_iso, utcnow
 
@@ -304,3 +304,4 @@ def _restore(eid: int, status: str) -> None:
         conn.execute("INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, ?, ?, ?)",
                      (eid, "reopen", OPERATOR, f"undo, back to {status}", now))
         conn.execute("UPDATE events SET status = ?, updated_at = ? WHERE id = ?", (status, now, eid))
+        fw1_feed.sync_event(conn, eid, parse_iso(now))

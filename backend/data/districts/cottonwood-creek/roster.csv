@@ -1,37 +1,37 @@
-name,phone,role,lat,lon,weekday_avail,ladder_rank,mesh_id
-Lt. Ana Reyes (duty officer),+13165550101,duty_officer,,,1,1,
-Chief Dan Moser,+13165550102,chief,,,0,2,
-County Dispatch,+13165550103,dispatch,,,1,,
-Mutual aid (neighbor FD + county EM),+13165550104,mutual_aid,,,1,,
-Sam Ortiz,+13165550111,volunteer,,,1,,
-Kelsey Brandt,+13165550112,volunteer,,,1,,
-Mike Yoder,+13165550113,volunteer,,,1,,
-Jess Harmon,+13165550114,volunteer,,,1,,
-Trent Ebert,+13165550115,volunteer,,,0,,
-Lacey Unruh,+13165550116,volunteer,,,0,,
-Bo Carlisle,+13165550117,volunteer,,,0,,
-Nate Friesen,+13165550118,volunteer,,,0,,
-Erin Kohler,+13165550119,volunteer,,,0,,
-Cal Dreher,+13165550120,volunteer,,,0,,
-Rita Stucky,+13165550121,volunteer,,,0,,
-Owen Platt,+13165550122,volunteer,,,0,,
-Darla Voth,+13165550123,volunteer,,,0,,
-Hank Lowery,+13165550124,volunteer,,,0,,
-Pete Albers,+13165550125,volunteer,,,0,,
-Gina Schrag,+13165550126,volunteer,,,0,,
-Wes Kittle,+13165550131,rancher,37.3821,-99.4512,0,,
-June Pfannenstiel,+13165550132,rancher,37.3611,-99.4783,0,,
-Dale Hutchins,+13165550133,rancher,37.3991,-99.4603,0,,
-Marla Ostrander,+13165550134,rancher,37.4076,-99.4565,0,,
-Gary Pruitt,+13165550135,rancher,37.3621,-99.3537,0,,
-Cody Brandt (lease pumper),+13165550141,pumper,37.3841,-99.4910,0,,
-Luis Orozco (lease pumper),+13165550142,pumper,37.4421,-99.5477,0,,
-Ray Delk (lease water truck),+13165550151,water_truck,37.3981,-99.4631,0,,
-Harlan Shafer (disc),+13165550161,disc,37.4031,-99.4601,0,,
-Tom Wiebe (disc),+13165550162,disc,37.4111,-99.4482,0,,
-Cottonwood Creek FD Station 1 (Coldwater),+13165550171,station,37.2689,-99.3268,1,,
-Protection FD (stand-in),+13165550172,station,37.2006,-99.4835,1,,
-Wilmore FD (stand-in),+13165550173,station,37.3364,-99.2093,1,,
-Mullinville FD (stand-in),+13165550174,station,37.5872,-99.4757,1,,
-Greensburg FD (stand-in),+13165550175,station,37.6028,-99.2932,1,,
-Ashland FD (stand-in),+13165550176,station,37.1886,-99.7657,1,,
+name,phone,role,lat,lon,weekday_avail,ladder_rank,mesh_id,app
+Lt. Ana Reyes (duty officer),+13165550101,duty_officer,,,1,1,,no
+Chief Dan Moser,+13165550102,chief,,,0,2,,yes
+County Dispatch,+13165550103,dispatch,,,1,,,no
+Mutual aid (neighbor FD + county EM),+13165550104,mutual_aid,,,1,,,no
+Sam Ortiz,+13165550111,volunteer,,,1,,,no
+Kelsey Brandt,+13165550112,volunteer,,,1,,,no
+Mike Yoder,+13165550113,volunteer,,,1,,,no
+Jess Harmon,+13165550114,volunteer,,,1,,,no
+Trent Ebert,+13165550115,volunteer,,,0,,,no
+Lacey Unruh,+13165550116,volunteer,,,0,,,no
+Bo Carlisle,+13165550117,volunteer,,,0,,,no
+Nate Friesen,+13165550118,volunteer,,,0,,,no
+Erin Kohler,+13165550119,volunteer,,,0,,,no
+Cal Dreher,+13165550120,volunteer,,,0,,,no
+Rita Stucky,+13165550121,volunteer,,,0,,,no
+Owen Platt,+13165550122,volunteer,,,0,,,no
+Darla Voth,+13165550123,volunteer,,,0,,,no
+Hank Lowery,+13165550124,volunteer,,,0,,,no
+Pete Albers,+13165550125,volunteer,,,0,,,no
+Gina Schrag,+13165550126,volunteer,,,0,,,no
+Wes Kittle,+13165550131,rancher,37.3821,-99.4512,0,,,no
+June Pfannenstiel,+13165550132,rancher,37.3611,-99.4783,0,,,no
+Dale Hutchins,+13165550133,rancher,37.3991,-99.4603,0,,,no
+Marla Ostrander,+13165550134,rancher,37.4076,-99.4565,0,,,no
+Gary Pruitt,+13165550135,rancher,37.3621,-99.3537,0,,,no
+Cody Brandt (lease pumper),+13165550141,pumper,37.3841,-99.4910,0,,,no
+Luis Orozco (lease pumper),+13165550142,pumper,37.4421,-99.5477,0,,,no
+Ray Delk (lease water truck),+13165550151,water_truck,37.3981,-99.4631,0,,,no
+Harlan Shafer (disc),+13165550161,disc,37.4031,-99.4601,0,,,no
+Tom Wiebe (disc),+13165550162,disc,37.4111,-99.4482,0,,,no
+Cottonwood Creek FD Station 1 (Coldwater),+13165550171,station,37.2689,-99.3268,1,,,no
+Protection FD (stand-in),+13165550172,station,37.2006,-99.4835,1,,,no
+Wilmore FD (stand-in),+13165550173,station,37.3364,-99.2093,1,,,no
+Mullinville FD (stand-in),+13165550174,station,37.5872,-99.4757,1,,,no
+Greensburg FD (stand-in),+13165550175,station,37.6028,-99.2932,1,,,no
+Ashland FD (stand-in),+13165550176,station,37.1886,-99.7657,1,,,no

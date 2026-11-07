@@ -140,6 +140,9 @@ def evaluate_event(
 
     if district is not None and district.contains(ev["lat"], ev["lon"]):
         level, reason = _stakes_promotion(conn, event_id, level, reason, suppression, now)
+    from . import fw1_feed
+
+    fw1_feed.sync_event(conn, event_id, now, red_flag)  # before the texts, so they can carry the app link
     rose = LEVELS.index(level) > (LEVELS.index(prev_level) if prev_level in LEVELS else -1)
     if rose and level != "monitor" and district is not None and district.contains(ev["lat"], ev["lon"]):
         from . import notify

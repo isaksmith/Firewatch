@@ -266,14 +266,43 @@ def _ack(conn, decoded: dict, from_num: int, my_num: int | None) -> str:
     return "ack" if known else "ack_unmatched"
 
 
+COORDS = re.compile(r"(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)")
+BAD_POSITION_REPLY = "Firewatch: that position is outside the district, so I did not use it. Send FIRE alone to use your radio's last position."
+
+
+def report_position(text: str) -> tuple[tuple[float, float] | None, str, bool]:
+    """For a FIRE/BURN/JOIN text with a "lat,lon" in it: (position or None, the text without it, saw_coordinates).
+    The phone app sends `FIRE 37.3821,-99.4681` after its position fix. A position outside the district box (or 0,0)
+    is not used."""
+    words = re.findall(r"[A-Za-z0-9]+", text)
+    m = COORDS.search(text)
+    if not words or words[0].upper() not in CHANNEL_REPORTS or not m:
+        return None, text, False
+    lat, lon = float(m.group(1)), float(m.group(2))
+    rest = (text[: m.start()] + " " + text[m.end():]).strip()
+    return ((lat, lon) if plausible_position(lat, lon) else None), rest, True
+
+
 def _inbound(conn, nid: str, text: str) -> None:
     from . import notify, scenario
 
     replay_now = scenario.running_now()
+    now = replay_now or utcnow()
+    sample = replay_now is not None or get_settings().mode == "sample"
+    at, text_out, saw = report_position(text)
+    if saw and at is None:
+        # Bad coordinates: say so plainly and do not guess. The message is still logged.
+        contact = conn.execute("SELECT * FROM contacts WHERE phone = ? OR mesh_id = ?", (nid, nid)).fetchone()
+        conn.execute(
+            "INSERT INTO messages(event_id, contact_id, phone, direction, purpose, body, status, is_sample, created_at, channel) "
+            "VALUES (NULL, ?, ?, 'in', NULL, ?, 'received', ?, ?, 'mesh')",
+            (contact["id"] if contact else None, nid, text, int(sample), iso(now)),
+        )
+        target = contact or {"id": None, "phone": nid, "name": nid, "opted_in": 1, "mesh_id": nid}
+        notify.send(conn, target, BAD_POSITION_REPLY, "reply", None, now, sample, channels=("mesh",))
+        return
     notify.handle_inbound(
-        conn, nid, text, replay_now or utcnow(),
-        is_sample=replay_now is not None or get_settings().mode == "sample",
-        channel="mesh", at=live_position(conn, nid),
+        conn, nid, text_out, now, is_sample=sample, channel="mesh", at=at or live_position(conn, nid),
     )
 
 

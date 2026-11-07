@@ -102,7 +102,8 @@ CREATE TABLE IF NOT EXISTS contacts (
   ladder_rank   INTEGER,
   opted_in      INTEGER NOT NULL DEFAULT 1,
   registered    INTEGER NOT NULL DEFAULT 1,
-  mesh_id       TEXT                       -- Meshtastic node ID (!a1b2c3d4) of the radio they carry
+  mesh_id       TEXT,                      -- Meshtastic node ID (!a1b2c3d4) of the radio they carry
+  app           INTEGER NOT NULL DEFAULT 0 -- 1 = uses the phone app: also gets the firewatch:// link text
 );
 
 CREATE TABLE IF NOT EXISTS signals (
@@ -136,6 +137,19 @@ CREATE TABLE IF NOT EXISTS messages (
   channel     TEXT NOT NULL DEFAULT 'sms'  -- sms | mesh
 );
 CREATE INDEX IF NOT EXISTS idx_messages_event ON messages(event_id);
+
+CREATE TABLE IF NOT EXISTS fw1_feed (          -- one row per alert change; the phone app's tiny feed (docs/mobile)
+  seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+  pack        TEXT NOT NULL,
+  event_id    INTEGER NOT NULL,
+  kind        TEXT NOT NULL,               -- alert | clear | notfire
+  level       TEXT NOT NULL,
+  flags       INTEGER NOT NULL DEFAULT 0,
+  code        TEXT NOT NULL,
+  created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fw1_feed_pack ON fw1_feed(pack, seq);
+CREATE INDEX IF NOT EXISTS idx_fw1_feed_event ON fw1_feed(event_id, seq);
 
 CREATE TABLE IF NOT EXISTS mesh_nodes (
   node_id      TEXT PRIMARY KEY,           -- !a1b2c3d4
@@ -180,7 +194,7 @@ CREATE TABLE IF NOT EXISTS burn_notices (
 # Columns added after the first release; ALTER them onto older databases.
 MIGRATIONS = {
     "events": {"evidence_json": "TEXT", "level_reason": "TEXT", "response_json": "TEXT"},
-    "contacts": {"mesh_id": "TEXT"},
+    "contacts": {"mesh_id": "TEXT", "app": "INTEGER NOT NULL DEFAULT 0"},
     "messages": {"channel": "TEXT NOT NULL DEFAULT 'sms'"},
     "burn_notices": {"start_at": "TEXT", "end_at": "TEXT", "caller": "TEXT", "label": "TEXT"},
 }
