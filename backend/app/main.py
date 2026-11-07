@@ -234,11 +234,19 @@ def list_alerts(
 ):
     statuses = [s.strip() for s in status.split(",") if s.strip()]
     since = iso(utcnow() - timedelta(hours=since_hours))
+    live = get_settings().mode == "live"
+    # Live mode hides the frozen sample fixtures but keeps scenario replay events, which are
+    # is_sample = 1 rows tagged with a scenario slug.
+    scenario_slugs = [p.stem for p in scenario.SCENARIOS_DIR.glob("*.json")] if live else []
+    sample_clause = (
+        f"(is_sample = 1 AND sample_slug IN ({','.join('?' * len(scenario_slugs))}))" if live and scenario_slugs
+        else "0" if live else "is_sample = 1"
+    )
     with connect() as conn:
         rows = conn.execute(
             f"SELECT * FROM events WHERE status IN ({','.join('?' * len(statuses))}) "
-            "AND recommendation IS NOT NULL AND (is_sample = 1 OR last_seen >= ?)",
-            (*statuses, since),
+            f"AND recommendation IS NOT NULL AND ({sample_clause} OR (is_sample = 0 AND last_seen >= ?))",
+            (*statuses, *scenario_slugs, since),
         ).fetchall()
         suppressed = {"total": 0, "static_source": 0, "likely_prescribed": 0, "registered_burn": 0, "low_signal": 0}
         alerts = []
