@@ -5,6 +5,7 @@ import Map, { Layer, Marker, NavigationControl, ScaleControl, Source, useMap, ty
 import { api, type AlertSummary } from '../api'
 import { REC_META, latLon, trackId } from '../lib/format'
 import { AOI_BBOX, BASEMAP_STYLE, KANSAS_VIEW, ringPolygon } from '../lib/map'
+import { FEEDS, LiveLayers, LiveToggles, useLiveFeeds, type FeedKey } from './LiveFeeds'
 import { TrackGlyph } from './ui'
 
 interface Props {
@@ -59,6 +60,10 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
     dry_grid: false,
     wind_lines: false,
   })
+  const [liveOn, setLiveOn] = useState<Record<FeedKey, boolean>>(() => Object.fromEntries(FEEDS.map((f) => [f.key, false])) as Record<FeedKey, boolean>)
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health, retry: false })
+  const keyConfigured = !!health.data?.firms_key_configured
+  const feeds = useLiveFeeds(liveOn, keyConfigured)
   const district = useQuery({ queryKey: ['district'], queryFn: api.district, retry: false })
   const lines = useQuery({ queryKey: ['layer', 'power_lines'], queryFn: () => api.layer('power_lines') })
   const statics = useQuery({ queryKey: ['layer', 'static_sources'], queryFn: () => api.layer('static_sources') })
@@ -92,7 +97,10 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
         mapStyle={BASEMAP_STYLE}
         style={{ width: '100%', height: '100%' }}
         attributionControl={{ compact: true }}
-        onLoad={() => setMapReady(true)}
+        onLoad={() => {
+          if (import.meta.env.DEV) (window as unknown as { __map?: unknown }).__map = mapRef.current?.getMap()
+          setMapReady(true)
+        }}
       >
         <NavigationControl position="bottom-right" showCompass={false} />
         <ScaleControl position="bottom-left" unit="imperial" maxWidth={90} />
@@ -199,6 +207,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
             </Marker>
           )
         })}
+        <LiveLayers feeds={feeds} />
         <CursorReadout />
       </Map>
 
@@ -233,6 +242,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
                 </label>
               ))}
             </div>
+            <LiveToggles feeds={feeds} on={liveOn} setOn={(k, v) => setLiveOn((o) => ({ ...o, [k]: v }))} keyConfigured={keyConfigured} />
             <div className="flex h-7 items-center border-t border-b border-line px-3">
               <span className="label">Symbology</span>
             </div>
