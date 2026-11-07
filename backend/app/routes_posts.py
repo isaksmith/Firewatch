@@ -2,6 +2,7 @@
 import hashlib
 import io
 import secrets
+import threading
 from datetime import timedelta
 from typing import Literal
 
@@ -26,6 +27,8 @@ MAX_PHOTO = 2 * 1024 * 1024
 PHOTO_TYPES = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
 PHOTO_SIDE = 1600
 PHOTO_PIXELS = 40_000_000
+# A full-size decode can take over 100 MB, and the thread pool runs 40 at once: allow two.
+_DECODES = threading.BoundedSemaphore(2)
 Image.MAX_IMAGE_PIXELS = PHOTO_PIXELS
 # The public view: one rule for the list and the photo route.
 PUBLIC_WHERE = "AND p.status = 'open' AND (e.id IS NULL OR e.status NOT IN ('dismissed', 'closed')) "
@@ -215,7 +218,7 @@ def create_post(body: NewPost, request: Request, x_firewatch_device: str = Heade
 
 def _reencode(raw: bytes, ctype: str) -> tuple[bytes, int, int]:
     try:
-        with Image.open(io.BytesIO(raw)) as img:
+        with _DECODES, Image.open(io.BytesIO(raw)) as img:
             if img.format != PHOTO_TYPES[ctype]:
                 raise ValueError("format mismatch")
             # Pillow only refuses past twice its limit, so check the header size before anything is decoded.

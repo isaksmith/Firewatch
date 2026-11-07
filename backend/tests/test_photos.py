@@ -197,3 +197,29 @@ def test_photo_ip_limit_30_an_hour(pc):
         for _ in range(8):
             codes.append(up(pc, m, post(pc, m, "fire", "Smoke column"), small).status_code)
     assert codes[:30] == [200] * 30 and codes[30] == 429
+
+
+def test_at_most_two_decodes_at_once(monkeypatch):
+    import threading
+    import time
+    from app import routes_posts
+    active, peak, lock = [0], [0], threading.Lock()
+    real = routes_posts.ImageOps.exif_transpose
+
+    def slow(img):
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        time.sleep(0.05)
+        with lock:
+            active[0] -= 1
+        return real(img)
+
+    monkeypatch.setattr(routes_posts.ImageOps, "exif_transpose", slow)
+    raw = jpeg_bytes((64, 64), exif=False)
+    threads = [threading.Thread(target=routes_posts._reencode, args=(raw, "image/jpeg")) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert peak[0] <= 2
