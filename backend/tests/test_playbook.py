@@ -120,3 +120,14 @@ def test_fitted_multiplier_is_used_and_cited_when_the_model_exists(tmp_path, mon
         assert decision.weights({"decision": {"danger_multiplier": {"Extreme": 9}}})["danger_multiplier"] == {"Extreme": 9}
     finally:
         decision.fire_day_model.cache_clear()
+
+
+def test_tower_smoke_sensor_counts_as_evidence():
+    w = decision.weights({})
+    line = {"kind": "line_fault", "label": "Power line lockout", "counts": "yes", "at": "2026-03-17T18:50:00Z"}
+    tower = {"kind": "sensor_smoke", "label": "Smoke sensor !a1b2c3d4", "counts": "yes", "at": "2026-03-17T18:56:00Z"}
+    alone = decision.probability([line], "Extreme", w)["p"]
+    both = decision.probability([line, tower], "Extreme", w)
+    assert both["p"] > alone and both["steps"][-1]["factor"] == w["lr_sensor_smoke"]
+    first = decision.probability([tower], "Extreme", w)  # a sensor as the first signal starts from the generic base rate
+    assert first["steps"][0]["p"] == w["other_prior"]

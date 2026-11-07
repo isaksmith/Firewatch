@@ -71,6 +71,7 @@ In the Cottonwood Creek replay this chain pages at T+9 instead of today's 911 ca
 - [Build plan](docs/PLAN.md): the scenario in minutes, whole-chain design, constraints, failure modes, cost and who pays, evidence, weekend scope, next step.
 - [Design](docs/DESIGN.md): data model, pipeline, signals and confirmation rules, scoring, response planner and messaging, spread model, API, UI.
 - [How Firewatch recommends actions](docs/RECOMMENDATIONS.md): the decision model end to end (probability of fire, acres at stake, false-alarm costs, expected loss), every weight and why, worked example, limits.
+- [Spread forecast back-test v1](docs/research/spread-backtest-v1.md): the forecast started from the first satellite look of Anderson Creek 2016 and Starbuck 2017, scored against later looks (v2 55% vs v1 29% of later detections; Starbuck runs too slow overnight).
 - [Fire-day model v1](docs/research/fire-day-model-v1.md): Kansas wildfire starts and large-fire share by fire-danger level, 2016–2025, which sets the danger multiplier.
 - [Competitor packet](docs/COMPETITOR_PACKET.md): official brief, Cottonwood Creek scenario (canonical), judging criteria, schedule.
 - [Faultline research brief](docs/FAULTLINE_RESEARCH.md): power-line faults on high-danger days as the ignition trigger; evidence, data sources, and build plan.
@@ -182,6 +183,7 @@ Results are in [backend/ml/report.md](backend/ml/report.md); the full analysis o
 | `backend/ml/` | Training pipeline and evaluation report |
 | `backend/app/sim/` | Grass-fire spread: fuel map (NLCD/CDL), changing weather, 24-member ensemble forecast |
 | `backend/app/decision.py`, `playbook.py` | Expected-loss recommendation model and the playbook it drives (options, previews, receipts) |
+| `backend/ml/backtest.py` | Spread back-test against FIRMS archive detections of real fires |
 | `backend/ml/fire_day.py` | Fire-day model: ignition rate and large-fire share by fire danger, from WFIGS + archive weather |
 | `backend/app/situation.py` | `Situation` contract between ingestion and forecast/recommendations; builds one from a scenario |
 | `backend/app/signals.py`, `confirm.py` | Line faults and texted reports on events; the two-source level rules and burn registry |

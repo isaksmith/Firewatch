@@ -37,6 +37,7 @@ DEFAULTS: dict[str, dict] = {
     "lr_report_unregistered": {"value": 2.0, "source": "Assumption: a texted report from an unknown number"},
     "lr_line_fault": {"value": 10.0, "source": "Assumption: a line lockout next to an already-detected fire"},
     "lr_camera": {"value": 8.0, "source": "Assumption: camera smoke detection"},
+    "lr_sensor_smoke": {"value": 15.0, "source": "Assumption: a tower sensor's smoke rule fired (PM2.5 jump of 50+ over its own baseline, fine-particle ratio that isn't dust, other towers not rising so it isn't regional haze). Specific, but one fixed point that can't tell where the smoke comes from"},
     "lr_registered_burn": {"value": 0.05, "source": "Assumption: inside a registered burn that hasn't escaped"},
     # satellite: Michael's scorer is calibrated to an even wildfire/burn prior, so score s is a likelihood ratio s/(100-s)
     # --- what a false alarm costs, in acres burned we'd accept to avoid it ---
@@ -183,6 +184,8 @@ def _likelihood_ratio(e: dict, w: dict) -> tuple[float, str]:
         return (w["lr_report_registered"], "") if counts == "yes" else (w["lr_report_unregistered"], "")
     if kind == "camera_smoke":
         return w["lr_camera"], ""
+    if kind == "sensor_smoke":
+        return (w["lr_sensor_smoke"], "") if counts == "yes" else (1.0, "")
     if kind == "burn_notice":
         return (1.0, "") if str(e.get("note", "")).startswith("escaped") else (w["lr_registered_burn"], " (not escaped)")
     return 1.0, ""

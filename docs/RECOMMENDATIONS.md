@@ -56,6 +56,7 @@ A lockout on an Extreme day therefore starts at 3% × 4.2 ≈ **13%**.
 | Text report, unknown number | ×2 | Assumption |
 | Line lockout next to an already-detected fire | ×10 | Assumption |
 | Camera smoke | ×8 | Assumption |
+| Tower smoke sensor (Isak's mesh nodes) | ×15 | Assumption. The sensor's own rule already rejects dust (coarse particles) and regional haze (other towers rising too). It's still a single fixed point that can't tell where the smoke comes from. |
 | Inside a registered burn that hasn't escaped | ×0.05 | Assumption. Michael's rules decide "escaped" (heat outside the radius, Severe+ danger, or a report from someone else). |
 
 **Independence.** Multiplying LRs assumes the pieces of evidence are independent. Michael's confirmation rules already count each source once (one satellite, one line, each contact once), and the model only multiplies those.

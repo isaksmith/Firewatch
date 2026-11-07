@@ -588,6 +588,10 @@ Sanity tests: zero wind on flat ground produces near-circular isochrones; doubli
   - `provenance`: every input labeled observed / forecast / inferred / simulated / assumed
 - Runtime is about 0.7 s for 24 members at 400 × 400.
 
+### 6.6b Back-test
+
+`backend/ml/backtest.py` starts the forecast from a real fire's first FIRMS look, with the archive's hourly weather, and scores it against later looks. v1 results are in [Spread forecast back-test v1](research/spread-backtest-v1.md): on Anderson Creek 2016, 70–81% of the detections 15 h later fell inside the forecast (median / worst case), against 25% for the original constant-wind model. Starbuck 2017 was under-predicted by about 2× overnight.
+
 ### 6.7 Situation contract (`backend/app/situation.py`)
 
 The forecast and the recommendation layer read only a `Situation`, a pydantic model that ingestion fills in. Every block carries a `Provenance {source, kind, as_of}`.
