@@ -436,3 +436,18 @@ def test_create_says_alerted_without_an_event_id():
     m = member("Wes")
     r = c.post("/api/board/posts", json=body, headers=hd(m)).json()
     assert r["alerted"] is True and "event_id" not in r
+
+
+def test_each_security_header_appears_once(pub):
+    from tests.test_photos import jpeg_bytes, up
+    from tests.test_routes_posts import _fire_with_event
+
+    with TestClient(app) as c:
+        pid, _ = _fire_with_event(c)
+        assert up(c, "tok-Reporter-spotter-1", pid, jpeg_bytes((300, 200))).status_code == 200
+    for path in (f"/api/board/posts/{pid}/photo", "/api/board/posts"):
+        r = pub.get(path)
+        assert r.status_code == 200, path
+        names = [k.lower() for k, _ in r.headers.raw] if isinstance(r.headers.raw[0][0], str) else [k.decode().lower() for k, _ in r.headers.raw]
+        for h in ("cache-control", "x-content-type-options"):
+            assert names.count(h) == 1, (path, h, names)

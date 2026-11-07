@@ -26,8 +26,10 @@ export function useBoardPosts() {
 
 export const isPinnable = (p: AdminPost) => p.status === 'open' && p.lat != null && p.lon != null
 
-export const threadLine = (p: { thread_size?: number }) =>
-  p.thread_size != null && p.thread_size > 1 ? `Part of ${p.thread_size} reports in this area` : null
+export const threadLine = (p: { thread_size?: number; badge?: string | null }) =>
+  p.thread_size != null && p.thread_size > 1
+    ? `Part of ${p.thread_size} reports in this area${p.badge ? '. The notice covers all of them.' : ''}`
+    : null
 
 /** Server age_min when present (replay posts carry old timestamps), else the browser clock. */
 export function postAge(p: { age_min?: number; created_at: string }): string {

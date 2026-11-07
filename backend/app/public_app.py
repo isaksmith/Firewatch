@@ -45,8 +45,10 @@ class Guard:
                 return
             if msg["type"] == "http.response.start":
                 started = True
-                h = list(msg.get("headers", [])) + HEADERS
-                if api:
+                h = list(msg.get("headers", []))
+                have = {k.lower() for k, _ in h}
+                h += [x for x in HEADERS if x[0] not in have]
+                if api and b"cache-control" not in have:
                     h.append((b"cache-control", b"no-store"))
                 msg = {**msg, "headers": h}
             await send(msg)

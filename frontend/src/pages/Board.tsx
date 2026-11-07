@@ -13,7 +13,7 @@ import {
   type StationAction,
 } from '../api'
 import { Mark } from '../components/ui'
-import { threadLine } from '../lib/board'
+import { postAge, threadLine } from '../lib/board'
 
 const CATEGORIES: { key: BoardCategory; label: string }[] = [
   { key: 'fire', label: 'Fire' },
@@ -35,26 +35,6 @@ function getPosition(): Promise<Position> {
       { timeout: 8000, maximumAge: 60000 },
     )
   })
-}
-
-function ago(iso: string, now: number): string {
-  const t = Date.parse(iso.endsWith('Z') || /[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z')
-  if (Number.isNaN(t)) return ''
-  return agoMin(Math.max(0, (now - t) / 60000))
-}
-
-function agoMin(min: number): string {
-  if (min < 1) return 'just now'
-  const m = Math.round(min)
-  if (m < 60) return `${m} min ago`
-  const h = Math.round(m / 60)
-  if (h < 24) return `${h} hr ago`
-  return `${Math.round(h / 24)} d ago`
-}
-
-/** Server age_min when present (replay posts carry old timestamps), else the browser clock. */
-function postAgo(p: BoardPost, now: number): string {
-  return p.age_min != null ? agoMin(Math.max(0, p.age_min)) : ago(p.created_at, now)
 }
 
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024
@@ -90,7 +70,7 @@ function uploadMessage(e: unknown): { text: string; retry: boolean } {
     if (e.status === 415) return { text: 'That file is not a photo we can use.', retry: false }
     if (e.status === 429) return { text: e.message, retry: true }
   }
-  return { text: 'Posted. The photo did not send.', retry: true }
+  return { text: 'The photo did not send.', retry: true }
 }
 
 function seeText(n: number): string {
@@ -125,7 +105,7 @@ function NewPost({ onPosted, onVideoSaved }: { onPosted: () => void; onVideoSave
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null)
   const [photo, setPhoto] = useState<{ blob: Blob; url: string } | null>(null)
   const [video, setVideo] = useState<string | null>(null)
-  const [retry, setRetry] = useState<{ postId: number; blob: Blob } | null>(null)
+  const [retry, setRetry] = useState<{ postId: number; blob: Blob; base: string } | null>(null)
   const photoInput = useRef<HTMLInputElement>(null)
   const videoInput = useRef<HTMLInputElement>(null)
   const live = useRef<{ photo: string | null; video: string | null }>({ photo: null, video: null })
@@ -183,17 +163,17 @@ function NewPost({ onPosted, onVideoSaved }: { onPosted: () => void; onVideoSave
     probe.src = url
   }
 
-  async function sendPhoto(postId: number, blob: Blob) {
+  async function sendPhoto(postId: number, blob: Blob, base: string) {
     setRetry(null)
-    setMsg({ text: 'Posted. Sending photo...' })
+    setMsg({ text: `${base} Sending photo...` })
     try {
       await boardApi.uploadPhoto(postId, blob)
-      setMsg({ text: 'Photo sent.' })
+      setMsg({ text: `${base} Photo sent.` })
       onPosted()
     } catch (e) {
       const m = uploadMessage(e)
-      setMsg({ text: m.text, bad: true })
-      if (m.retry) setRetry({ postId, blob })
+      setMsg({ text: `${base} ${m.text}`, bad: true })
+      if (m.retry) setRetry({ postId, blob, base })
     }
   }
 
@@ -227,7 +207,7 @@ function NewPost({ onPosted, onVideoSaved }: { onPosted: () => void; onVideoSave
       if (photo) {
         const sending = photo
         clearPhoto()
-        await sendPhoto(r.post_id, sending.blob)
+        await sendPhoto(r.post_id, sending.blob, text)
       }
     } catch (e) {
       setMsg({ text: `Could not post: ${e instanceof Error ? e.message : 'try again'}`, bad: true })
@@ -285,6 +265,7 @@ function NewPost({ onPosted, onVideoSaved }: { onPosted: () => void; onVideoSave
         ref={photoInput}
         type="file"
         accept="image/*"
+        capture="environment"
         className="hidden"
         aria-label="Photo file"
         onChange={(e) => {
@@ -338,7 +319,7 @@ function NewPost({ onPosted, onVideoSaved }: { onPosted: () => void; onVideoSave
         </p>
       )}
       {retry && (
-        <button type="button" className="btn mt-2 !h-11" onClick={() => void sendPhoto(retry.postId, retry.blob)}>
+        <button type="button" className="btn mt-2 !h-11" onClick={() => void sendPhoto(retry.postId, retry.blob, retry.base)}>
           Try again
         </button>
       )}
@@ -348,14 +329,12 @@ function NewPost({ onPosted, onVideoSaved }: { onPosted: () => void; onVideoSave
 
 function PostCard({
   post,
-  now,
   station,
   canPage,
   videoUrl,
   onChanged,
 }: {
   post: BoardPost
-  now: number
   station: boolean
   canPage: boolean
   videoUrl?: string
@@ -465,7 +444,7 @@ function PostCard({
       )}
 
       <p className="mt-2 text-[12px] text-muted">
-        {post.author ?? 'A neighbor'} <span className="text-dim">·</span> {postAgo(post, now)} <span className="text-dim">·</span>{' '}
+        {post.author ?? 'A neighbor'} <span className="text-dim">·</span> {postAge(post)} <span className="text-dim">·</span>{' '}
         <span className="text-text">{seeText(post.confirms)}</span>
       </p>
 
@@ -535,7 +514,6 @@ function PostCard({
 
 export function Board() {
   const qc = useQueryClient()
-  const [now, setNow] = useState(() => Date.now())
   const lastGood = useRef<BoardPost[] | null>(null)
   // Mock video: blob URLs for this phone's own posts, page memory only.
   const [videos, setVideos] = useState<Record<number, string>>({})
@@ -547,11 +525,6 @@ export function Board() {
     },
     [],
   )
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000)
-    return () => clearInterval(t)
-  }, [])
 
   const [pending, setPending] = useState<{ token: string; name: string } | null>(null)
   const [linkMsg, setLinkMsg] = useState<string | null>(null)
@@ -675,7 +648,7 @@ export function Board() {
           )}
           {list && list.length === 0 && <p className="text-[13px] text-muted">Nothing posted in the last 24 hours.</p>}
           {list?.map((p) => (
-            <PostCard key={p.id} post={p} now={now} station={station} canPage={canPage} videoUrl={videos[p.id]} onChanged={refresh} />
+            <PostCard key={p.id} post={p} station={station} canPage={canPage} videoUrl={videos[p.id]} onChanged={refresh} />
           ))}
         </section>
       </main>
