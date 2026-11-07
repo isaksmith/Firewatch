@@ -14,7 +14,7 @@ export function Attribution({ placement = 'footer' }: { placement?: 'footer' | '
         aria-expanded={open}
         className="num cursor-pointer border border-line-2 px-2 py-[1px] text-[11px] tracking-[0.08em] text-text hover:border-text"
       >
-        SOURCES &amp; ATTRIBUTION
+        SOURCES<span className="hidden sm:inline"> &amp; ATTRIBUTION</span>
       </button>
       {open && (
         <p

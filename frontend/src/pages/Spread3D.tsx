@@ -83,19 +83,19 @@ export function Spread3D() {
 
   return (
     <div className="flex h-full flex-col bg-void">
-      <header className="flex h-10 shrink-0 items-center gap-4 border-b border-line bg-void px-3">
+      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-void px-3 sm:gap-4">
         <Link to={`/alerts/${id}`} className="btn !h-6 !px-2">
           <ChevronLeft size={12} /> Back
         </Link>
-        <span className="label !text-muted">
+        <span className="label hidden !text-muted sm:inline">
           Spread preview · <span className="text-text">{trackId(id)}</span>
         </span>
-        <span className="h-4 w-px bg-line-2" />
+        <span className="hidden h-4 w-px bg-line-2 sm:block" />
         <ScoreReadout score={a.score} rec={a.recommendation} size="sm" />
-        <span className="text-[13px] font-medium">{a.place_label}</span>
+        <span className="hidden text-[13px] font-medium sm:inline">{a.place_label}</span>
         <RecTag rec={a.recommendation} />
         <span
-          className="num ml-auto border border-investigate/40 px-1.5 py-[1px] text-[10px] tracking-[0.12em] text-investigate"
+          className="num ml-auto min-w-0 border border-investigate/40 px-1.5 py-[1px] text-[10px] tracking-[0.12em] text-investigate"
           title="Simplified grass-fire estimate for planning. Not an operational fire behavior prediction."
         >
           ESTIMATE · NOT AN OPERATIONAL PREDICTION
