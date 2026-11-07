@@ -309,7 +309,10 @@ export interface PlanParams {
   budget_usd?: number
   rich_range_km?: number
   bare_fetch_km?: number
+  pricing?: NodePricing
 }
+
+export type NodePricing = 'stocked' | 'custom'
 
 export interface WindMode {
   from_deg: number
@@ -426,11 +429,12 @@ export interface RegionPlan {
   sites: PlanSite[]
   relays: PlanRelay[]
   bom: {
+    pricing: NodePricing
     lines: { item: string; qty: number; unit: number; total: number }[]
     hardware: number
     spares: number
     total: number
-    custom_pcb_hardware: number
+    alternative: { pricing: NodePricing; hardware: number }
   }
   geojson: {
     cells: GeoJSON.FeatureCollection<GeoJSON.Polygon, { priority: number; covered: number }>

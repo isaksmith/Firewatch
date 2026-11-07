@@ -53,9 +53,13 @@ PARAMS = {
     "bare_fetch_km": 0.4,  # gas head catches fires this far upwind of the plot (Dryad spaces 100 m)
     "bare_catch": 0.3,  # chance one bare node catches a fire inside its plot's fetch (gas plumes are narrow)
     "budget_usd": None,
+    "pricing": "custom",  # node prices from NODE_PRICES
 }
-COSTS = {"bare": 175, "rich": 240, "relay": 105, "station": 45}
-CUSTOM_PCB = {"bare": 136.44, "rich": 203.60}  # low-end ~100-unit budgets in sensors/README.md
+COSTS = {"relay": 105, "station": 45}
+NODE_PRICES = {
+    "stocked": {"bare": 175, "rich": 240},  # sensors/README.md stocked-module BOM, rounded for ordering
+    "custom": {"bare": 136.44, "rich": 203.60},  # sensors/README.md low-end custom-board budgets at ~100 units
+}
 SPARES = 0.10
 
 WEIGHTS = {"history": 0.30, "burns": 0.25, "lines": 0.25, "people": 0.20}
@@ -863,7 +867,10 @@ def plan_region(region: Region, overrides: dict | None = None, fetch_climate: bo
         warnings.append(warn)
     station = pick_station(g, region)
     cands = relay_candidates(g, region, terrain)
-    site_cost = p["bare_per_site"] * COSTS["bare"] + p["rich_per_site"] * COSTS["rich"]
+    if p["pricing"] not in NODE_PRICES:
+        raise ValueError(f"pricing must be one of {', '.join(NODE_PRICES)}")
+    price = NODE_PRICES[p["pricing"]]
+    site_cost = p["bare_per_site"] * price["bare"] + p["rich_per_site"] * price["rich"]
 
     def build(n: int):
         sites, curve = choose_sites(g, clim, p, n)
@@ -984,17 +991,20 @@ def plan_region(region: Region, overrides: dict | None = None, fetch_climate: bo
     n_bare = sum(s["bare"] for s in site_out)
     n_rich = sum(s["rich"] for s in site_out)
     n_relay = len(relays)
+    def hardware_at(prices: dict) -> float:
+        return n_bare * prices["bare"] + n_rich * prices["rich"] + n_relay * COSTS["relay"] + COSTS["station"]
+
     lines = [
-        {"item": "Bare node (gas, temperature, humidity, pressure)", "qty": n_bare, "unit": COSTS["bare"]},
-        {"item": "Rich node (bare plus PMSA003I particulate)", "qty": n_rich, "unit": COSTS["rich"]},
+        {"item": "Bare node (gas, temperature, humidity, pressure)", "qty": n_bare, "unit": price["bare"]},
+        {"item": "Rich node (bare plus PMSA003I particulate)", "qty": n_rich, "unit": price["rich"]},
         {"item": "Relay (radio only, mast or tower mount)", "qty": n_relay, "unit": COSTS["relay"]},
         {"item": "Station bridge (USB to the FireWatch server)", "qty": 1, "unit": COSTS["station"]},
     ]
     for ln in lines:
-        ln["total"] = ln["qty"] * ln["unit"]
-    hardware = sum(ln["total"] for ln in lines)
-    spares = round((n_bare * COSTS["bare"] + n_rich * COSTS["rich"] + n_relay * COSTS["relay"]) * SPARES)
-    custom = n_bare * CUSTOM_PCB["bare"] + n_rich * CUSTOM_PCB["rich"] + n_relay * COSTS["relay"] + COSTS["station"]
+        ln["total"] = round(ln["qty"] * ln["unit"], 2)
+    hardware = round(hardware_at(price), 2)
+    spares = round((hardware - COSTS["station"]) * SPARES)
+    alt = next(k for k in NODE_PRICES if k != p["pricing"])
 
     w, s_, e, n_ = region.bbox
     area_km2 = len(g.x) * g.cell_km**2
@@ -1021,8 +1031,9 @@ def plan_region(region: Region, overrides: dict | None = None, fetch_climate: bo
         "station": {k: station[k] for k in ("name", "lon", "lat")},
         "sites": site_out,
         "relays": relays,
-        "bom": {"lines": lines, "hardware": hardware, "spares": spares, "total": hardware + spares,
-                "custom_pcb_hardware": round(custom)},
+        "bom": {"pricing": p["pricing"], "lines": lines, "hardware": hardware, "spares": spares,
+                "total": round(hardware + spares, 2),
+                "alternative": {"pricing": alt, "hardware": round(hardware_at(NODE_PRICES[alt]))}},
         "geojson": {
             "cells": {"type": "FeatureCollection", "features": cells},
             "nodes": {"type": "FeatureCollection", "features": node_feats},

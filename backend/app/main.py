@@ -857,6 +857,7 @@ class PlanParams(BaseModel):
     rich_range_km: float | None = Field(None, gt=0, le=10)
     bare_fetch_km: float | None = Field(None, gt=0, le=2)
     site_min_sep_km: float | None = Field(None, ge=0.5, le=30)
+    pricing: Literal["stocked", "custom"] | None = None
 
 
 class CustomPlanIn(PlanParams):

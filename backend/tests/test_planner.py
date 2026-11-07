@@ -89,9 +89,21 @@ def test_every_site_reaches_the_station_within_the_hop_limit(plan):
 def test_bom_adds_up(plan):
     bom = plan["bom"]
     s = plan["summary"]
-    assert bom["hardware"] == s["bare"] * 175 + s["rich"] * 240 + s["relays"] * 105 + 45
-    assert bom["total"] == bom["hardware"] + bom["spares"]
-    assert bom["custom_pcb_hardware"] < bom["hardware"]
+    assert bom["pricing"] == "custom"
+    custom = s["bare"] * 136.44 + s["rich"] * 203.60 + s["relays"] * 105 + 45
+    assert bom["hardware"] == round(custom, 2)
+    assert bom["total"] == round(bom["hardware"] + bom["spares"], 2)
+    stocked = s["bare"] * 175 + s["rich"] * 240 + s["relays"] * 105 + 45
+    assert bom["alternative"] == {"pricing": "stocked", "hardware": stocked}
+
+
+def test_custom_board_pricing_buys_more_plots_on_a_budget():
+    region = planner.resolve_region(DISTRICT)
+    stocked, custom = (planner.plan_region(region, {"budget_usd": 12000, "pricing": k}, fetch_climate=False)
+                       for k in ("stocked", "custom"))
+    assert custom["bom"]["lines"][0]["unit"] == 136.44 and custom["bom"]["lines"][1]["unit"] == 203.60
+    assert custom["bom"]["total"] <= 12000
+    assert custom["summary"]["sites"] > stocked["summary"]["sites"]
 
 
 def test_rich_nodes_sit_downwind_of_each_fire_wind_mode(plan):

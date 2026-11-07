@@ -493,7 +493,7 @@ Everything is in acres, so the trade reads plainly: "a false page costs us about
 
 ### 5.10 Region planner
 
-[sensors/README.md](../sensors/README.md) defines two ground-node tiers: **bare** (gas, temperature, humidity, pressure; $175) and **rich** (bare plus a PMSA003I particulate sensor; $240). Its illustrative layout is seven bare and two rich nodes per 15-acre planning plot, or 70 bare and 20 rich for a county, "depending on site assessment", with separately powered relays and one station bridge. The region planner does the desk half of that site assessment for any fire district or Kansas county. It decides where the plots go, how the nodes sit in each plot, and which relays connect them to the station, using only public geography and climate data. Code: `backend/app/planner.py`, `backend/app/climate.py`; page `/planner`.
+[sensors/README.md](../sensors/README.md) defines two ground-node tiers: **bare** (gas, temperature, humidity, pressure) and **rich** (bare plus a PMSA003I particulate sensor). The planner prices them at the README's reviewed low-end custom-board budgets for ~100 units, $136.44 bare and $203.60 rich, which cover electronics and enclosure but not deployment mounts. It can switch to the stocked-module prices, $175 and $240, for comparison. Its illustrative layout is seven bare and two rich nodes per 15-acre planning plot, or 70 bare and 20 rich for a county, "depending on site assessment", with separately powered relays and one station bridge. The region planner does the desk half of that site assessment for any fire district or Kansas county. It decides where the plots go, how the nodes sit in each plot, and which relays connect them to the station, using only public geography and climate data. Code: `backend/app/planner.py`, `backend/app/climate.py`; page `/planner`.
 
 1. **Grid.** The region is cut into 1 km cells, or coarser so that there are at most 2,500 cells.
 2. **Where fires start.** For each cell, a likelihood is built from four inputs, each normalized to the region's 95th percentile:
@@ -552,7 +552,7 @@ Everything is in acres, so the trade reads plainly: "a false page costs us about
 - the region, climate and power check;
 - plots with reasons, a risk breakdown, why each was picked and laid out, checks, node positions, gateway link and hop count;
 - relays with uplinks, why each was used, and the plots each carries;
-- a bill of materials at the README's prices, plus the custom-PCB estimate;
+- a bill of materials at the selected node prices (custom board by default, `pricing=stocked` for stocked modules), plus the same plan's hardware at the other prices;
 - GeoJSON for the priority grid (with each cell's rank and factor shares), nodes and links;
 - the assumptions, and any warnings.
 

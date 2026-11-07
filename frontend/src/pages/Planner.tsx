@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { AlertTriangle, ChevronRight, Radio } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Map, { Layer, Marker, NavigationControl, ScaleControl, Source, type MapRef } from 'react-map-gl/maplibre'
-import { api, type Climatology, type PlanParams, type PlanSite, type RegionPlan, type RiskFactor, type TierPower } from '../api'
+import { api, type Climatology, type NodePricing, type PlanParams, type PlanSite, type RegionPlan, type RiskFactor, type TierPower } from '../api'
 import { TopBar } from '../components/TopBar'
 import { KV, SectionHeader } from '../components/ui'
 import { useLowData } from '../lib/lowData'
@@ -13,6 +13,8 @@ const MONTHS = 'JFMAMJJASOND'
 const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
 const pct = (x: number) => `${Math.round(x * 100)}%`
 const pct1 = (x: number) => `${(x * 100).toFixed(1)}%`
+const usd2 = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 })}`
+const PRICING_LABELS: Record<NodePricing, string> = { stocked: 'Stocked modules', custom: 'Custom board' }
 const KM_PER_MI = 1.609344
 
 // Classes by rank within the region, since scores are normalized per region and only compare inside it.
@@ -525,6 +527,7 @@ export function Planner() {
   const [region, setRegion] = useState(DEFAULT_REGION)
   const [mode, setMode] = useState<'plots' | 'budget'>('plots')
   const [form, setForm] = useState({ sites: 10, bare: 7, rich: 2, budget: 20000, richKm: 3, bareKm: 0.4 })
+  const [pricing, setPricing] = useState<NodePricing>('custom')
   const [selected, setSelected] = useState<number | null>(null)
   const problems = (Object.keys(LIMITS) as FormKey[])
     .filter((k) => (k !== 'sites' || mode === 'plots') && (k !== 'budget' || mode === 'budget'))
@@ -539,6 +542,7 @@ export function Planner() {
     rich_per_site: form.rich,
     rich_range_km: form.richKm,
     bare_fetch_km: form.bareKm,
+    pricing,
   })
   // Only valid inputs reach the API, so a half-typed number can't replace the plan with an error.
   const committed = useDebounced(problems.length ? null : wanted)
@@ -557,7 +561,7 @@ export function Planner() {
   const regionName = (key: string) =>
     [...(regions.data?.districts ?? []), ...(regions.data?.counties ?? [])].find((r) => r.key === key)?.name ?? key
   const outOfDate = !!p && (wanted !== request || plan.isFetching || plan.isError || problems.length > 0)
-  const plotCost = (form.bare * 175 + form.rich * 240) * 1.1
+  const plotCost = p ? (p.params.bare_per_site * p.bom.lines[0].unit + p.params.rich_per_site * p.bom.lines[1].unit) * 1.1 : 0
 
   return (
     <div className="flex h-full flex-col bg-bg">
@@ -601,6 +605,16 @@ export function Planner() {
                   {m === 'plots' ? 'Number of plots' : 'Budget'}
                 </button>
               ))}
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="label !text-[9.5px]">Node prices</span>
+              <div className="flex gap-1">
+                {(['custom', 'stocked'] as const).map((k) => (
+                  <button key={k} onClick={() => setPricing(k)} className={`btn !h-6 flex-1 ${pricing === k ? 'btn-primary' : ''}`}>
+                    {PRICING_LABELS[k]}
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-2">
               {mode === 'plots' ? (
@@ -737,7 +751,7 @@ export function Planner() {
                 {p.bom.lines.map((l) => (
                   <div key={l.item} className="flex justify-between gap-3 py-[2px]">
                     <span className="text-muted">
-                      {l.qty} × {l.item}
+                      {l.qty} × {l.item} <span className="num text-dim">@ {usd2(l.unit)}</span>
                     </span>
                     <span className="num text-text">{usd(l.total)}</span>
                   </div>
@@ -751,8 +765,19 @@ export function Planner() {
                   <span className="num text-text">{usd(p.bom.total)}</span>
                 </div>
                 <p className="mt-1.5 text-[11px] leading-snug text-dim">
-                  Low-end hardware estimate using custom nodes priced at bulk quantities (~100 units): about {usd(p.bom.custom_pcb_hardware)} before spares.
-                  Node estimates cover electronics and enclosure. Excludes deployment mounts, tax, shipping, field labor, and the site survey.
+                  {p.bom.pricing === 'stocked' ? (
+                    <>
+                      Node prices are the sensor design's stocked-module BOM, rounded for ordering. With custom nodes at bulk quantities (~100 units), the
+                      same plan is about {usd(p.bom.alternative.hardware)} before spares.
+                    </>
+                  ) : (
+                    <>
+                      Node prices are Preston's reviewed low-end custom-board budgets at ~100 units, covering electronics and enclosure but not deployment
+                      mounts. The board still needs a routed design and assembly quote. With stocked modules, the same plan is about{' '}
+                      {usd(p.bom.alternative.hardware)} before spares.
+                    </>
+                  )}{' '}
+                  Excludes tax, shipping, field labor, and the site survey.
                 </p>
               </div>
 
