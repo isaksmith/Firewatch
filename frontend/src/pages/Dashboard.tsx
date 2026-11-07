@@ -41,6 +41,7 @@ export function Dashboard() {
     onSuccess: () => {
       setScenarioHidden(false)
       autoSelected.current = false
+      navigate('/') // the open alert belongs to the replay just cleared
       setTimeout(() => qc.invalidateQueries(), 400)
     },
   })

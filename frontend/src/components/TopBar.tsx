@@ -31,20 +31,19 @@ function SourceStatus({ name, h }: { name: string; h: SourceHealth }) {
 
 function SourceChips({ sources }: { sources: Record<string, SourceHealth> }) {
   const entries = Object.entries(sources)
-  const others = entries.filter(([k]) => !(k in SOURCE_LABELS))
-  const working = others.filter(([, h]) => h.status === 'ok' || h.status === 'sample').length
-  const detail = others.map(([k, h]) => `${k}: ${h.status}`).join('\n')
+  const working = entries.filter(([, h]) => h.status === 'ok' || h.status === 'sample').length
+  const detail = entries.map(([k, h]) => `${k}: ${h.status}`).join('\n')
   return (
     <>
-      {entries.filter(([k]) => k in SOURCE_LABELS).map(([k, h]) => <SourceStatus key={k} name={k} h={h} />)}
-      {others.length > 0 && (
-        <span className="flex items-center gap-2" title={detail}>
-          <span className="label">Feeds</span>
-          <span className={`num text-[10px] tracking-[0.1em] ${working === others.length ? 'text-ok' : 'text-investigate'}`}>
-            {working}/{others.length}
-          </span>
+      <span className="hidden items-center gap-5 min-[1700px]:flex">
+        {entries.filter(([k]) => k in SOURCE_LABELS).map(([k, h]) => <SourceStatus key={k} name={k} h={h} />)}
+      </span>
+      <span className="flex items-center gap-2" title={detail}>
+        <span className="label">Feeds</span>
+        <span className={`num text-[10px] tracking-[0.1em] ${working === entries.length ? 'text-ok' : 'text-investigate'}`}>
+          {working}/{entries.length}
         </span>
-      )}
+      </span>
     </>
   )
 }
@@ -103,7 +102,8 @@ export function TopBar({
 
   return (
     <header className="flex h-10 shrink-0 items-center gap-4 overflow-hidden border-b border-line bg-void px-4 whitespace-nowrap">
-      <div className="flex items-center gap-2.5 text-text">
+      <div className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden">
+      <div className="flex shrink-0 items-center gap-2.5 text-text">
         <Mark size={16} />
         <span className="num text-[13px] font-semibold tracking-[0.28em]">FIREWATCH</span>
       </div>
@@ -114,7 +114,7 @@ export function TopBar({
           title={threeDSelected ? 'Open the 3D spread view for the selected alert' : 'Open the 3D spread view for the top alert. Select another alert first to see its own.'}
         >
           <Box size={12} /> 3D view
-          <span className="hidden text-[10px] font-normal tracking-normal text-muted lg:inline">{threeDSelected ? 'selected alert' : 'top alert'}</span>
+          <span className="hidden text-[10px] font-normal tracking-normal text-muted 2xl:inline">{threeDSelected ? 'selected alert' : 'top alert'}</span>
         </Link>
       )}
       <Divider />
@@ -149,19 +149,22 @@ export function TopBar({
           <span className="blink h-1.5 w-1.5 bg-ok" /> LIVE
         </span>
       )}
-      <Divider />
-      <div className="hidden items-center gap-5 lg:flex">
+      <div className="hidden items-center gap-5 min-[1400px]:flex">
+        <Divider />
         {health.data && <SourceChips sources={health.data.sources} />}
         {health.isError && <span className="num text-[10px] tracking-[0.12em] text-escalate">BACKEND UNREACHABLE</span>}
       </div>
+      </div>
 
-      <div className="ml-auto flex shrink-0 items-center gap-4">
-        <Clock />
-        <Divider />
-        <label className="flex items-center gap-2">
-          <span className="label">OP</span>
-          <input value={operator} onChange={(e) => setOperator(e.target.value)} className="field w-28 !h-6 uppercase" aria-label="Operator name" />
-        </label>
+      <div className="flex shrink-0 items-center gap-4">
+        <div className="hidden items-center gap-4 md:flex">
+          <Clock />
+          <Divider />
+          <label className="flex items-center gap-2">
+            <span className="label">OP</span>
+            <input value={operator} onChange={(e) => setOperator(e.target.value)} className="field w-28 !h-6 uppercase" aria-label="Operator name" />
+          </label>
+        </div>
         {onRunScenario && scenarios && scenarios.length > 1 && (
           <select
             value={scenarioSlug}
@@ -179,8 +182,13 @@ export function TopBar({
           </select>
         )}
         {onRunScenario && (
-          <button onClick={onRunScenario} disabled={scenarioRunning} className="btn btn-danger !h-6">
-            <Flame size={11} /> {scenarioRunning ? 'Scenario running' : 'Run scenario'}
+          <button
+            onClick={onRunScenario}
+            disabled={scenarioRunning}
+            aria-label={scenarioRunning ? 'Scenario running' : 'Run scenario'}
+            className="btn btn-danger !h-6"
+          >
+            <Flame size={11} /> <span className="hidden md:inline">{scenarioRunning ? 'Scenario running' : 'Run scenario'}</span>
           </button>
         )}
         {mode === 'sample' && (
@@ -189,7 +197,7 @@ export function TopBar({
           </button>
         )}
         {mode === 'live' && (
-          <button onClick={() => ingest.mutate()} disabled={ingest.isPending} className="btn !h-6">
+          <button onClick={() => ingest.mutate()} disabled={ingest.isPending} className="btn hidden !h-6 md:inline-flex">
             <RefreshCw size={11} className={ingest.isPending ? 'animate-spin' : ''} /> Ingest
           </button>
         )}
