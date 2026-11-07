@@ -142,7 +142,8 @@ def _item(conn, r, station: bool, now) -> dict:
     out = {"id": r["id"], "category": r["category"], "body": r["body"], "lat": lat, "lon": lon,
            "estimated": bool(r["estimated"]), "hearsay": bool(r["hearsay"]), "flagged": bool(r["flagged"]),
            "status": r["status"], "parent_id": r["parent_id"], "created_at": r["created_at"],
-           "author": author, "confirms": r["n_counted"], "notes": r["n_notes"], "badge": BADGE if held else None}
+           "author": author, "confirms": r["n_counted"], "notes": r["n_notes"], "badge": BADGE if held else None,
+           "unconfirmed": not member and not r["n_counted"]}
     if station:  # the alert routes behind event_id are not public, so the public view has no link to them
         out["held"] = held
         out["event_id"] = r["event_id"]
@@ -157,9 +158,9 @@ def _list(conn, now, is_sample: bool, station: bool) -> list[dict]:
          "FROM posts p LEFT JOIN contacts c ON c.id = p.contact_id "
          "LEFT JOIN posts par ON par.id = p.parent_id LEFT JOIN events e ON e.id = COALESCE(p.event_id, par.event_id) WHERE p.created_at >= ? AND p.is_sample = ? ")
     if not station:
-        q += ("AND p.status = 'open' AND (c.registered = 1 OR p.category = 'burn' OR "
-              "EXISTS (SELECT 1 FROM post_confirms k WHERE k.post_id = p.id AND k.counted = 1)) "
-              "AND (e.id IS NULL OR e.status NOT IN ('dismissed', 'closed')) ")
+        # Everyone sees every open post at once, so people nearby can confirm it (Michael, 2026-11-07).
+        # A post from a non-member with no counted confirm is marked unconfirmed.
+        q += "AND p.status = 'open' AND (e.id IS NULL OR e.status NOT IN ('dismissed', 'closed')) "
     q += "ORDER BY " + ("p.flagged DESC, " if station else "") + "p.created_at DESC, p.id DESC LIMIT 200"
     rows = conn.execute(q, (iso(now - timedelta(hours=24)), int(is_sample))).fetchall()
     return [_item(conn, r, station, now) for r in rows]

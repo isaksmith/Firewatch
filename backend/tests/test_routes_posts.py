@@ -90,15 +90,32 @@ def test_device_and_me():
         assert c.get("/api/board/me", headers=hd(v)).json()["station"] is True
 
 
-def test_public_hides_anonymous_until_counted_confirm():
+def test_public_shows_anonymous_marked_unconfirmed_until_counted_confirm():
+    """Michael, 2026-11-07: everyone sees a post at once, so people nearby can confirm it."""
     with TestClient(app) as c:
         anon, m = device(c), member()
         pid = post(c, anon)
-        assert pub(c) == []
+        items = pub(c)
+        assert ids(items) == [pid] and items[0]["unconfirmed"] is True and items[0]["author"] == "Community"
         r = see(c, m, pid)
         assert r.json()["counted"] is True
         items = pub(c)
-        assert ids(items) == [pid] and items[0]["confirms"] == 1 and items[0]["author"] == "Community"
+        assert ids(items) == [pid] and items[0]["confirms"] == 1 and items[0]["unconfirmed"] is False
+
+
+def test_second_anonymous_phone_can_see_and_confirm():
+    with TestClient(app) as c:
+        pid = post(c, device(c), "smoke", "Smoke off the highway")
+        other = device(c)
+        assert ids(pub(c, other)) == [pid]
+        assert see(c, other, pid).status_code == 200
+        assert pub(c, other)[0]["confirms"] == 1
+
+
+def test_member_post_is_never_unconfirmed():
+    with TestClient(app) as c:
+        post(c, member(), "smoke", "Smoke to the north")
+        assert pub(c)[0]["unconfirmed"] is False
 
 
 def test_member_post_and_burn_show_at_once():
@@ -132,7 +149,7 @@ def test_station_view_shows_hidden_flagged_first_with_name():
         items = pub(c, vol)
         assert ids(items)[0] == flagged and first in ids(items)
         assert {i["id"]: i["author"] for i in items}[first] == "Dana"
-        assert pub(c) == []
+        assert {i["author"] for i in pub(c)} == {"Community"}
 
 
 def test_bad_token_gets_public_view():

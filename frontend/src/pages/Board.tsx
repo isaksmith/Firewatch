@@ -225,6 +225,7 @@ function PostCard({
           {cat}
         </span>
         {post.flagged && <span className="num bg-escalate px-1.5 py-[1px] text-[10px] font-semibold tracking-[0.14em] text-white uppercase">Flagged</span>}
+        {post.unconfirmed && <span className="num border border-line-2 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-muted uppercase">Unconfirmed</span>}
         {post.estimated && <span className="num text-[10px] tracking-[0.14em] text-investigate uppercase">Estimated location</span>}
         {post.hearsay && <span className="num text-[10px] tracking-[0.14em] text-investigate uppercase">Secondhand</span>}
         {station && post.held && <span className="num text-[10px] tracking-[0.14em] text-degraded uppercase">Held</span>}

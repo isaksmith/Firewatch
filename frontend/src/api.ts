@@ -510,6 +510,7 @@ export interface BoardPost {
   confirms: number
   notes: number | null
   badge: string | null
+  unconfirmed: boolean
   held?: boolean
   event_status?: string | null
 }
