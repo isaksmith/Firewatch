@@ -4,7 +4,8 @@ import { Link } from 'react-router-dom'
 import {
   boardApi,
   BoardError,
-  ensureDevice,
+  getDeviceToken,
+  isWellFormedToken,
   setDeviceToken,
   type BoardCategory,
   type BoardPost,
@@ -21,19 +22,6 @@ const CATEGORIES: { key: BoardCategory; label: string }[] = [
   { key: 'other', label: 'Other' },
 ]
 const MAX_BODY = 500
-
-function consumeFragmentToken() {
-  try {
-    const m = window.location.hash.match(/[#&]d=([^&]+)/)
-    if (!m) return
-    setDeviceToken(decodeURIComponent(m[1]))
-    history.replaceState(null, '', window.location.pathname + window.location.search)
-  } catch {
-    /* ignore */
-  }
-}
-// Runs once at import time, before the first /me request goes out.
-consumeFragmentToken()
 
 type Position = { lat: number; lon: number } | null
 
@@ -88,6 +76,7 @@ function NewPost({ onPosted }: { onPosted: () => void }) {
   const [category, setCategory] = useState<BoardCategory>('fire')
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
+  const [attach, setAttach] = useState(true)
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null)
 
   async function submit() {
@@ -95,8 +84,7 @@ function NewPost({ onPosted }: { onPosted: () => void }) {
     setBusy(true)
     setMsg(null)
     try {
-      const pos = await getPosition()
-      await ensureDevice()
+      const pos = attach ? await getPosition() : null
       const r = await boardApi.post({ category, body: body.trim(), lat: pos?.lat ?? null, lon: pos?.lon ?? null })
       let text: string
       if (r.known) text = 'This one is already known and being watched.'
@@ -105,7 +93,8 @@ function NewPost({ onPosted }: { onPosted: () => void }) {
       else if (r.event_id != null) text = 'Report received. The duty officer is being told.'
       else if (category === 'burn') text = 'Posted. To register a burn, text BURN.'
       else text = 'Posted to the board.'
-      if (!pos) text += ' This post has no location, because we could not get yours.'
+      if (attach && !pos) text += ' This post has no location, because we could not get yours.'
+      if (r.reissued) text += ' Your sign-in had expired, so this went in as a community post.'
       setMsg({ text })
       setBody('')
       onPosted()
@@ -146,6 +135,13 @@ function NewPost({ onPosted }: { onPosted: () => void }) {
           {body.length} / {MAX_BODY}
         </span>
       </div>
+      <label className="mt-2 flex items-start gap-2 text-[13px] text-text">
+        <input type="checkbox" checked={attach} onChange={(e) => setAttach(e.target.checked)} className="mt-[3px] h-4 w-4" />
+        <span>
+          Attach my location
+          <span className="block text-[12px] text-muted">Helps the fire district find it. The public sees it rounded to about a kilometer.</span>
+        </span>
+      </label>
       <button type="button" onClick={submit} disabled={busy || !body.trim()} className="btn btn-primary mt-3 !h-11 w-full">
         {busy ? 'Posting' : 'Post'}
       </button>
@@ -188,9 +184,8 @@ function PostCard({
     setNote(null)
     try {
       const pos = await getPosition()
-      await ensureDevice()
       const r = await boardApi.confirm(post.id, { kind, lat: pos?.lat ?? null, lon: pos?.lon ?? null })
-      setNote({ text: confirmMessage(r.reason, r.counted) })
+      setNote({ text: confirmMessage(r.reason, r.counted) + (r.reissued ? ' Your sign-in had expired, so this went in as a community post.' : '') })
       onChanged()
     } catch (e) {
       setNote({ text: `Could not send: ${e instanceof Error ? e.message : 'try again'}`, bad: true })
@@ -229,7 +224,7 @@ function PostCard({
         <span className={`num border px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] uppercase ${hot ? 'border-escalate/60 text-escalate' : 'border-line-2 text-muted'}`}>
           {cat}
         </span>
-        {post.flagged && <span className="num text-[10px] tracking-[0.14em] text-escalate uppercase">Flagged</span>}
+        {post.flagged && <span className="num bg-escalate px-1.5 py-[1px] text-[10px] font-semibold tracking-[0.14em] text-white uppercase">Flagged</span>}
         {post.estimated && <span className="num text-[10px] tracking-[0.14em] text-investigate uppercase">Estimated location</span>}
         {post.hearsay && <span className="num text-[10px] tracking-[0.14em] text-investigate uppercase">Secondhand</span>}
         {station && post.held && <span className="num text-[10px] tracking-[0.14em] text-degraded uppercase">Held</span>}
@@ -319,9 +314,55 @@ export function Board() {
     return () => clearInterval(t)
   }, [])
 
+  const [pending, setPending] = useState<{ token: string; name: string } | null>(null)
+  const [linkMsg, setLinkMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    let m: RegExpMatchArray | null = null
+    try {
+      m = window.location.hash.match(/[#&]d=([^&]+)/)
+      if (m) history.replaceState(null, '', window.location.pathname + window.location.search)
+    } catch {
+      /* ignore */
+    }
+    if (!m) return
+    let t: string
+    try {
+      t = decodeURIComponent(m[1])
+    } catch {
+      return
+    }
+    if (!isWellFormedToken(t)) return
+    const stored = getDeviceToken()
+    if (stored === t) return
+    if (!stored) {
+      setDeviceToken(t)
+      qc.invalidateQueries({ queryKey: ['board-me'] })
+      qc.invalidateQueries({ queryKey: ['board-posts'] })
+      return
+    }
+    boardApi
+      .me(t)
+      .then((r) => {
+        if (r) setPending({ token: t, name: r.name ?? 'this account' })
+      })
+      .catch((e) => {
+        setLinkMsg(e instanceof BoardError && e.status === 401 ? 'That link is no longer valid.' : 'Could not check that link.')
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function switchTo() {
+    if (!pending) return
+    setDeviceToken(pending.token)
+    setPending(null)
+    qc.invalidateQueries({ queryKey: ['board-me'] })
+    qc.invalidateQueries({ queryKey: ['board-posts'] })
+  }
+
   const me = useQuery({
     queryKey: ['board-me'],
-    queryFn: boardApi.me,
+    queryFn: () => boardApi.me(),
     retry: false,
     refetchOnWindowFocus: false,
   })
@@ -358,7 +399,23 @@ export function Board() {
       </header>
 
       <main className="mx-auto flex max-w-[640px] flex-col gap-4 px-4 py-4">
-        {me.data?.name && (
+        {pending && (
+          <div role="status" className="flex flex-wrap items-center gap-2 border border-investigate/60 bg-investigate/10 px-3 py-2 text-[13px] text-text">
+            <span className="flex-1">This link signs you in as {pending.name}. Switch to it?</span>
+            <button type="button" className="btn btn-primary !h-11" onClick={switchTo}>
+              Switch
+            </button>
+            <button type="button" className="btn !h-11" onClick={() => setPending(null)}>
+              Keep current
+            </button>
+          </div>
+        )}
+        {linkMsg && (
+          <p role="status" className="border border-escalate/60 px-3 py-2 text-[13px] text-escalate">
+            {linkMsg}
+          </p>
+        )}
+        {me.data && (me.data.member || me.data.station) && (
           <p className="text-[12px] text-muted">
             Signed in as <span className="text-text">{me.data.name}</span>
             {station ? ' (fire district)' : ''}

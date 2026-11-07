@@ -430,19 +430,38 @@ export const api = {
 
 const DEVICE_KEY = 'firewatch.device'
 
+const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/
+
+export function isWellFormedToken(t: string): boolean {
+  return TOKEN_RE.test(t)
+}
+
 export function getDeviceToken(): string | null {
   try {
-    return localStorage.getItem(DEVICE_KEY)
+    const t = localStorage.getItem(DEVICE_KEY)
+    if (t === null) return null
+    if (TOKEN_RE.test(t)) return t
+    localStorage.removeItem(DEVICE_KEY)
+    return null
   } catch {
     return null
   }
 }
 
 export function setDeviceToken(token: string) {
+  if (!TOKEN_RE.test(token)) return
   try {
     localStorage.setItem(DEVICE_KEY, token)
   } catch {
     /* storage blocked: the page still works without it */
+  }
+}
+
+export function clearDeviceToken() {
+  try {
+    localStorage.removeItem(DEVICE_KEY)
+  } catch {
+    /* ignore */
   }
 }
 
@@ -503,9 +522,9 @@ export class BoardError extends Error {
   }
 }
 
-async function boardRequest<T>(path: string, init?: RequestInit): Promise<T> {
+async function boardRequest<T>(path: string, init?: RequestInit, tokenOverride?: string): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = getDeviceToken()
+  const token = tokenOverride ?? getDeviceToken()
   if (token) headers['X-Firewatch-Device'] = token
   const res = await fetch(`${BASE}/board${path}`, { ...init, headers })
   if (!res.ok) {
@@ -522,13 +541,31 @@ export async function ensureDevice(): Promise<void> {
   setDeviceToken(r.token)
 }
 
+/** Ensure a device, call, and on a 401 make one new device and retry once. */
+async function withDevice<T>(call: () => Promise<T>): Promise<T & { reissued: boolean }> {
+  await ensureDevice()
+  try {
+    return { ...(await call()), reissued: false }
+  } catch (e) {
+    if (!(e instanceof BoardError) || e.status !== 401) throw e
+  }
+  clearDeviceToken()
+  await ensureDevice()
+  return { ...(await call()), reissued: true }
+}
+
 export const boardApi = {
-  me: () => boardRequest<BoardMe>('/me'),
+  /** With no token there is no identity to look up, so no request goes out. */
+  me: async (token?: string): Promise<BoardMe | null> => {
+    const t = token ?? getDeviceToken()
+    if (!t) return null
+    return boardRequest<BoardMe>('/me', undefined, t)
+  },
   posts: () => boardRequest<BoardPost[]>('/posts'),
   post: (b: { category: BoardCategory; body: string; lat: number | null; lon: number | null }) =>
-    boardRequest<PostResult>('/posts', { method: 'POST', body: JSON.stringify(b) }),
+    withDevice(() => boardRequest<PostResult>('/posts', { method: 'POST', body: JSON.stringify(b) })),
   confirm: (id: number, b: { kind: ConfirmKind; lat: number | null; lon: number | null }) =>
-    boardRequest<ConfirmResult>(`/posts/${id}/confirm`, { method: 'POST', body: JSON.stringify(b) }),
+    withDevice(() => boardRequest<ConfirmResult>(`/posts/${id}/confirm`, { method: 'POST', body: JSON.stringify(b) })),
   station: (id: number, action: StationAction) =>
     boardRequest<unknown>(`/posts/${id}/station`, { method: 'POST', body: JSON.stringify({ action }) }),
 }
