@@ -731,3 +731,21 @@ def test_messages_fail_closed_with_blank_token_outside_sample(monkeypatch):
     with TestClient(app) as c:
         _cfg(monkeypatch, api_token="", mode="live")
         assert c.get("/api/messages").status_code == 503
+
+
+def test_location_opt_out_stores_no_point_and_no_signal():
+    with TestClient(app) as c:
+        m = member()
+        r = c.post("/api/board/posts", headers=hd(m), json={"category": "fire", "body": "Flames by the road", "attach_location": False})
+        assert r.status_code == 200
+        row = _row(r.json()["post_id"])
+        assert row["lat"] is None and row["lon"] is None
+        with connect() as conn:
+            assert conn.execute("SELECT COUNT(*) n FROM signals").fetchone()["n"] == 0
+
+
+def test_public_view_has_no_event_link():
+    with TestClient(app) as c:
+        pid = post(c, member(), "fire", "Flames in the field right now")
+        assert "event_id" not in {i["id"]: i for i in pub(c)}[pid]
+        assert "event_id" in {i["id"]: i for i in pub(c, member("Vol", "volunteer"))}[pid]

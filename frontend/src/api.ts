@@ -487,7 +487,7 @@ export interface BoardPost {
   flagged: boolean
   status: string
   parent_id: number | null
-  event_id: number | null
+  event_id?: number | null
   created_at: string
   author: string | null
   confirms: number
@@ -562,7 +562,7 @@ export const boardApi = {
     return boardRequest<BoardMe>('/me', undefined, t)
   },
   posts: () => boardRequest<BoardPost[]>('/posts'),
-  post: (b: { category: BoardCategory; body: string; lat: number | null; lon: number | null }) =>
+  post: (b: { category: BoardCategory; body: string; lat: number | null; lon: number | null; attach_location: boolean }) =>
     withDevice(() => boardRequest<PostResult>('/posts', { method: 'POST', body: JSON.stringify(b) })),
   confirm: (id: number, b: { kind: ConfirmKind; lat: number | null; lon: number | null }) =>
     withDevice(() => boardRequest<ConfirmResult>(`/posts/${id}/confirm`, { method: 'POST', body: JSON.stringify(b) })),

@@ -77,6 +77,7 @@ class NewPost(_Where):
     category: Literal["fire", "smoke", "hazard", "burn", "other"]
     body: str
     estimated: bool = False
+    attach_location: bool = True
 
     @field_validator("body")
     @classmethod
@@ -119,10 +120,11 @@ def _item(conn, r, station: bool, now) -> dict:
     held = notify.post_held(conn, r, now)
     out = {"id": r["id"], "category": r["category"], "body": r["body"], "lat": lat, "lon": lon,
            "estimated": bool(r["estimated"]), "hearsay": bool(r["hearsay"]), "flagged": bool(r["flagged"]),
-           "status": r["status"], "parent_id": r["parent_id"], "event_id": r["event_id"], "created_at": r["created_at"],
+           "status": r["status"], "parent_id": r["parent_id"], "created_at": r["created_at"],
            "author": author, "confirms": r["n_counted"], "notes": r["n_notes"], "badge": BADGE if held else None}
-    if station:
+    if station:  # the alert routes behind event_id are not public, so the public view has no link to them
         out["held"] = held
+        out["event_id"] = r["event_id"]
         out["event_status"] = r["e_status"]
     return out
 
@@ -153,7 +155,8 @@ def create_post(body: NewPost, x_firewatch_device: str = Header(default="")):
     with connect() as conn:
         c = _need(conn, x_firewatch_device)
         r = posts.create(conn, c, c["phone"], body.body, body.category, classify(body.body).hearsay, now, is_sample,
-                         channel="web", at=(body.lat, body.lon) if body.lat is not None else None, estimated=body.estimated)
+                         channel="web", at=(body.lat, body.lon) if body.lat is not None and body.attach_location else None,
+                         estimated=body.estimated, use_home=body.attach_location)
     return {"post_id": r["post_id"], "event_id": r["event_id"], "flagged": r["flagged"], "asked": r["asked"], "known": r.get("known", False)}
 
 

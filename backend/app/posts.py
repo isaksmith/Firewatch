@@ -94,13 +94,16 @@ def _known_hold(conn, pt, is_sample: bool, now: datetime):
 def create(
     conn: sqlite3.Connection, contact, phone: str, body: str, category: str, hearsay: bool, now: datetime,
     is_sample: bool = False, channel: str = "sms", at: tuple[float, float] | None = None,
-    estimated: bool = False,
+    estimated: bool = False, use_home: bool = True,
 ) -> dict:
-    """Store a board post from free text or the web and do what the 'What a post does' table says."""
+    """Store a board post from free text or the web and do what the 'What a post does' table says.
+
+    `use_home` False is a reporter's opt-out: the post stores no point, not even their roster address.
+    """
     from .confirm import evaluate_event
     from .signals import add_signal
 
-    pt = at or ((contact["lat"], contact["lon"]) if contact and contact["lat"] is not None else None)
+    pt = at or ((contact["lat"], contact["lon"]) if use_home and contact and contact["lat"] is not None else None)
     member = bool(contact and contact["registered"])
     out = {"post_id": None, "event_id": None, "asked": 0, "flagged": 0, "parent_id": None}
     if category in FIRE_LIKE:

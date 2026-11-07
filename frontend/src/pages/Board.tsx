@@ -85,7 +85,7 @@ function NewPost({ onPosted }: { onPosted: () => void }) {
     setMsg(null)
     try {
       const pos = attach ? await getPosition() : null
-      const r = await boardApi.post({ category, body: body.trim(), lat: pos?.lat ?? null, lon: pos?.lon ?? null })
+      const r = await boardApi.post({ category, body: body.trim(), lat: pos?.lat ?? null, lon: pos?.lon ?? null, attach_location: attach })
       let text: string
       if (r.known) text = 'This one is already known and being watched.'
       else if (r.flagged && r.asked > 0) text = 'Posted. Neighbors nearby are being asked.'
