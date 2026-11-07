@@ -1,547 +1,632 @@
-FIREWATCH CONFIRMATION LAYER - BUILD PLAN (UPDATED)
-Firewatch 2026 - WSU Innovation Works x Lockheed Martin Skunk Works
-Nov 6-8, 2026, Woolsey Hall
-Repo: https://github.com/isaksmith/Firewatch
-
-Loop we are building:
-satellite hotspot -> enrich -> ML confidence score -> map alert
--> 3D spread preview -> operator action
-
-
-========================================================================
-1. DECISIONS LOCKED
-========================================================================
-
-- Primary customer: Kansas rural fire district dispatch, with the Kansas
-  Forest Service as the statewide operator. Utilities are a secondary
-  persona (power-line proximity is a feature and a map overlay).
-- Frontend: React + Vite + TypeScript + MapLibre GL JS + deck.gl.
-  No Streamlit.
-- 3D: the same MapLibre map with terrain turned on and pitched to 60
-  degrees. No Cesium, no raw Three.js, no map tokens needed.
-- Backend: Python, FastAPI, SQLite.
-- ML: rules scorer first, then XGBoost with per-alert reasons.
-- Sample mode is the default for development and the demo.
-
-
-========================================================================
-2. WHAT THE JUDGES ASKED FOR (FROM THE RFP)
-========================================================================
-
-- Detect -> Confirm -> Respond as one system. We are the Confirm layer
-  plus a Respond preview. Show how the pieces talk to each other.
-- A real customer: Kansas rural fire district or state wildfire agency.
-- False alarms are the named problem: "Dust, controlled burns, and haze
-  look like smoke. A system that cries wolf gets switched off."
-  Suppressing Flint Hills prescribed burns and industrial heat sources
-  is our core value.
-- Tell the customer what it costs, how long it takes to stand up, and
-  what it does when it fails.
-- Ground rules: public data only, civil use, no assumption of unlimited
-  power or connectivity, buildable by a small team in one weekend.
-
-Kansas context for the pitch:
-- 2017 Starbuck fire, Clark County, about 626,000 acres.
-- 2016 Anderson Creek fire, Barber County.
-- Dec 15, 2021 wind-event fires in central Kansas.
-- Kansas is mostly flat, so wind dominates spread. Slope matters mainly
-  in the Flint Hills and Red Hills.
-- Flint Hills prescribed burns cluster in March-April and make up a
-  large share of the state's satellite detections.
-
-
-========================================================================
-3. SCHEDULE (CENTRAL TIME)
-========================================================================
-
-Fri 5:30-9 pm      Kickoff + first work session
-                   Need: skeleton running end to end on sample data
-Sat 9 am-12:30 pm  Build
-                   Need: real enrichment, model v1, 3D preview v1
-Sat 12:30-1:30 pm  Design review with Lockheed engineers
-                   Need: working loop + architecture + cost/failure story
-Sat 2 pm           8 finalists announced
-Sat 2:30-8 pm      Finalist build
-                   Need: polish, eval numbers, live mode, demo script
-Sun 10 am          Code freeze
-Sun 11 am          Final slides due in the app
-Sun 11:30 am       Finalist pitches
-
-
-========================================================================
-4. DATA SOURCES (ALL PUBLIC, VERIFIED)
-========================================================================
-
-Kansas bounding box: -102.05,36.99,-94.59,40.00
-
-Hotspots (polar satellites)
-  NASA FIRMS Area API, free MAP_KEY
-  Sources: VIIRS_SNPP_NRT, VIIRS_NOAA20_NRT, VIIRS_NOAA21_NRT, MODIS_NRT
-  URL: /api/area/csv/{KEY}/{SOURCE}/{w,s,e,n}/{days}
-  Limit: 5000 transactions per 10 minutes
-  US ultra-real-time data arrives under 60 s after overpass, but there
-  are only a few overpasses per day.
-
-Hotspots (geostationary)
-  FIRMS GOES_NRT, same key. 2-3 km pixels, about 30 min latency,
-  scans every 5-10 min. Gives repeat looks between polar passes.
-  Provisional data.
-
-Historical hotspots (training)
-  FIRMS yearly US country CSVs, no key, about 30 MB each. Example:
-  https://firms.modaps.eosdis.nasa.gov/data/country/viirs-snpp/2023/viirs-snpp_2023_United_States.csv
-  Download 2016-2024, filter to Kansas. Keep out of git.
-
-Weather, live and historical
-  Open-Meteo forecast and archive APIs, no key, 10k calls/day.
-  Wind speed/direction/gusts, RH, temperature, precipitation, CAPE,
-  weather codes. Same variables for training and live scoring.
-
-Fire weather alerts (display only)
-  NWS api.weather.gov/alerts, no key (User-Agent header required).
-
-Lightning
-  Proxy: Open-Meteo thunderstorm weather codes 95-99 and CAPE over the
-  prior 24 h. Stretch: GOES GLM from NOAA's AWS open data bucket.
-
-Terrain
-  AWS Terrain Tiles (Terrarium PNG, elevation-tiles-prod), no key.
-  Used for MapLibre 3D terrain and for slope in the spread model.
-
-Infrastructure
-  OpenStreetMap via Overpass: power=line (115 kV and up),
-  power=substation, place=town/village/city. Pull once, cache as
-  GeoJSON. (HIFLD Open shut down in 2025.)
-
-Counties and regions
-  US Census TIGER Kansas counties; EPA Level III ecoregions for the
-  Flint Hills polygon.
-
-Labels
-  NIFC WFIGS Incident Locations (ArcGIS REST), no key.
-  Verified: 891 Kansas incidents, 669 wildfire (WF) and 222 prescribed
-  (RX), with discovery time, size, and origin point. Starts in 2014.
-
-
-========================================================================
-5. ARCHITECTURE
-========================================================================
-
-Flow:
-  FIRMS -> Ingest poller (every 5 min) -> Cluster into events
-  -> Enrich (Open-Meteo, OSM layers, terrain) -> Score (model + rules)
-  -> SQLite -> FastAPI -> React dashboard -> Alert detail -> 3D preview
-  Spread simulator reads terrain and is called from the API.
-  Operator actions go back through the API into SQLite.
-
-Key design choice: alerts are per EVENT, not per pixel. Detections
-within about 2 km and 12 h are grouped into one event. Multi-pass and
-multi-satellite agreement becomes a confirmation feature.
-
-Repo layout:
-  backend/
-    app/main.py              FastAPI app and routes
-    app/config.py            env: FIRMS_MAP_KEY, MODE, BBOX, thresholds
-    app/db.py                SQLite schema
-    app/ingest/firms.py      poll FIRMS sources, dedupe
-    app/ingest/weather.py    Open-Meteo current + archive
-    app/ingest/nws.py        Red Flag Warnings
-    app/features/cluster.py  detections -> events
-    app/features/enrich.py   feature vector per event
-    app/features/terrain.py  elevation and slope
-    app/features/infra.py    distances to lines, substations, towns,
-                             static heat sources
-    app/scoring/rules.py     rules scorer and guardrails
-    app/scoring/model.py     load model, predict, reasons
-    app/sim/spread.py        arrival-time grid and isochrones
-    data/                    cached GeoJSON, sample events, model files
-  ml/
-    build_dataset.py         FIRMS history + WFIGS labels + weather
-    train.py                 train, calibrate, evaluate, export
-    report.md                metrics and feature importance
-  frontend/src/
-    api.ts
-    Dashboard.tsx            map + filters + ranked list
-    AlertDetail.tsx          score, reasons, actions, history
-    Spread3D.tsx             terrain, wind, animated spread, controls
-  docs/PLAN.md, docs/DESIGN.md, docs/PLAN.txt
-
-Database tables:
-  detections     one satellite pixel per overpass (dedupe key:
-                 source|lat4|lon4|acq_datetime)
-  events         one fire; holds latest score, recommendation, status,
-                 place label like "8 mi SW of Ashland, Clark Co."
-  scores         score history per event with reasons
-  actions        acknowledge / dismiss / escalate / reopen + note
-  source_health  last good pull per data source
-
-Alert status: new -> acknowledged | escalated | dismissed.
-Auto-close after 24 h with no new detections. A dismissed event that
-later rises to a higher recommendation reopens and is flagged.
-
-API (base /api):
-  GET  /alerts?min_score=&status=&since=&include_monitor=
-  GET  /alerts/{id}            detections, features, reasons, weather,
-                               nearby assets, actions, score history
-  POST /alerts/{id}/actions    {action, operator, note}
-  GET  /alerts/{id}/simulate?minutes=60&wind_kmh=&wind_from_deg=
-  GET  /layers/{power_lines|substations|towns|static_sources|counties}
-  GET  /health                 data age per source: ok / stale / down
-  POST /ingest/run             manual poll
-  POST /sample/replay          stream sample events in over ~60 s
-
-MODE=sample feeds frozen fixtures through the same pipeline so the demo
-never depends on a live overpass or venue Wi-Fi.
-
-
-========================================================================
-6. ML SCORER
-========================================================================
-
-What the score means:
-  Not "is this pixel hot" (FIRMS already says that). Our score is the
-  probability that this event is an uncontrolled wildfire worth a
-  response, scaled 0-100.
-
-  Static heat source (refinery, ethanol plant)   -> Monitor (suppressed)
-  Prescribed / ag burn (calm April Flint Hills)   -> Monitor/Investigate
-  Threatening wildfire (red-flag day, near town)  -> Escalate
-
-Thresholds (configurable per district):
-  Escalate >= 70, Investigate 40-69, Monitor < 40
-
-Features per event:
-  Detection:     max and total fire radiative power, brightness, share
-                 of high-confidence pixels, pixel size, day/night,
-                 local hour
-  Confirmation:  number of detections, number of distinct satellites,
-                 minutes active, FRP growth between passes
-  Weather:       wind, gusts, direction, RH, temperature, rain in prior
-                 72 h, grassland fire danger index
-  Lightning:     thunderstorm codes in prior 24 h (proxy)
-  Context:       day of year, Flint Hills flag, elevation, slope,
-                 distance to transmission line, substation, town, and
-                 known static heat source, number of other events
-                 within 25 km in the prior 24 h
-  Every feature has a fallback. Any fallback marks the event "degraded."
-
-Grassland fire danger index (McArthur Mk 4, Noble et al. 1980):
-  GFDI = 2 * exp(-23.6 + 5.01*ln(C) + 0.0281*T - 0.226*sqrt(RH)
-                 + 0.633*sqrt(U))
-  C = curing % (default 95 Nov-Apr), T = deg C, RH = %, U = km/h
-  Verify constants against the source.
-
-Labels:
-  Wildfire (1):        event within about 3 km and -12 h/+48 h of a
-                       WFIGS WF incident
-  Prescribed burn (0): matched to a WFIGS RX incident
-  Static source (0):   inside our static heat-source mask (grid cells
-                       with detections on many separate days), plus
-                       FIRMS type = 2
-  Unmatched:           excluded (many Kansas rural fires never reach
-                       IRWIN, so unmatched does not mean "no fire")
-  If too few labels by Sat 10 am, add clearly labeled synthetic events
-  and say so in the pitch.
-
-Rules scorer v0 (Friday; permanent fallback). Start at 30, clip 0-100:
-  +10  any high-confidence detection
-  +12  max FRP >= 50 MW   (+6 if >= 10 MW)
-  +14  seen by 3+ satellites   (+8 if 2)
-  +8   FRP at least doubled between passes
-  +20  GFDI >= 50   (+12 if 25-49, +5 if 12-24)
-  +8   gusts >= 64 km/h (40 mph)
-  +6   RH <= 20%
-  +8   within 3 km of a town or 1 km of a transmission line
-  -45  within 1 km of a known static heat source
-  -20  in Flint Hills, March-April, and GFDI < 12
-  -10  5+ other events nearby in 24 h and GFDI < 12
-  -10  10 mm or more of rain in prior 72 h
-
-Model v1 (Saturday morning):
-  - XGBoost, shallow trees, class weights; logistic regression baseline
-  - Calibrated probabilities; score = round(100 * p)
-  - Temporal split: train through 2022, validate 2023, test 2024
-  - Reasons: XGBoost per-prediction contributions (pred_contribs),
-    converted to score points; top 3 shown per alert, e.g.
-    "+18 gusts 45 mph, +12 RH 14%, -9 Flint Hills burn season"
-  - Saved files: xgb-v1.json, features.json, metrics.json
-
-Guardrails (applied after the model, shown in the UI when they fire):
-  - Within 1 km of a town or 0.5 km of a line, and not a static
-    source: never below Investigate
-  - Within 0.5 km of a static source and FRP not growing: cap at Monitor
-  - Weather missing: use rules scorer, mark degraded
-
-Re-scoring: when a detection joins the event, and hourly while open.
-Notify only when the recommendation goes UP.
-
-Evaluation for the pitch:
-  ROC-AUC, precision in the top 10 alerts per day, false-alarm reduction
-  vs. alerting on every FIRMS pixel, feature importance chart.
-  Also: for matched Kansas wildfires, first satellite detection time vs.
-  reported discovery time. Report honestly either way.
-
-
-========================================================================
-7. 3D SPREAD PREVIEW
-========================================================================
-
-Purpose: "where could this go in the next 30-60 minutes." Labeled on
-screen as a simplified grass-fire estimate, not an operational
-prediction.
-
-Fire behavior (all fuel treated as cured grass; verify constants):
-  1. Dead fuel moisture:  MC = 9.58 - 0.205*T + 0.138*RH
-  2. Moisture factor:     MC < 12:  phiM = exp(-0.108*MC)
-                          MC >= 12: phiM = 0.684 - 0.0342*MC (U <= 10)
-                                    phiM = 0.547 - 0.0228*MC (U > 10)
-  3. Curing factor:       phiC = 1.12 / (1 + 59.2*exp(-0.124*(C - 50)))
-  4. Head spread rate, km/h (CSIRO grassland, Cheney et al. 1998):
-                          U < 5:  R = (0.054 + 0.269*U) * phiM * phiC
-                          U >= 5: R = (1.4 + 0.838*(U-5)^0.844)
-                                      * phiM * phiC
-  5. Fire shape:          LB = 1.1 * U^0.464 (U >= 1), else 1
-                          e = sqrt(1 - 1/LB^2)
-                          R(theta) = R * (1 - e) / (1 - e*cos(theta))
-                          theta = angle from downwind direction
-  6. Slope:               multiply by exp(0.069 * s), s = slope in degrees
-                          along travel direction, clamped to +/-20
-                          (doubles per 10 deg upslope, halves downslope)
-
-Grid and output:
-  - 12 x 12 km around the event, shifted 3 km downwind, 60 m cells
-    (200 x 200)
-  - Fire arrival time per cell via Dijkstra over 16 neighbors
-  - Isochrones every 5 min as GeoJSON polygons, up to 60 min
-  - Impacts: first minute each town, line, and substation is reached
-  - Target under 500 ms per call; cache by event + rounded wind
-  - Tests: zero wind on flat ground is near-circular; more wind gives a
-    longer head run; flipping wind mirrors the shape
-
-Frontend view:
-  - Satellite imagery on terrain (exaggeration 1.5), camera pitched 60
-    degrees looking downwind
-  - Isochrone rings draped on terrain, yellow (5 min) to dark red
-    (60 min); bright line for the current front
-  - Wind shown as drifting particles plus a big arrow at the ignition
-  - Towns, lines, substations overlaid; an asset turns red when reached
-  - Side panel: observed wind, override toggle, speed slider, direction
-    dial, impacts list ("345 kV line 22 min, Ashland 38 min"), head
-    spread rate, area at 60 min
-  - Bottom bar: play, 0-60 min time scrubber, 1x/4x, reset to observed
-  - Wind override re-calls /simulate (debounced 250 ms)
-
-
-========================================================================
-8. DASHBOARD AND UI
-========================================================================
-
-Look: dark theme for dim dispatch rooms. Color is never the only signal;
-every level also has an icon and text.
-  Escalate     red     #EF4444  flame icon
-  Investigate  amber   #F59E0B  eye icon
-  Monitor      slate   #64748B  circle icon
-  Degraded     purple  #A78BFA  warning icon
-  Sample mode  cyan    #38BDF8
-  Background #0B0F14, panels #121821, text #E6EDF3, muted #8B98A5
-  Font: Inter, tabular numbers for scores and times
-
-Main dashboard:
-  - Top bar: LIVE or SAMPLE badge, data freshness chips per source
-    (green ok, amber stale, red down), Red Flag count, Replay sample,
-    Run ingest, operator name
-  - Left: ranked alert list. Card shows score badge, recommendation,
-    status, place label, age, sources (e.g. VIIRS x2, GOES x5), score
-    trend, top reason. Filters: min score, status, time window,
-    "show suppressed"
-  - Center: Kansas map with event markers sized by score, new
-    escalations pulsing, optional power lines and county lines
-  - Bottom strip: "14 detections suppressed today: 9 likely prescribed
-    burns, 5 static heat sources" (click to show them)
-
-Alert detail drawer (right side):
-  - Score, recommendation, place, first/last seen, status
-  - "Why this score": top 3 reasons as bars with +/- points, score trend
-  - Conditions: wind, temperature, GFDI band, recent rain
-  - Nearby: towns, lines, substations with distances
-  - Detection timeline by satellite
-  - Open 3D spread preview button
-  - Note field + Acknowledge / Escalate / Dismiss, with quick-pick notes
-    ("Paged VFD", "Known prescribed burn", "Industrial site")
-  - Action history
-  - Banners when degraded or when a guardrail changed the result
-
-Frontend libraries: react-map-gl/maplibre, maplibre-gl, deck.gl
-(MapboxOverlay), TanStack Query (poll every 30 s), Zustand, Tailwind,
-lucide-react, React Router (/, /alerts/:id, /alerts/:id/3d).
-Basemap: OpenFreeMap. 3D imagery: Esri World Imagery.
-
-
-========================================================================
-9. SAMPLE MODE (DEMO INSURANCE)
-========================================================================
-
-Freeze 8-10 events to JSON with detections AND weather so everything
-runs offline:
-  Starbuck fire ignition, Mar 2017, Clark Co.        -> Escalate
-  Anderson Creek fire, Mar 2016, Barber Co.          -> Escalate (slope)
-  Dec 15, 2021 wind-event fires, central Kansas      -> Escalate
-  2-3 Flint Hills April prescribed burns             -> Monitor/Investigate
-  Refinery or ethanol plant hotspot                  -> Monitor
-  Synthetic ignition beside a 230 kV line            -> Escalate (guardrail)
-  Synthetic single low-FRP detection, humid day      -> Monitor
-
-Exact dates, coordinates, and weather to be confirmed from the FIRMS
-archive, WFIGS, and Open-Meteo archive during data prep.
-"Replay sample" streams them in over about 60 seconds.
-
-
-========================================================================
-10. TEAM WORKSTREAMS (4-6 PEOPLE)
-========================================================================
-
-Data and ingestion
-  Owns: FIRMS, Open-Meteo, OSM layers, sample fixtures, history download
-  Fri night: last 5 days of Kansas hotspots in SQLite; power lines
-  GeoJSON
-
-ML
-  Owns: labels, training table, model, evaluation report
-  Fri night: rules scorer v0; WFIGS-to-FIRMS matching script
-
-Backend and simulation
-  Owns: FastAPI, clustering, /simulate
-  Fri night: API serving sample alerts; spread grid prototype
-
-Frontend
-  Owns: dashboard, detail drawer, 3D view
-  Fri night: map showing sample alerts from the API
-
-Customer, cost, and pitch (non-engineering, half the score)
-  Owns: dispatcher workflow, cost model, failure modes, slides, demo
-  script
-  Fri night: one-page profile of a Kansas rural fire district
-
-
-========================================================================
-11. MILESTONES AND CUT LINES
-========================================================================
-
-M1 - Fri 9 pm (must)
-  - One command starts each side locally
-  - Sample events flow API -> map
-  - Rules v0 scores them
-  - FIRMS key works for a live Kansas pull
-  - Historical CSV downloads started
-
-M2 - Sat 12:30 pm, design review (must)
-  - Real enrichment (weather, distances, terrain)
-  - XGBoost v1 with reasons
-  - 3D view with animated isochrones
-  - Actions logged
-  - Architecture slide + cost and failure slide
-
-M3 - Sat 8 pm (high)
-  - Wind override and time scrub
-  - Evaluation report with temporal split
-  - Live mode polling every 5 min
-  - Health and degraded banners
-  - 5-minute demo rehearsed once
-
-M4 - Sun 10 am
-  - Code frozen; slides submitted by 11 am
-
-Cut first if behind: GOES source, lightning, NWS banner, hosting,
-multiclass model.
-Never cut: sample mode, reasons on every alert, 3D animation, actions.
-
-
-========================================================================
-12. COST, STAND-UP, AND FAILURE (SLIDES THE RFP ASKS FOR)
-========================================================================
-
-Cost: all data is free and public. One small cloud VM, about $10-25 per
-month, covers all 105 Kansas counties. A district needs only a browser:
-no fiber, no sensors, no full-time operator.
-
-Stand-up: about one day. Set the district boundary, load local assets
-(towns, lines, critical facilities), set alert contacts, tune
-thresholds against last season's events.
-
-Failure behavior (fail visible, never silent):
-  FIRMS down or delayed  -> banner with data age; GOES still gives
-                            repeat looks; unscored hotspots still shown
-  Weather API down       -> score with detection + context only; alert
-                            marked "degraded confidence"
-  Clouds / no overpass   -> shown as a coverage gap, not "no fire";
-                            911 remains the primary path
-  Poor field connectivity-> alerts are small text payloads (SMS/email
-                            ready); dashboard is optional
-  Model wrong            -> human always decides; guardrails near towns
-                            and lines; actions logged for retraining
-
-
-========================================================================
-13. DEMO SCRIPT (UNDER 5 MINUTES)
-========================================================================
-
-1. Problem (30 s): Kansas grass fires; 911 calls come late; raw FIRMS
-   on a spring day is dozens of dots, mostly prescribed burns.
-2. Ingest (30 s): hit Replay; events stream onto the map.
-3. Confirm (60 s): ranked list. Starbuck-like event scores ~91 with
-   reasons; Flint Hills burn ~22; refinery ~5. Toggle "show suppressed."
-4. Respond preview (90 s): open 3D; spread runs toward a town and a
-   transmission line; change wind direction and watch it swing.
-5. Act (30 s): escalate with a note; show the logged history.
-6. Why trust it (60 s): evaluation numbers, feature importance, cost /
-   stand-up / failure slide.
-
-
-========================================================================
-14. POSITIONS ON OPEN QUESTIONS
-========================================================================
-
-- Primary customer: Kansas rural fire district dispatch + Kansas Forest
-  Service. Utilities served by the same alerts plus the asset overlay.
-- Satellite latency and gaps: stated honestly. Polar satellites pass a
-  few times a day; GOES fills gaps at coarse resolution. This adds to
-  911 calls; it does not replace them.
-- Thin labels: temporal split, simple model, honest synthetic data,
-  rules guardrails.
-- Trusted thresholds: start at 70/40, show calibration, let each
-  district tune, log every override.
-- Human review: always. The system ranks and explains; people decide.
-
-
-========================================================================
-15. SETUP CHECKLIST (AT OR BEFORE KICKOFF)
-========================================================================
-
-[ ] Request a free FIRMS MAP_KEY:
-    https://firms.modaps.eosdis.nasa.gov/api/map_key/
-[ ] Add every teammate as a collaborator on the GitHub repo
-[ ] Start downloading FIRMS yearly US VIIRS/MODIS CSVs (keep out of git)
-[ ] Pull Kansas OSM power lines, substations, and towns via Overpass;
-    save as GeoJSON
-[ ] Confirm Python 3.11+ and Node 20+ on every laptop
-[ ] Copy .env.example to .env (MODE=sample works without a key)
-
-Environment variables:
-  FIRMS_MAP_KEY=
-  MODE=sample
-  BBOX=-102.05,36.99,-94.59,40.00
-  POLL_MINUTES=5
-  THRESHOLD_ESCALATE=70
-  THRESHOLD_INVESTIGATE=40
-  CURING_PCT_OVERRIDE=
-  NWS_USER_AGENT=firewatch-demo (you@example.com)
-  VITE_API_BASE=http://localhost:8000/api
-
-
-========================================================================
-DATA ATTRIBUTION
-========================================================================
-
-NASA FIRMS (LANCE); Open-Meteo (CC BY 4.0); NOAA / National Weather
-Service; NIFC WFIGS / IRWIN; OpenStreetMap contributors (ODbL); AWS
-Terrain Tiles; US Census TIGER; EPA ecoregions.
+Firewatch — Build Plan
+
+Weekend build for Firewatch 2026 (WSU Innovation Works × Lockheed Martin Skunk Works, Nov 6–8,
+Woolsey Hall).
+
+Customer: the chief of the Cottonwood Creek Fire District: 450 sq mi, 18 volunteers (5 who can leave
+work on a weekday), 2+1 trucks, secondhand equipment, mill-levy budget, one bar of cell at best, no
+fiber.
+
+What we build: a Detect → Confirm → Respond chain that turns the first cheap signals of a grass fire
+(a power line faulting on a red-flag afternoon, a satellite hotspot, a rancher's text) into a
+confirmed alert. The alert goes to the duty officer's phone, and the right neighbors get a targeted
+text, minutes before anyone would otherwise call 911. Everything the district touches works over
+SMS.
+
+Software design details live in DESIGN.md.
+
+----------------------------------------------------------------------------------------------------
+
+1. The problem in minutes
+
+The brief's timeline, with our spread model's estimate of the fire at each point. Assumptions: grass
+fully cured (March), 16 mph south wind, 18% RH, flat terrain. At those settings the model reproduces
+the brief's "2–3 miles by 2:52" on its own, which is a useful check on both.
+
++------+--------------------------+------------------------+-------------------------+
+| Time | What happens             | Minutes since ignition | Fire (our model)        |
++======+==========================+========================+=========================+
+| 1:50 | Line down, grass ignites | 0                      | —                       |
++------+--------------------------+------------------------+-------------------------+
+| 2:17 | First person sees smoke  | 27                     | 1.1 mi long, ~110 acres |
++------+--------------------------+------------------------+-------------------------+
+| 2:21 | 911 call                 | 31                     | 1.4 mi, ~150 acres      |
++------+--------------------------+------------------------+-------------------------+
+| 2:34 | First truck rolls        | 44                     | 1.8 mi, ~300 acres      |
++------+--------------------------+------------------------+-------------------------+
+| 2:52 | First truck on scene     | 62                     | 2.7 mi, ~600 acres      |
++------+--------------------------+------------------------+-------------------------+
+
+Where the 62 minutes go: 31 min before anyone knows, 13 min turnout, 18 min drive. Turnout and drive
+are set by volunteers and distance; we can't buy those down cheaply. The first 31 minutes are where
+a system can win.
+
+The same afternoon with Firewatch (same turnout, same drive):
+
++-------+-------------------------------------------------+----------------------------------------+
+| Time  | What happens                                    | Fire                                   |
++=======+=================================================+========================================+
+| 1:50  | Co-op recloser locks out on the feeder;         | —                                      |
+|       | red-flag weather → Firewatch opens an event,    |                                        |
+|       | texts the duty officer (Investigate) and asks   |                                        |
+|       | the two nearest signed-up ranchers "see smoke?" |                                        |
++-------+-------------------------------------------------+----------------------------------------+
+| ~1:58 | A rancher replies "1" (smoke) → second          | 0.3 mi, ~15 acres                      |
+|       | independent signal → Escalate; duty officer     |                                        |
+|       | replies PAGE                                    |                                        |
++-------+-------------------------------------------------+----------------------------------------+
+| ~1:59 | Page goes out through county dispatch; the      |                                        |
+|       | downwind rancher, the lease water-truck driver, |                                        |
+|       | and two disc owners get a text with direction   |                                        |
+|       | and arrival estimate                            |                                        |
++-------+-------------------------------------------------+----------------------------------------+
+| ~2:10 | Rancher starts a disc line ahead of the head    | 0.9 mi, ~65 acres                      |
+|       | (if safe)                                       |                                        |
++-------+-------------------------------------------------+----------------------------------------+
+| ~2:11 | Brush 1 rolls                                   |                                        |
++-------+-------------------------------------------------+----------------------------------------+
+| ~2:29 | Brush 1 on scene                                | 1.7 mi, ~240 acres (60% less than 600) |
++-------+-------------------------------------------------+----------------------------------------+
+
+These numbers are from our model, not field data, and the 8-minute confirmation assumes a line-fault
+feed and a rancher who answers. Section 8 says how we'd test both.
+
+2. What the judges will probe, and where we answer it
+
++-------------------------+--------------------------------------------------------------+---------+
+| Requirement             | Our answer                                                   | Section |
++=========================+==============================================================+=========+
+| Whole chain             | Detect (line faults, satellites, texts) → Confirm            | 4       |
+|                         | (independent signals, burn registry, ask-the-neighbor, ML    |         |
+|                         | score) → Respond (duty officer, page via dispatch, targeted  |         |
+|                         | texts with spread ETAs) on one event record                  |         |
++-------------------------+--------------------------------------------------------------+---------+
+| Field reality           | SMS-first, nothing to install in phase 1, explicit cry-wolf  | 5       |
+|                         | budget, weather-gated triggers                               |         |
++-------------------------+--------------------------------------------------------------+---------+
+| Built for this district | 5 weekday volunteers → targeted, not mass, paging; neighbors | 4.3, 5  |
+|                         | and the lease water truck act before Brush 1; works on one   |         |
+|                         | bar                                                          |         |
++-------------------------+--------------------------------------------------------------+---------+
+| Honest numbers          | ~$300–500/yr for phase 1; who pays per phase; stand-up in a  | 6, 7    |
+|                         | week; failure table                                          |         |
++-------------------------+--------------------------------------------------------------+---------+
+| Evidence                | ML evaluated on 10 years of Kansas fires; satellite timing   | 8       |
+|                         | measured (and it's not fast enough alone); spread model      |         |
+|                         | checked against the brief; scenario replay                   |         |
++-------------------------+--------------------------------------------------------------+---------+
+| Next step               | One burn-season pilot measuring signal-to-page minutes and   | 10      |
+|                         | false pages per month                                        |         |
++-------------------------+--------------------------------------------------------------+---------+
+
+3. Constraints we design for
+
++------------------------------------------------+------------------------------------------------+
+| Constraint                                     | Design rule it produces                        |
++================================================+================================================+
+| One bar of cell, no fiber                      | Every field interaction is a 160-character SMS |
+|                                                | (works on one bar, carrier store-and-forward). |
+|                                                | Replies are single digits or one word. The web |
+|                                                | console is for the station and county, never   |
+|                                                | required in the field.                         |
++------------------------------------------------+------------------------------------------------+
+| Power                                          | Phase 1 puts no hardware in the district: the  |
+|                                                | server runs in the cloud, the district needs   |
+|                                                | phones. Phase 3 camera nodes are solar +       |
+|                                                | battery, send stills not video, and            |
+|                                                | store-and-forward.                             |
++------------------------------------------------+------------------------------------------------+
+| False alarms (dust, haze, March burns,         | No single weak signal pages anyone. Pages need |
+| neighbors' smoke)                              | two independent signals, or a strong           |
+|                                                | multi-pass satellite score. Registered burns   |
+|                                                | are suppressed inside their area and day. Line |
+|                                                | faults only count on fire-weather days. Rate   |
+|                                                | limits and batching. A measured cry-wolf       |
+|                                                | budget: at most 2 non-fire pages a month in    |
+|                                                | burn season.                                   |
++------------------------------------------------+------------------------------------------------+
+| Rural cost and scale                           | Free public data, one small cloud VM,          |
+|                                                | pay-per-message SMS. No full-time operator:    |
+|                                                | the system texts a human only when it needs a  |
+|                                                | decision.                                      |
++------------------------------------------------+------------------------------------------------+
+| 5 people who can leave work                    | Page the duty officer first, then targeted     |
+|                                                | volunteers, then mutual aid. The people        |
+|                                                | closest to the fire (ranchers, pumpers, the    |
+|                                                | lease water truck) get the earliest, most      |
+|                                                | specific text, because they're already there.  |
++------------------------------------------------+------------------------------------------------+
+| Time                                           | Every step is measured in minutes since first  |
+|                                                | signal, and the demo shows that clock.         |
++------------------------------------------------+------------------------------------------------+
+
+4. System design
+
+    flowchart LR
+      subgraph detect [Detect]
+        Coop["Co-op line faults / smart-meter outages"]
+        Sat["Satellites: GOES every 5 min, VIIRS/MODIS passes"]
+        Txt["Texts: ranchers, pumpers, drivers"]
+        Cam["Phase 3: camera on grain elevator"]
+        Wx["Weather + fire danger (gates triggers)"]
+      end
+      subgraph confirm [Confirm]
+        Event["One event per fire"]
+        Fuse["Independent-signal rules + ML satellite score"]
+        Burn["Burn registry (texted burn notices)"]
+        Ask["Ask the nearest neighbors: 1 smoke / 2 no / 3 my burn"]
+      end
+      subgraph respond [Respond]
+        Duty["Duty officer text: PAGE / NO"]
+        Page["Page via county dispatch + paging app"]
+        Targeted["Downwind rancher, water truck, disc owners: direction + ETA"]
+        Mutual["Mutual-aid request, prefilled"]
+      end
+      Coop --> Event
+      Sat --> Event
+      Txt --> Event
+      Cam --> Event
+      Wx --> Fuse
+      Event --> Fuse
+      Burn --> Fuse
+      Fuse -->|Investigate| Ask
+      Ask --> Fuse
+      Fuse -->|"Investigate or Escalate"| Duty
+      Duty --> Page
+      Duty --> Targeted
+      Page -->|"fewer than 2 responding in 5 min"| Mutual
+
+How the pieces talk: every signal, whatever its source, attaches to one event (a place and a time
+window). Confirmation reads the event's signals; response reads the event's location, the wind, and
+the spread estimate. Messages in and out go through one SMS gateway, and every message, reply, and
+decision is logged on the event. That log is the audit trail and the training data.
+
+4.1 Detect
+
++------------------+------------------+------------------+------------------+------------------+
+| Signal           | Latency          | Cost to district | Works on one     | Notes            |
+|                  |                  |                  | bar?             |                  |
++==================+==================+==================+==================+==================+
+| Electric co-op   | Seconds (feeder  | $0; needs a      | Server-side, yes | The scenario's   |
+| line fault /     | lockout,         | data-sharing     |                  | ignition is a    |
+| outage           | smart-meter      | agreement with   |                  | line down. A     |
+|                  | "last gasp") to  | the co-op        |                  | lockout on a     |
+|                  | ~15 min (public  |                  |                  | fire-weather day |
+|                  | outage map)      |                  |                  | in grass is the  |
+|                  |                  |                  |                  | earliest signal  |
+|                  |                  |                  |                  | that exists.     |
+|                  |                  |                  |                  | Many Kansas      |
+|                  |                  |                  |                  | co-ops already   |
+|                  |                  |                  |                  | publish outage   |
+|                  |                  |                  |                  | maps; a direct   |
+|                  |                  |                  |                  | feed is better.  |
++------------------+------------------+------------------+------------------+------------------+
+| GOES-East fire   | Scans every 5    | Free             | Server-side      | Sees growing     |
+| detection        | min; ~2 km       |                  |                  | fires between    |
+|                  | pixels           |                  |                  | polar passes;    |
+|                  |                  |                  |                  | can't see small  |
+|                  |                  |                  |                  | ones. NOAA's     |
+|                  |                  |                  |                  | Next Generation  |
+|                  |                  |                  |                  | Fire System      |
+|                  |                  |                  |                  | builds alerts on |
+|                  |                  |                  |                  | this (public     |
+|                  |                  |                  |                  | access to        |
+|                  |                  |                  |                  | verify). Latency |
+|                  |                  |                  |                  | for Kansas grass |
+|                  |                  |                  |                  | fires to be      |
+|                  |                  |                  |                  | measured.        |
++------------------+------------------+------------------+------------------+------------------+
+| VIIRS / MODIS    | <1 min to ~3 h   | Free             | Server-side      | Sharp (375 m)    |
+| (FIRMS)          | after an         |                  |                  | but sparse in    |
+|                  | overpass; ~6–8   |                  |                  | time. Day passes |
+|                  | looks a day,     |                  |                  | land around      |
+|                  | clustered early  |                  |                  | 12:30–2:30 pm,   |
+|                  | afternoon and    |                  |                  | which overlaps   |
+|                  | around 1–2 am    |                  |                  | afternoon fire   |
+|                  |                  |                  |                  | weather. Our ML  |
+|                  |                  |                  |                  | score runs on    |
+|                  |                  |                  |                  | these.           |
++------------------+------------------+------------------+------------------+------------------+
+| Texted reports   | Human speed      | ~1¢ per message  | Yes (SMS)        | Keyword FIRE     |
+|                  |                  |                  |                  | plus a road or   |
+|                  |                  |                  |                  | landmark.        |
+|                  |                  |                  |                  | Ranchers and     |
+|                  |                  |                  |                  | lease pumpers    |
+|                  |                  |                  |                  | drive the        |
+|                  |                  |                  |                  | district daily.  |
+|                  |                  |                  |                  | Reports from     |
+|                  |                  |                  |                  | unregistered     |
+|                  |                  |                  |                  | numbers count,   |
+|                  |                  |                  |                  | but can't page   |
+|                  |                  |                  |                  | alone.           |
++------------------+------------------+------------------+------------------+------------------+
+| Burn notices     | Before the burn  | Same             | Yes              | Keyword BURN     |
+|                  |                  |                  |                  | registers a burn |
+|                  |                  |                  |                  | area and day.    |
+|                  |                  |                  |                  | This is a        |
+|                  |                  |                  |                  | negative signal  |
+|                  |                  |                  |                  | that cuts false  |
+|                  |                  |                  |                  | alarms; many     |
+|                  |                  |                  |                  | Kansas counties  |
+|                  |                  |                  |                  | already expect a |
+|                  |                  |                  |                  | call to dispatch |
+|                  |                  |                  |                  | before a burn.   |
++------------------+------------------+------------------+------------------+------------------+
+| Weather and fire | Hourly           | Free             | Server-side      | Not a detection. |
+| danger           |                  |                  |                  | It gates the     |
+|                  |                  |                  |                  | others: a line   |
+|                  |                  |                  |                  | fault on a humid |
+|                  |                  |                  |                  | day is an        |
+|                  |                  |                  |                  | outage, not a    |
+|                  |                  |                  |                  | fire.            |
++------------------+------------------+------------------+------------------+------------------+
+| Phase 3: camera  | 1–5 min (stills) | ~$1.5–4k per     | Stills fit on    | A grain elevator |
+| on a tall        |                  | node +           | one bar          | or water tower   |
+| structure        |                  | ~$20–40/mo data  |                  | sees smoke 10–15 |
+|                  |                  | (rough)          |                  | miles out on     |
+|                  |                  |                  |                  | flat ground. 2–3 |
+|                  |                  |                  |                  | nodes for 450 sq |
+|                  |                  |                  |                  | mi. Next step,   |
+|                  |                  |                  |                  | not this         |
+|                  |                  |                  |                  | weekend.         |
++------------------+------------------+------------------+------------------+------------------+
+
+4.2 Confirm (without sending a person)
+
+An event's level comes from explicit, tunable rules over its signals. The ML model scores the
+satellite evidence (section 11).
+
++-------------+-----------------------------------------+-----------------------------------------+
+| Level       | Rule (initial, tuned per district)      | Who hears about it                      |
++=============+=========================================+=========================================+
+| Escalate    | Two independent signals agree (any two  | Duty officer gets a PAGE / NO text      |
+|             | of: satellite score ≥ 40, line fault on |                                         |
+|             | a fire-weather day, texted report,      |                                         |
+|             | neighbor reply "1", camera smoke), or   |                                         |
+|             | satellite score ≥ 70                    |                                         |
++-------------+-----------------------------------------+-----------------------------------------+
+| Investigate | Any one signal: satellite score ≥ 40,   | Duty officer gets an FYI text;          |
+|             | line fault with fire danger High or     | Firewatch asks the neighbors            |
+|             | above, a texted report                  |                                         |
++-------------+-----------------------------------------+-----------------------------------------+
+| Monitor     | Anything else, including a detection    | Nobody; shown on the console and in an  |
+|             | inside a registered burn on its day     | optional evening digest                 |
+|             | (unless it escapes: detection > 1 km    |                                         |
+|             | outside the area, fire danger Very High |                                         |
+|             | or above, or a neighbor reports it      |                                         |
+|             | spreading)                              |                                         |
++-------------+-----------------------------------------+-----------------------------------------+
+
+Ask the neighbor is the cheapest confirmation there is. At Investigate, Firewatch texts up to three
+signed-up contacts within 3 miles: "Firewatch: possible fire near Rd 40 & Hwy 177. See smoke? Reply
+1 yes, 2 no, 3 it's my burn." People who are already there answer in minutes, and nobody drives out.
+"3" from the registered burner's own number drops the event to Monitor.
+
+Public imagery: the alert links the latest GOES visible loop for the area, so the duty officer can
+look for a plume in daylight (free, 5-minute refresh).
+
+Drone, honestly: a $2–7k thermal drone is a good size-up and night-scouting tool for the first
+arriving volunteer. It doesn't confirm remotely across 450 sq mi, because flying beyond line of
+sight needs an FAA waiver. It's in the cost table as optional.
+
+4.3 Respond
+
+1.  Duty officer first. One text with place, signals, wind, and a link:
+    FIREWATCH ESC: grass fire likely 2 mi SW of Rosalia. Line fault 1:50 + rancher saw smoke. Wind S 16 mph. Reply PAGE or NO.
+    No acknowledgment in 3 min → the chief; then county dispatch by automated call.
+2.  Page through the existing path. PAGE notifies county dispatch, who tone the district as they do
+    today, and posts to the district's paging app if it has one (most accept email-to-page).
+    Firewatch doesn't bypass dispatch.
+3.  Targeted texts, before Brush 1 arrives. The spread estimate picks who is downwind within 60
+    minutes: ranchers (move stock, open gates), the lease water-truck driver, and disc owners.
+    Example:
+    FIREWATCH: grass fire 3 mi S of you, wind S 16 mph, could reach your place in ~35 min. Can you disc a line? Reply 1 yes 2 no. Only if safe.
+4.  Mutual aid, prefilled. If fewer than 2 volunteers reply "responding" within 5 min, or the
+    60-minute footprint is bigger than 2+1 trucks can hold, the chief gets a ready-to-send request
+    for the neighboring district and county EM.
+5.  Updates as evidence arrives. New satellite passes and replies update the event; recipients get a
+    follow-up only when the threat level or direction changes.
+
+5. Field reality
+
+- Connectivity: SMS everywhere in the field; the carrier stores and retries messages. Optional links
+  open a text-only page (< 50 KB, static map image). The 3D console is for the station, the county
+  EOC, and the pitch.
+- Power: none needed in the district in phases 1–2. Camera nodes (phase 3) are sized for 3 cloudy
+  days on battery.
+- False alarms: the burn registry, two-signal rule, weather gating, and ML suppression of Flint
+  Hills burns and refinery flares (section 11). Investigate is a text, not a page. Batching: one
+  Investigate digest per 15 min at most; one page per 30 min per area unless a new independent
+  signal arrives. Every dismissal is logged and reviewed monthly.
+- People: the escalation ladder never depends on one person; mutual aid triggers on missing replies,
+  not on someone remembering.
+
+6. Failure modes
+
++--------------------------------+--------------------------------+-------------------------------+
+| Failure                        | What Firewatch does            | What the district does        |
++================================+================================+===============================+
+| Duty officer has no signal     | Carrier retries; after 3 min   | Nothing new; 911 still works  |
+|                                | with no reply the ladder moves |                               |
+|                                | on (chief, then county         |                               |
+|                                | dispatch by voice call)        |                               |
++--------------------------------+--------------------------------+-------------------------------+
+| Firewatch server down          | An external uptime monitor     | Same as today                 |
+|                                | texts the chief within 5 min:  |                               |
+|                                | "Firewatch offline — 911 is    |                               |
+|                                | your only detection"           |                               |
++--------------------------------+--------------------------------+-------------------------------+
+| A source goes quiet (satellite | Per-source health; a 7 am      | Knows which eyes are closed   |
+| feed late, co-op feed silent,  | health text during burn        |                               |
+| camera offline)                | season; the console says "no   |                               |
+|                                | data," never "no fire"         |                               |
++--------------------------------+--------------------------------+-------------------------------+
+| False-alarm storm (calm March  | Registered burns suppressed;   | Gets one digest, not 30 texts |
+| afternoon, 30 hotspots)        | satellite-only events can't    |                               |
+|                                | page below 70; rate limits and |                               |
+|                                | batching                       |                               |
++--------------------------------+--------------------------------+-------------------------------+
+| Volunteers unavailable         | Mutual-aid prompt after 5 min  | One tap to send               |
+|                                | with < 2 responding            |                               |
++--------------------------------+--------------------------------+-------------------------------+
+| Fake or mistaken texted report | Unregistered numbers can       | Reviews in the log            |
+|                                | trigger Investigate and the    |                               |
+|                                | neighbor check, never a page   |                               |
+|                                | alone                          |                               |
++--------------------------------+--------------------------------+-------------------------------+
+| Model wrong                    | Humans decide every page;      | 911 remains primary           |
+|                                | rules floor events near towns  |                               |
+|                                | and lines at Investigate;      |                               |
+|                                | overrides are logged for       |                               |
+|                                | retraining                     |                               |
++--------------------------------+--------------------------------+-------------------------------+
+
+7. Honest numbers
+
+Rough figures before vendor quotes. We will say "rough" on the slide.
+
++----------+---------------------+---------------------+---------------------+---------------------+
+| Phase    | What                | Cash cost           | Who realistically   | Time to stand up    |
+|          |                     |                     | pays                |                     |
++==========+=====================+=====================+=====================+=====================+
+| 1        | Cloud server, SMS   | ~$10–25/mo server + | District operating  | About a week: day 1 |
+|          | number and          | ~$5–20/mo SMS ≈     | budget (mill levy), | boundary, roster    |
+|          | messages,           | $300–500/yr         | or $0 if the Kansas | import, thresholds; |
+|          | satellites,         |                     | Forest Service      | days 2–5 sign-ups   |
+|          | weather, texted     |                     | hosts one instance  | by text at a        |
+|          | reports, burn       |                     | for all districts   | district meeting    |
+|          | registry,           |                     | (one server handles | and through the     |
+|          | ask-the-neighbor,   |                     | the state)          | co-op newsletter;   |
+|          | targeted texts      |                     |                     | one drill page      |
++----------+---------------------+---------------------+---------------------+---------------------+
+| 2        | Co-op fault and     | $0 hardware; staff  | The co-op:          | 1–3 months          |
+|          | outage feed         | time                | line-caused         | (data-sharing       |
+|          |                     |                     | ignitions are its   | agreement)          |
+|          |                     |                     | liability, and a    |                     |
+|          |                     |                     | wildfire mitigation |                     |
+|          |                     |                     | plan wants this     |                     |
++----------+---------------------+---------------------+---------------------+---------------------+
+| 3        | 2–3 camera nodes on | ~$1.5–4k each +     | Kansas Forest       | Next grant cycle,   |
+|          | elevators or towers | ~$20–40/mo data     | Service Volunteer   | 6–12 months         |
+|          |                     |                     | Fire Assistance     |                     |
+|          |                     |                     | grant (cost share), |                     |
+|          |                     |                     | the oil-lease       |                     |
+|          |                     |                     | operator, the co-op |                     |
++----------+---------------------+---------------------+---------------------+---------------------+
+| Optional | Thermal drone + FAA | ~$2–7k + ~$175 test | VFA grant or FEMA   | Weeks               |
+|          | Part 107            |                     | Assistance to       |                     |
+|          | certificate         |                     | Firefighters        |                     |
++----------+---------------------+---------------------+---------------------+---------------------+
+
+8. Evidence
+
+Built and measured (in the repo now):
+
+- The app, end to end on real Kansas data: ingest → cluster → enrich → score → map → 3D spread →
+  logged actions. It includes real OSM transmission lines, substations, and towns, and industrial
+  heat sources derived from 10 years of satellite data.
+- ML confirmation score evaluated on 2016–2025 Kansas fires (report). The test set is 2023–2025,
+  never seen in training. On those years, 76% of reported wildfires reach Investigate or higher
+  (rules baseline: 55%), and 82% of unreported Flint Hills spring burns and 99% of refinery and
+  plant hotspots stay at Monitor.
+- Satellite timing, and why we didn't stop at satellites: for 209 matched Kansas wildfires, the
+  first polar-orbiter detection came a median 8 minutes after the reported discovery; only 47% were
+  detected before it. Satellites confirm and track; they don't win the first 31 minutes alone. That
+  result is why the design leads with line faults and people.
+- Spread model against the brief: with March grass, 18% RH, and a 12–19 mph wind, our model gives
+  2.3–3.0 miles at 62 minutes, matching the brief's 2–3 miles.
+
+To build and measure by Saturday 12:30 (section 9):
+
+- Cottonwood Creek replay: the scenario run through the real pipeline, with the
+  minutes-since-ignition clock and every text shown.
+- Alert load for a 450 sq mi stand-in district: replay every satellite event in past March–Aprils
+  through the scorer and count how many would have texted or paged the duty officer. That's the
+  cry-wolf number.
+
+9. Weekend scope
+
+Tonight (Fri), one slice we can demo: the Cottonwood Creek replay. It reuses everything built so far
+(events, scoring, spread, impacts, map) and adds:
+
+1.  Non-satellite signals on events: line fault, texted report, neighbor reply, burn notice.
+2.  The confirmation rules in section 4.2, with reasons ("Line fault 1:50 on a High fire-danger
+    day").
+3.  A contacts roster (volunteers, ranchers, pumpers, water truck, disc owners) with locations and
+    roles.
+4.  An SMS outbox and inbox (simulated in sample mode, Twilio in live mode) and the response
+    planner: who gets which text, using spread arrival times for each contact.
+5.  A scenario clock in the console: minutes since ignition, the baseline timeline beside the
+    Firewatch timeline, and fire size at each point.
+6.  Same afternoon, a registered burn 6 miles away that never pages anyone.
+
+Saturday review (12:30): the 62-minute problem, the whole-chain map with its constraints, the replay
+demo, the evidence numbers, cost and failure, and the plan to Sunday.
+
+Saturday afternoon → Sunday 11:00: alert-load estimate; real SMS to a teammate's phone over Twilio;
+the text-only page for links; polish the 3D view with contact ETAs; rehearse.
+
+Cut first if behind: live Twilio (keep the simulated outbox), GOES ingestion, the evening digest,
+the text-only page. Never cut: the replay with the clock, the two-signal rule, targeted texts, the
+honest-numbers slide.
+
+10. Next step (after the weekend)
+
+Pilot one district through one March–April burn season. Sign up ranchers and pumpers by text, take
+burn notices by text, and get the co-op's outage feed. Measure three things:
+
+1.  Minutes from first signal to duty-officer text and to page.
+2.  Non-fire pages per month against the budget of 2.
+3.  How often a neighbor answers within 5 minutes.
+
+If the line-fault signal proves out, add camera nodes in season two with a VFA grant. The Kansas
+Forest Service hosting one instance for every district is the scale path.
+
+11. ML confirmation score (built)
+
+The score answers: how likely is it that this satellite event is an uncontrolled wildfire rather
+than a prescribed burn or an industrial heat source? It's one input to the rules in 4.2, not the
+whole decision.
+
+- Data: FIRMS Kansas archive 2016–2025 replayed through the app's own clustering; labels from NIFC
+  WFIGS (224 wildfires, 90 prescribed burns) plus 400 unreported Flint Hills spring fires as weak
+  negatives. Industrial heat sources are handled by a rule, not the model.
+- Features: fire radiative power, brightness, passes and satellites, growth; wind, gusts, humidity,
+  temperature, rain, grassland fire danger; season, Flint Hills, terrain; distances to lines,
+  substations, towns; nearby fires.
+- Model: XGBoost with Platt calibration; logistic regression and the rules scorer as baselines;
+  temporal split (train ≤ 2022, test 2023–2025) plus leave-one-year-out. Per-alert reasons from
+  XGBoost contributions.
+- Honest caveats (in the report): small samples; reported fires skew toward people; weak labels are
+  mostly but not entirely right; logistic regression beat XGBoost on the test years while XGBoost
+  won across the training years.
+
+12. Spread estimate (built)
+
+A grass-fire arrival-time grid (CSIRO grassland rate of spread, elliptical shape from wind, slope
+adjustment) over terrain tiles, well under a second per run. It returns isochrones every 5 minutes
+and when each town, substation, and line is reached. In the Respond layer, the same arrival times
+decide which contacts get a text and what ETA it says. On screen it's labeled "Estimate, not an
+operational prediction."
+
+13. Data sources
+
++---------------------------+---------------------------+--------------+---------------------------+
+| Need                      | Source                    | Key?         | Notes                     |
++===========================+===========================+==============+===========================+
+| Hotspots (polar)          | NASA FIRMS: VIIRS S-NPP,  | Free MAP_KEY | Area API; yearly country  |
+|                           | NOAA-20, NOAA-21, MODIS   |              | CSVs for training (no     |
+|                           |                           |              | key)                      |
++---------------------------+---------------------------+--------------+---------------------------+
+| Hotspots (geostationary)  | FIRMS GOES; NOAA Next     | Free         | GOES-East scans the US    |
+|                           | Generation Fire System    |              | every 5 min; NGFS public  |
+|                           |                           |              | access to verify          |
++---------------------------+---------------------------+--------------+---------------------------+
+| Line faults / outages     | The district's electric   | Agreement    | Varies by co-op; sample   |
+|                           | co-op: public outage map, |              | mode uses a synthetic     |
+|                           | or a direct feed          |              | feed                      |
++---------------------------+---------------------------+--------------+---------------------------+
+| Texts in and out          | Twilio (or any SMS        | Account      | ~1¢ per message;          |
+|                           | gateway)                  |              | simulated in sample mode  |
++---------------------------+---------------------------+--------------+---------------------------+
+| Weather, live +           | Open-Meteo forecast and   | None         | Same variables for        |
+| historical                | archive                   |              | training and serving      |
++---------------------------+---------------------------+--------------+---------------------------+
+| Fire weather alerts       | NWS api.weather.gov Red   | User-Agent   | Display                   |
+|                           | Flag Warnings             |              |                           |
++---------------------------+---------------------------+--------------+---------------------------+
+| Terrain                   | AWS Terrain Tiles         | None         | 3D view and slope         |
++---------------------------+---------------------------+--------------+---------------------------+
+| Infrastructure            | OpenStreetMap via         | None         | Lines ≥ 115 kV,           |
+|                           | Overpass                  |              | substations, towns        |
+|                           |                           |              | (cached)                  |
++---------------------------+---------------------------+--------------+---------------------------+
+| Labels                    | NIFC WFIGS incident       | None         | 891 Kansas incidents (669 |
+|                           | locations                 |              | WF, 222 RX)               |
++---------------------------+---------------------------+--------------+---------------------------+
+
+14. Software architecture (summary)
+
+Python FastAPI backend with SQLite; a poller for FIRMS; enrichment, clustering, scoring, and spread
+in-process; React + MapLibre console. Sample mode feeds fixtures through the same pipeline, so the
+demo never depends on venue Wi-Fi or a live overpass. New for the Respond layer: a signals table, a
+contacts roster, an SMS gateway adapter with an outbox, and the response planner. See DESIGN.md.
+
+    backend/
+      app/            FastAPI app: ingest, features, scoring, sim, signals, notify
+      ml/             download, build_dataset, train, report.md
+      data/           layers, samples, model, district config + roster
+    frontend/         console: queue, map, alert drawer, 3D spread, scenario clock, SMS outbox
+    docs/             PLAN.md, DESIGN.md
+
+15. Demo script (5 minutes)
+
+1.  The 62 minutes (40 s): the brief's timeline beside our model's fire size. 600 acres at arrival,
+    and the first 31 minutes are lost before anyone knows.
+2.  Why not just satellites (30 s): across 10 years of Kansas fires, satellites saw them a median 8
+    minutes after the report. So we start with a line fault and a neighbor.
+3.  Replay Cottonwood Creek (2 min): 1:50 line fault on a red-flag day → Investigate text, neighbors
+    asked. 1:58 rancher replies 1 → Escalate. Duty officer replies PAGE → dispatch paged; the
+    downwind rancher, water truck, and disc owners get texts with ETAs (phone mockups beside the
+    map). The 3D view shows the fire reaching the contacts. Brush 1 arrives at 2:29: 240 acres, not
+    600.
+4.  The burn next door (30 s): a registered burn 6 miles away the same afternoon: satellite hotspot,
+    Monitor, no text.
+5.  Honest numbers (60 s): $300–500 a year, who pays, a week to stand up, what happens when each
+    piece fails.
+6.  Next step (20 s): one burn-season pilot and three numbers we'd measure.
+
+16. Team workstreams
+
++-------------------------+------------------------------------------------------------------------+
+| Workstream              | Owns                                                                   |
++=========================+========================================================================+
+| Signals & SMS           | Signals table, co-op feed adapter (synthetic first), SMS gateway +     |
+|                         | outbox, inbound parsing                                                |
++-------------------------+------------------------------------------------------------------------+
+| Confirm & respond logic | Two-signal rules, burn registry, ask-the-neighbor, response planner,   |
+|                         | escalation ladder                                                      |
++-------------------------+------------------------------------------------------------------------+
+| ML & evidence           | Model upkeep, alert-load estimate, evaluation numbers on slides        |
++-------------------------+------------------------------------------------------------------------+
+| Frontend                | Scenario clock, SMS outbox panel and phone mockups, contacts on the    |
+|                         | map and in 3D                                                          |
++-------------------------+------------------------------------------------------------------------+
+| Customer, cost & pitch  | Chief persona, cost and who-pays slide, failure slide, demo script,    |
+|                         | rehearsal                                                              |
++-------------------------+------------------------------------------------------------------------+
+
+17. Assumptions to confirm
+
+- Where the district is. The brief doesn't place Cottonwood Creek. We demo on a stand-in 450 sq mi
+  area in Butler County (oil leases, Flint Hills grass, March burning), set in config.
+- What "2+1 trucks" means: we read it as two brush trucks plus one other apparatus.
+- Paging path: county dispatch tones the district; some members use a paging app. We plug into both
+  rather than replace either.
+- Co-op data: whether the local co-op will share lockout and outage data, and how fast. Until then
+  the line-fault signal is simulated in the demo and labeled that way.
+- Burn notification: whether the county already requires a call to dispatch before a burn. If so,
+  the registry digitizes that call instead of adding a new rule.
+
+18. Schedule (Central time)
+
++-------------------+--------------------------------------+--------------------------------------+
+| When              | Event                                | What we need ready                   |
++===================+======================================+======================================+
+| Fri evening       | Build                                | Cottonwood Creek replay slice        |
++-------------------+--------------------------------------+--------------------------------------+
+| Sat 12:30–1:30 pm | Design review with Lockheed          | Problem in minutes, whole-chain map, |
+|                   | engineers                            | replay, evidence, cost and failure,  |
+|                   |                                      | plan to Sunday                       |
++-------------------+--------------------------------------+--------------------------------------+
+| Sat 2 pm          | 8 finalists announced                | —                                    |
++-------------------+--------------------------------------+--------------------------------------+
+| Sat 2:30–8 pm     | Finalist build                       | Alert-load estimate, live SMS,       |
+|                   |                                      | polish, rehearse                     |
++-------------------+--------------------------------------+--------------------------------------+
+| Sun 10 am         | Code frozen                          | —                                    |
++-------------------+--------------------------------------+--------------------------------------+
+| Sun 11 am         | Slides due in app                    | —                                    |
++-------------------+--------------------------------------+--------------------------------------+
+| Sun 11:30 am      | Finalist pitches                     | 5-minute demo rehearsed              |
++-------------------+--------------------------------------+--------------------------------------+

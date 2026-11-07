@@ -1,28 +1,27 @@
-# Firewatch Confirmation Layer
+# Firewatch
 
-**Early wildfire detection → ML confirmation → 3D response preview** for Kansas rural fire districts.
+**Detect → Confirm → Respond** for rural Kansas volunteer fire districts, built around SMS so it works on one bar of cell.
 
 Built for [Firewatch 2026](https://wsuinnovationworks.com/) (WSU Innovation Works × Lockheed Martin Skunk Works, Nov 6–8, 2026).
 
 ## The problem
 
-Most Kansas wildfires are found by a 911 call, minutes to hours after ignition, when the cheap window to stop them has closed. Satellites see many of them sooner, but raw satellite hotspots are noisy: on a spring day the Flint Hills produce dozens of detections from prescribed pasture burns, and refineries and ethanol plants show up as permanent "fires." A dispatcher can't triage that, so the data goes unused.
+In the challenge scenario (Cottonwood Creek Fire District: 450 sq mi, 18 volunteers, one bar of cell), a downed line starts a grass fire at 1:50. Nobody sees it until 2:17, 911 is called at 2:21, and the first truck arrives at 2:52, when the fire is 2–3 miles long. The 31 minutes before anyone knows are the ones that matter. Satellites alone don't win them: across 10 years of Kansas wildfires, they saw the fire a median 8 minutes *after* it was reported. And a system that cries wolf over March pasture burns gets switched off by April.
 
 ## What Firewatch does
 
-1. **Ingests** NASA FIRMS satellite hotspots (VIIRS, MODIS, GOES) for Kansas every 5 minutes.
-2. **Groups** pixels into events, so one fire produces one alert.
-3. **Enriches** each event with wind, humidity, a grassland fire danger index, terrain, and distance to towns, power lines, and known industrial heat sources.
-4. **Scores** each event 0–100 for "uncontrolled wildfire worth a response," with a recommendation (Monitor / Investigate / Escalate) and the top reasons behind it.
-5. **Previews** likely spread over the next 60 minutes on 3D terrain, driven by wind and slope, with what it reaches and when.
-6. **Logs** dispatcher actions (acknowledge / escalate / dismiss) for review and retraining.
+- **Detect:** combines cheap signals into one event per fire: electric co-op line faults on fire-weather days, satellite hotspots (VIIRS, MODIS, GOES), and texted reports from ranchers and lease pumpers.
+- **Confirm without a drive-out:** an ML score separates wildfires from prescribed burns and refinery flares. Escalation needs two independent signals. Registered burns are suppressed. The nearest neighbors are asked by text: "See smoke? 1 yes, 2 no, 3 it's my burn."
+- **Respond before the first engine:** the duty officer gets one text and replies PAGE. Paging goes through county dispatch. The downwind rancher, the lease water truck, and disc owners get a text with direction and an arrival estimate from the spread model, and mutual aid is drafted if too few volunteers respond.
 
-Humans decide. Firewatch ranks, explains, and previews.
+Humans decide every page. Every signal, text, and decision is logged on the event.
+
+**Status:** the satellite path (ingest, clustering, enrichment, ML scoring, map, 3D spread, logged actions) is built and evaluated on real Kansas data. The line-fault, SMS, and response pieces are designed in [docs/DESIGN.md](docs/DESIGN.md) (sections 4.5 and 5.6) and are this weekend's build. The plan, honest cost numbers, and failure modes are in [docs/PLAN.md](docs/PLAN.md).
 
 ## Docs
 
-- [Build plan](docs/PLAN.md): goals, data sources, milestones, team workstreams, demo script, cost and failure story.
-- [Design](docs/DESIGN.md): data model, pipeline, feature spec, scoring, spread model, API contract, UI design.
+- [Build plan](docs/PLAN.md): the scenario in minutes, whole-chain design, constraints, failure modes, cost and who pays, evidence, weekend scope, next step.
+- [Design](docs/DESIGN.md): data model, pipeline, signals and confirmation rules, scoring, response planner and messaging, spread model, API, UI.
 
 ## Stack
 
