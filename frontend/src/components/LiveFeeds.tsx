@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Layer, Popup, Source, useMap, type MapLayerMouseEvent } from 'react-map-gl/maplibre'
 import { api, type FeedResponse } from '../api'
 
-export type FeedKey = 'nws_alerts' | 'lsr' | 'wfigs_incidents' | 'wfigs_perimeters' | 'metar' | 'spc' | 'hms' | 'landsat_nrt' | 'goes_fire' | 'goes_lightning' | 'goes_smoke'
+export type FeedKey = 'nws_alerts' | 'lsr' | 'wfigs_incidents' | 'wfigs_perimeters' | 'metar' | 'spc' | 'hms' | 'landsat_nrt' | 'goes_fire' | 'goes_lightning' | 'goes_smoke' | 'rtma_ru'
 
 interface FeedDef {
   key: FeedKey
@@ -27,6 +27,7 @@ export const FEEDS: FeedDef[] = [
   { key: 'goes_fire', label: 'GOES fire (geostationary)', every: 60, color: '#ff3df2', kind: 'point', list: 'points' },
   { key: 'goes_lightning', label: 'GOES lightning (5 min)', every: 60, color: '#ffe94d', kind: 'point', list: 'points' },
   { key: 'goes_smoke', label: 'GOES smoke (daytime)', every: 300, color: '#b0a8b9', kind: 'point', list: 'points' },
+  { key: 'rtma_ru', label: 'RTMA-RU dry air (15 min)', every: 900, color: '#e8a33d', kind: 'point', list: 'points' },
 ]
 
 export const FEED_SWATCH: Record<FeedKey, string> = Object.fromEntries(
@@ -154,6 +155,7 @@ const POPUP_FIELDS: Record<FeedKey, string[]> = {
   landsat_nrt: ['acq_date', 'frp'],
   goes_lightning: ['time', 'energy_fj'],
   goes_smoke: ['pixels'],
+  rtma_ru: ['temp_c', 'dew_c', 'rh', 'p_hpa'],
   goes_fire: ['satellite', 'class', 'power_mw', 'temp_k', 'scan_start'],
 }
 
