@@ -165,7 +165,7 @@ def status(slug: str) -> dict:
 
     cfg = load_district(sc["district"]).settings
     turnout, drive = cfg.get("turnout_min", 13), cfg.get("drive_min", 18)
-    events, firewatch = [], []
+    events, firewatch, escalated_seen = [], [], False
     with connect() as conn:
         rows = conn.execute("SELECT * FROM events WHERE sample_slug = ? ORDER BY first_seen", (slug,)).fetchall()
         n_out = conn.execute(
@@ -182,7 +182,9 @@ def status(slug: str) -> dict:
                     "SELECT COUNT(*) n FROM messages WHERE event_id = ? AND direction = 'out'", (ev["id"],)
                 ).fetchone()["n"],
             })
-            if state.get("investigate_at"):
+            # one timeline: the first event that got a text, unless a later one escalated
+            if state.get("investigate_at") and (not firewatch or (state.get("escalate_at") and not escalated_seen)):
+                escalated_seen = bool(state.get("escalate_at"))
                 page_t = minutes(state.get("page_at"))
                 firewatch = [
                     {"key": "signal", "t": minutes(ev["first_seen"]), "label": "First signal"},

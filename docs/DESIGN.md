@@ -288,6 +288,7 @@ Satellite detections go through 4.1–4.4 and get an ML score (section 5). Every
 ```
 independent = distinct kinds among qualifying evidence (satellite counts once however many passes)
 if registered_burn(event) and not escaped(event):      level = monitor     reason "Registered burn by <name> today"
+    (extreme day, no escape evidence: level = investigate, one quiet duty officer FYI, never escalate)
 elif sat_score >= 70 or independent >= 2:              level = escalate
 elif independent >= 1:                                 level = investigate
 else:                                                  level = monitor
@@ -295,7 +296,9 @@ then apply guardrails (5.4): near a town or line → at least investigate; known
 ```
 
 - `registered_burn`: the event lies within a burn notice's radius on the notice's local date.
-- `escaped`: a detection or report more than 1 km outside the notice radius, or a `report` / `neighbor_reply 1` from someone other than the burner saying it's spreading.
+- `escaped`: evidence only. Any of: a `report` from anyone (the burner's own FIRE text counts), a `neighbor_reply 1` from someone other than the burner, or fire outside the notice area. A strong satellite detection is not escape evidence. There is no weather-based escape.
+- **Extreme days.** On a Red Flag day, or at GFDI >= `burn_escape_gfdi`, a registered burn with no escape evidence goes to Investigate, never Escalate. That sends one quiet duty officer FYI and, as for any Investigate event, asks up to 3 nearby contacts. It never asks anyone to page. On other days it stays at Monitor and texts nobody.
+- **Late notices.** Only a notice that predates the event (`created_at <= first_seen`) can suppress it. A notice registered after the event began is treated as a claim and caps the event at Investigate.
 - The event's `score` column stays the satellite ML score (null when there is no satellite evidence). `recommendation` is the level above.
 
 **Ask the neighbor.** When an event first reaches Investigate, text up to 3 opted-in contacts with a location within 3 miles of the event, nearest first. Duty officers are skipped because they're already being told. Each contact gets at most one ask per event and at most 3 per day. Replies are matched to the open ask from that number in the last 2 hours.

@@ -180,18 +180,80 @@ def test_registered_burn_stays_quiet_until_it_escapes():
         assert any("escaped" in e.get("note", "") for e in loads(ev["evidence_json"]))
 
 
-def test_registered_burn_stays_quiet_on_an_extreme_day():
+EXTREME = {**WEATHER, "wind_kmh": 56, "gust_kmh": 90, "rh_pct": 11}
+BURN = (37.75, -96.545)
+
+
+def _gary(conn):
+    return conn.execute("SELECT id FROM contacts WHERE phone = ?", (GARY,)).fetchone()["id"]
+
+
+def test_extreme_day_burn_without_escape_evidence_investigates_with_one_fyi_never_escalates():
     # Root cause of the packet bug: fire danger alone (GFDI >= 25) used to mark every burn escaped.
-    extreme = {**WEATHER, "wind_kmh": 56, "gust_kmh": 90, "rh_pct": 11}
-    burn = (37.75, -96.545)
     with connect() as conn:
         sync_roster(conn)
         notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
-        eid = _line_fault(conn, weather=extreme, where=burn)
+        eid = _line_fault(conn, weather=EXTREME, where=BURN)
+        ev = _event(conn, eid)
+        assert ev["recommendation"] == "investigate"
+        assert not any("escaped" in e.get("note", "") for e in loads(ev["evidence_json"]))
+        assert len(_out(conn, "duty_fyi", eid)) == 1
+        assert not _out(conn, "duty_escalate", eid)
+        evaluate_event(conn, eid, EXTREME, _at(4))
+        ev = _event(conn, eid)
+        assert ev["recommendation"] != "escalate"
+        assert not any("escaped" in e.get("note", "") for e in loads(ev["evidence_json"]))
+        assert len(_out(conn, "duty_fyi", eid)) == 1
+
+
+def test_normal_day_burn_stays_monitor():
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
+        eid = _line_fault(conn, weather=CALM, where=BURN)
         ev = _event(conn, eid)
         assert ev["suppression"] == "registered_burn" and ev["recommendation"] == "monitor"
-        assert not any("escaped" in e.get("note", "") for e in loads(ev["evidence_json"]))
         assert not _out(conn, "duty_fyi")
+
+
+def test_burners_own_fire_report_escapes():
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
+        eid = _line_fault(conn, weather=CALM, where=BURN)
+        assert _event(conn, eid)["recommendation"] == "monitor"
+        notify.handle_inbound(conn, GARY, "FIRE", _at(5), is_sample=True)
+        ev = _event(conn, eid)
+        assert ev["recommendation"] != "monitor"
+        assert any("escaped" in e.get("note", "") for e in loads(ev["evidence_json"]))
+        assert ev["recommendation"] == "investigate"
+        assert len(_out(conn, "duty_fyi", eid)) == 1
+
+
+def test_neighbor_one_from_someone_else_escapes_the_burn():
+    with connect() as conn:
+        sync_roster(conn)
+        notify.handle_inbound(conn, GARY, "BURN", _at(-200), is_sample=True)
+        eid = _line_fault(conn, weather=EXTREME, where=BURN)
+        wes = conn.execute("SELECT id FROM contacts WHERE phone = ?", (WES,)).fetchone()["id"]
+        conn.execute(  # Wes was asked about this event (the nearest-first ask only reached Gary)
+            "INSERT INTO messages(event_id, contact_id, phone, direction, purpose, body, status, is_sample, created_at) "
+            "VALUES (?, ?, ?, 'out', 'ask_neighbor', 'ask', 'sent', 1, ?)", (eid, wes, WES, iso(_at(1))))
+        notify.handle_inbound(conn, WES, "1", _at(6), is_sample=True)
+        ev = _event(conn, eid)
+        assert any("neighbor sees smoke" in e.get("note", "") for e in loads(ev["evidence_json"]))
+        assert ev["suppression"] != "registered_burn"
+
+
+def test_late_burn_notice_cannot_suppress_an_event():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = _line_fault(conn, where=BURN)
+        assert _event(conn, eid)["recommendation"] == "investigate"
+        notify.handle_inbound(conn, GARY, "BURN", _at(10), is_sample=True)
+        evaluate_event(conn, eid, WEATHER, _at(11))
+        ev = _event(conn, eid)
+        assert ev["recommendation"] != "monitor" and ev["suppression"] != "registered_burn"
 
 
 def test_burn_that_left_its_notice_escalates_on_an_extreme_day():
@@ -297,11 +359,11 @@ def _first_out_minute(conn, slug: str, purpose: str, t0: str):
 
 @pytest.mark.parametrize(
     "slug,fyi,escalate,dispatch",
-    [("cottonwood-creek-packet", None, 0, 9), ("cottonwood-creek-packet-no-fault", 27, 38, 47)],
+    [("cottonwood-creek-packet", 38, 0, 9), ("cottonwood-creek-packet-no-fault", 27, 38, 47)],
 )
 def test_packet_scenarios_report_the_worse_number(slug, fyi, escalate, dispatch):
     # Measured, not tuned. With the line fault on a Red Flag day Firewatch escalates at minute 0 (no FYI
-    # first); the no-fault packet has no fault to lean on and escalates at 38. Neither asks to page.
+    # first; the minute-38 FYI on the packet is Gary's registered burn, Investigate on a Red Flag day); the no-fault packet has no fault to lean on and escalates at 38. Neither asks to page.
     # One scenario per DB: a second replay in the same DB loses its duty_fyi (finding, not fixed here).
     t0 = "2026-03-17T18:50:00Z"
     scenario.run_now(slug)

@@ -179,20 +179,33 @@ def decide_level(
             independent.setdefault(f"camera:{s['source']}", "camera smoke")
         evidence.append(item)
 
-    burn, escaped = _registered_burn(conn, ev, f, signals, cfg)
+    burn, escaped, late = _registered_burn(conn, ev, signals)
+    extreme = False
     if burn is not None:
+        extreme = red_flag or g >= cfg.get("burn_escape_gfdi", 25)
         evidence.append({
             "kind": "burn_notice",
             "label": f"Registered burn: {burn['name']}, today, {burn['radius_km']:g} km radius",
             "at": burn["created_at"],
             "counts": "no",
             **({"note": "escaped: " + ", ".join(escaped)} if escaped else {}),
+            **({"note": "notice sent after the event started: a claim, not a reason to stay quiet"} if late else {}),
         })
 
     n = len(independent)
     labels = list(independent.values())
-    if burn is not None and not escaped:
-        return "monitor", f"Monitor: {burn['name']}'s registered burn, inside its notice and not escaped", evidence, "registered_burn"
+    if burn is not None and not late and not escaped:
+        if not extreme:
+            return "monitor", f"Monitor: {burn['name']}'s registered burn, inside its notice and not escaped", evidence, "registered_burn"
+        # Fire danger is extreme, so a burn that has not shown escape evidence is still worth one quiet look.
+        # Capped at Investigate: a registered burn is visible from space, so a satellite never escalates it.
+        why = "Red Flag day" if red_flag else f"fire danger {gfdi_band(g)}"
+        return (
+            "investigate",
+            f"Investigate: {burn['name']}'s registered burn, no sign it escaped, but {why}",
+            evidence,
+            None,
+        )
     if red_flag_fault and district is not None and district.contains(ev["lat"], ev["lon"]):
         level, reason = "escalate", "Escalate: Line fault on a Red Flag day"
     elif strong or n >= 2:
@@ -208,7 +221,9 @@ def decide_level(
                 (f"{e['label']}, {e['note']}" for e in evidence if e.get("note")), "no qualifying signal"
             )
         )
-    if claimed_by and level == "escalate" and not escaped:
+    if late and level == "escalate" and not escaped:
+        level, reason = "investigate", f"Investigate: {burn['name']} sent a burn notice after this started (a claim); check before paging"
+    elif claimed_by and level == "escalate" and not escaped:
         level, reason = "investigate", f"Investigate: {claimed_by} says it's their burn (unregistered); check before paging"
 
     suppression = None
@@ -217,25 +232,34 @@ def decide_level(
     return level, reason, evidence, suppression
 
 
-def _registered_burn(conn, ev, f, signals, cfg) -> tuple[dict | None, list[str]]:
-    """The burn notice covering this event today, and why it counts as escaped (empty if it hasn't)."""
+def _registered_burn(conn, ev, signals) -> tuple[dict | None, list[str], bool]:
+    """The burn notice covering this event today, why it counts as escaped (empty if it hasn't), and
+    whether it is `late`: sent after the event started, so only a claim and never a reason to stay quiet.
+
+    Escape needs evidence: any report (the notice tells the burner to text FIRE), a "1" (sees smoke) from
+    someone other than the burner, or fire seen outside the notice. Fire danger is a condition, not evidence,
+    and a satellite detection is not evidence either: a registered burn is visible from space."""
     burn_date = parse_iso(ev["first_seen"]).astimezone(CENTRAL).date().isoformat()
     rows = conn.execute(
         "SELECT b.*, c.name FROM burn_notices b JOIN contacts c ON c.id = b.contact_id "
-        "WHERE b.burn_date = ? AND b.is_sample = ?",
+        "WHERE b.burn_date = ? AND b.is_sample = ? ORDER BY b.created_at",
         (burn_date, ev["is_sample"]),
     ).fetchall()
-    burn = next((dict(b) for b in rows if haversine_km(ev["lat"], ev["lon"], b["lat"], b["lon"]) <= b["radius_km"]), None)
+    first = parse_iso(ev["first_seen"])
+    covering = [dict(b) for b in rows if haversine_km(ev["lat"], ev["lon"], b["lat"], b["lon"]) <= b["radius_km"]]
+    on_time = [b for b in covering if parse_iso(b["created_at"]) <= first]
+    burn = (on_time or covering or [None])[0]
     if burn is None:
-        return None, []
+        return None, [], False
+    late = not on_time
     escaped = []
     limit = burn["radius_km"] + BURN_ESCAPE_OUTSIDE_KM
     points = [(d["lat"], d["lon"]) for d in conn.execute("SELECT lat, lon FROM detections WHERE event_id = ?", (ev["id"],))]
     points += [(s["lat"], s["lon"]) for s in signals if s["kind"] in LOCATING_SIGNALS]
     if any(haversine_km(lat, lon, burn["lat"], burn["lon"]) > limit for lat, lon in points):
         escaped.append(f"fire seen more than {BURN_ESCAPE_OUTSIDE_KM:g} km outside the notice")
-    # Fire danger is a condition, not evidence of escape: on a Red Flag day every registered burn
-    # would count as escaped (GFDI 101 in the packet replay), so a burn would never stay quiet.
-    if any(s["kind"] == "report" and s["contact_id"] != burn["contact_id"] for s in signals):
-        escaped.append("reported by someone other than the burner")
-    return burn, escaped
+    if any(s["kind"] == "report" for s in signals):
+        escaped.append("a text report of fire")
+    if any(s["kind"] == "neighbor_reply" and s["value"] == "1" and s["contact_id"] != burn["contact_id"] for s in signals):
+        escaped.append("a neighbor sees smoke")
+    return burn, escaped, late
