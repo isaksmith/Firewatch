@@ -8,7 +8,7 @@
 
 ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white) ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white) ![XGBoost](https://img.shields.io/badge/XGBoost-scorer-EB5B2B) ![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white) ![MapLibre](https://img.shields.io/badge/MapLibre-GL-396CB2?logo=maplibre&logoColor=white) ![Meshtastic](https://img.shields.io/badge/Meshtastic-LoRa-67EA94) ![Data](https://img.shields.io/badge/data-free%20%26%20public-ff4b2b)
 
-[How it works](#how-it-works) · [Screens](#screens) · [Quick start](#quick-start) · [Run the demo](#run-the-demo) · [Docs](#docs) · [Data sources](#data-sources-and-apis)
+[How it works](#how-it-works) · [Screens](#screens) · [Quick start](#quick-start) · [Run the demo](#run-the-demo) · [Pitch deck](docs/pitch/Firewatch-Pitch.pdf) · [Docs](#docs) · [Data sources](#data-sources-and-apis)
 
 Built for [Firewatch 2026](https://wsuinnovationworks.com/) · WSU Innovation Works × Lockheed Martin Skunk Works · Nov 6–8, 2026
 
