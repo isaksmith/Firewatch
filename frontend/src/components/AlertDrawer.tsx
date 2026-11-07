@@ -271,7 +271,12 @@ const PURPOSE_LABEL: Record<string, string> = {
   mutual_aid_draft: 'Mutual-aid draft',
   mutual_aid: 'Mutual aid',
   reply: 'Auto-reply',
+  answer: 'Answer',
+  channel_update: 'Channel update',
 }
+
+/** Who an outbound text went to; a channel update has no contact, only the broadcast address. */
+const recipient = (m: Message) => m.contact_name ?? (m.purpose === 'channel_update' ? 'district channel' : m.phone ?? '?')
 
 function ResponseSection({ a }: { a: AlertDetail }) {
   const r = a.response!
@@ -374,9 +379,9 @@ function groupMessages(messages: Message[]) {
       last.m.channel === m.channel
     ) {
       last.n += 1
-      last.names.push(m.contact_name ?? m.phone ?? '?')
+      last.names.push(recipient(m))
     } else {
-      out.push({ m, n: 1, names: [m.contact_name ?? m.phone ?? '?'] })
+      out.push({ m, n: 1, names: [recipient(m)] })
     }
   }
   return out

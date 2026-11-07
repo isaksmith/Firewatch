@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import numpy as np
 
-from . import fw1, fw1_feed, livesend, mesh
+from . import ask as ask_mod, bulletin, fw1, fw1_feed, livesend, llm, mesh
 from .config import get_settings
 from .db import iso, loads, parse_iso
 from .district import LADDER_ROLES, NEIGHBOR_ROLES, VOLUNTEER_ROLES, load_district
@@ -218,6 +218,7 @@ def t_place_hint() -> str:
 ESTIMATE_JOIN_KM = 8.0  # a report placed by bearing and distance may be off by miles, so it joins wider
 
 CHANNELS = ("sms", "mesh")
+REPLY_PURPOSES = ("reply", "answer")  # "answer": ask.py's answer to a question, sent a moment after the text
 
 
 def send(
@@ -228,7 +229,7 @@ def send(
 
     Mesh messages go out even in sample mode: they only reach radios the roster links to a contact.
     """
-    if not contact["opted_in"] and purpose != "reply":
+    if not contact["opted_in"] and purpose not in REPLY_PURPOSES:
         return None
     if len(body) > SMS_MAX:
         if SIGNED_FW1_RE.search(body):  # cutting would chop the signature: refuse loudly instead
@@ -245,7 +246,7 @@ def send(
     for channel, to, gateway in routes:
         status, gid = "sent", None
         # A reply answers a text the person just sent (Twilio-signed webhook), so it is exempt from the live guard.
-        held = isinstance(gateway, TwilioGateway) and purpose != "reply" and livesend.check(conn, event_id, now)
+        held = isinstance(gateway, TwilioGateway) and purpose not in REPLY_PURPOSES and livesend.check(conn, event_id, now)
         if held:
             log.warning("live SMS for event %s held: %s", event_id, held)
             status = "held"
@@ -441,7 +442,7 @@ def _ladder_step(conn, ev, state: dict, now: datetime) -> None:
 
 
 def tick(conn: sqlite3.Connection, now: datetime, is_sample: bool | None = None) -> None:
-    """Advance timers: the no-answer ladder, and mutual aid when too few respond."""
+    """Advance timers: the no-answer ladder, mutual aid when too few respond, and the channel's situation updates."""
     d = load_district()
     waits = d.settings.get("ladder_minutes", [3, 6])
     q = "SELECT * FROM events WHERE response_json IS NOT NULL AND status != 'closed'"
@@ -464,6 +465,7 @@ def tick(conn: sqlite3.Connection, now: datetime, is_sample: bool | None = None)
             n = _n_responding(state)
             if now >= after and n < d.settings.get("min_responding", 2):
                 _draft_mutual_aid(conn, ev, state, f"{n} responding {d.settings.get('mutual_aid_after_min', 5)} min after page", now)
+        bulletin.tick(conn, ev, state, now)
 
 
 def _n_responding(state: dict) -> int:
@@ -479,6 +481,7 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
     state = _state(ev)
     d = load_district()
     sample = bool(ev["is_sample"])
+    first = True
     if action == "page":
         if state.get("decision") == "page":
             return state
@@ -506,6 +509,7 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
             )
         conn.execute("UPDATE events SET status = 'escalated' WHERE id = ? AND status IN ('new', 'acknowledged')", (event_id,))
     elif action == "no":
+        first = state.get("decision") != "no"
         clear_hold(conn, event_id)
         state.update(decision="no", decision_by=by, decision_at=iso(now))
         conn.execute("UPDATE events SET status = 'dismissed' WHERE id = ?", (event_id,))
@@ -513,7 +517,8 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
         if not state.get("mutual_aid"):
             _draft_mutual_aid(conn, ev, state, f"requested by {by}", now)
         ma = state["mutual_aid"]
-        if not ma.get("sent_at"):
+        first = not ma.get("sent_at")
+        if first:
             target = _one(conn, "mutual_aid")
             plan = state.get("plan") or plan_response(conn, ev, now)
             if target:
@@ -527,6 +532,7 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
     )
     _save(conn, event_id, state)
     fw1_feed.sync_event(conn, event_id, now)
+    bulletin.decided(conn, _event(conn, event_id), action, state, now, first)
     return state
 
 
@@ -1016,6 +1022,9 @@ def handle_inbound(
             (contact["id"], *here, radius, burn_date, int(is_sample), iso(now)),
         )
         out.update(action="burn", reply="Firewatch: burn noted for today near your place. Text FIRE if it gets away.")
+    elif word not in RESERVED and llm.enabled() and ask_mod.is_question(body):
+        # "Where is the fire?" names a fire but is not a sighting: answered, never filed as a report.
+        out["action"] = "question"
     else:
         out["reply"] = HELP.format(name=d.short_name)
         text = body.strip()
@@ -1052,4 +1061,6 @@ def handle_inbound(
     if out["reply"]:
         target = contact or {"id": None, "phone": phone, "name": phone, "opted_in": 1, "mesh_id": phone if channel == "mesh" else None}
         send(conn, target, out["reply"], "reply", out["event_id"], now, is_sample, channels=(channel,))
+    if out["action"] == "question":
+        ask_mod.answer_later(msg_id, phone, body, here, now, is_sample, channel)
     return out

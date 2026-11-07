@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     mesh_device: str = ""  # serial port (first Meshtastic port when blank) or the radio's host for tcp
     mesh_channel_index: int = 0
     mesh_channel_feed: bool = True  # copy every mesh text to the district channel as well as the person's radio
+    # OpenRouter: plain-language answers to texted questions and situation updates on the mesh channel. Blank = off.
+    openrouter_api_key: str = ""
+    openrouter_model: str = "openrouter/free"  # a free model picked per request; the checks in llm.py catch weak ones
+    openrouter_timeout_s: float = 12.0
+    mesh_channel_updates: bool = True  # with a key and a radio: post a situation update while a paged fire is open
+    channel_update_min: int = 15  # minutes between updates, sooner on a wind shift or the fire doubling
     scenario_seconds_per_minute: float = 2.0
     forwarded_ip_header: str = ""  # e.g. cf-connecting-ip; trusted only from a loopback peer
     api_token: str = ""  # when set, required (X-Firewatch-Token) on endpoints that can text people

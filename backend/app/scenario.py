@@ -218,7 +218,8 @@ def _live_radio_steps(conn, sc: dict, t: int) -> list[tuple[dict, dict]]:
 
 def _last_alert_id(conn, contact_id: int) -> int:
     r = conn.execute(
-        "SELECT MAX(id) m FROM messages WHERE contact_id = ? AND direction = 'out' AND purpose != 'reply'", (contact_id,)
+        "SELECT MAX(id) m FROM messages WHERE contact_id = ? AND direction = 'out' AND purpose NOT IN ('reply', 'answer')",
+        (contact_id,),
     ).fetchone()
     return r["m"] or 0
 

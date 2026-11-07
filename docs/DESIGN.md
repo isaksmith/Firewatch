@@ -567,6 +567,20 @@ For Cottonwood Creek's 446 sq mi, the default 10 plots (70 bare, 20 rich) need 5
 
 The planner drafts a placement design. The radio survey and the supervised-burn detection trial in sensors/README.md confirm or move each site.
 
+### 5.11 Plain-language answers and channel updates (OpenRouter)
+
+A language model on OpenRouter writes two kinds of text. It never writes the alerts: those stay fixed templates, because the parser depends on their reply words (`PAGE 12`, `R 12`) and coordinates. Code: `backend/app/llm.py`, `ask.py`, `bulletin.py`. Off unless `OPENROUTER_API_KEY` is set. With no key, nothing changes.
+
+- **Questions.** A text or radio message that asks something ("where is the fire?", "is it coming our way", `STATUS`) and starts with no keyword gets an answer, not the HELP reply. The answer comes from the open fires within 25 mi of the sender (their radio's GPS fix, or their roster address). For each fire it uses the status, distance and bearing, wind and spread direction, the forecast's acres now and in an hour, and the worst-case arrival at the sender. It goes out as one text (purpose `answer`) on the channel the question came in on, a moment later on a worker thread. A question is never filed as a report, even when it names a fire. The model is told to answer with `FIRE` when someone says they can see one.
+- **Channel updates.** While a paged fire is open, the district's mesh channel gets a short update (purpose `channel_update`, one `messages` row per post) at these points:
+  - when crews are paged, when mutual aid goes out, or when an escalated fire is stood down;
+  - every `CHANNEL_UPDATE_MIN` (15) minutes after that;
+  - sooner if the wind swings 45 degrees or more, or the forecast size doubles and grows by at least 100 acres.
+
+  Updates go out only when the server's radio is up. A replay posts only while it plays on its clock, never when it is loaded all at once. Updates carry no names or addresses, since everyone on the channel reads them.
+- **Checks.** The model gets a block of facts and must answer from those facts alone. Its answer is turned into one line of ASCII (a curly quote would turn an SMS into 70-character segments) and cut at a sentence end to fit. It is then rejected if it uses any number that isn't in the facts (911 aside). If the call fails, times out (12 s), or the answer is rejected, a plain template goes out with the same facts. So the model changes the wording only, never whether a text goes out.
+- **Model.** `OPENROUTER_MODEL`, default `openrouter/free`. That router picks one of OpenRouter's free models for each request, so it costs nothing, but the quality of the wording varies from text to text. Some of those models refuse to answer with reasoning turned off; for them the call is retried once with reasoning on. A paid model such as `anthropic/claude-haiku-5.5` (about a tenth of a cent per answer) words things more reliably.
+
 ## 6. Spread simulation
 
 Every estimate from this model is shown as a worst case ("as little as", "up to", "soonest"). It runs fast: on the packet's weather it gives 7.7 mi at minute 62, against the packet's 2 to 3 mi. A downwind text warned too early costs little; one warned too late does not.
@@ -967,6 +981,10 @@ API_TOKEN=                 # when set, required on endpoints that can text peopl
 MESH_GATEWAY=off           # off | serial | tcp: a Meshtastic radio attached to the server
 MESH_DEVICE=               # serial port (first Meshtastic port when blank) or the radio's host for tcp
 MESH_CHANNEL_INDEX=0
+OPENROUTER_API_KEY=        # blank = no model: questions get the HELP reply, no channel updates
+OPENROUTER_MODEL=openrouter/free  # a free model per request; or a paid one, e.g. anthropic/claude-haiku-5.5
+MESH_CHANNEL_UPDATES=true  # with a key and a radio, post situation updates while a paged fire is open
+CHANNEL_UPDATE_MIN=15
 ```
 
 `backend/data/districts/<slug>/settings.json` holds what a chief tunes:
@@ -1058,6 +1076,7 @@ Kept small and aimed at the things that would embarrass us in a demo:
 - **Messages:** every rendered template is ≤ 160 characters for the longest town name in the district.
 - **Scenario:** the Cottonwood Creek replay reaches Escalate at T+8 and PAGE at T+9, and the first truck is on scene at T+38 (packet: T+62). The three-fire replay pages each fire 9 minutes after it starts, by number, and each fire's forecast starts from its own ignition.
 - **Two open fires:** texts about the second fire carry its number; `PAGE <n>` pages the named fire, not the newest; a bare `PAGE` still answers the newest; an unknown number changes nothing.
+- **Model text:** a question is answered from the nearest fire's facts and never filed as a report; a failed call or an answer with an invented number falls back to the template; a page posts one channel update, then one per 15 minutes; with no key or no radio nothing calls OpenRouter. Tests never use a real key.
 
 ## 12. Data attribution (shown in the app footer and slides)
 
