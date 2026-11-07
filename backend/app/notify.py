@@ -360,6 +360,8 @@ def _ladder_step(conn, ev, state: dict, now: datetime) -> None:
             send(conn, dispatch, t_dispatch_ladder(ev, why), "ladder_dispatch", ev["id"], now, sample)
     state.setdefault("ladder", []).append({"step": step, "at": iso(now)})
     state["ladder_step"] = step + 1
+    if "ladder_resume_at" in state:
+        state["ladder_resume_at"] = iso(now)
     _save(conn, ev["id"], state)
 
 
@@ -377,10 +379,12 @@ def tick(conn: sqlite3.Connection, now: datetime, is_sample: bool | None = None)
         args = (int(is_sample),)
     for ev in conn.execute(q, args).fetchall():
         state = _state(ev)
-        if state.get("escalate_at") and not state.get("decision") and held(ev, now) != "ladder":
+        if state.get("escalate_at") and not state.get("decision") and ev["status"] != "dismissed" and held(ev, now) != "ladder":
             step = state.get("ladder_step", 0)
             if 1 <= step <= len(waits):
                 due = parse_iso(state["escalate_at"]) + timedelta(minutes=sum(waits[:step]))
+                if state.get("ladder_resume_at"):
+                    due = max(due, parse_iso(state["ladder_resume_at"]) + timedelta(minutes=waits[step - 1]))
                 if now >= due:
                     _ladder_step(conn, ev, state, now)
         if state.get("page_at") and not state.get("mutual_aid"):
@@ -494,8 +498,8 @@ def acknowledge(conn: sqlite3.Connection, *, event_id: int | None = None, post_i
     det = conn.execute("SELECT COALESCE(MAX(id), 0) m FROM detections").fetchone()["m"]
     sig = conn.execute("SELECT COALESCE(MAX(id), 0) m FROM signals").fetchone()["m"]
     conn.execute(
-        "UPDATE events SET ack_level = ?, ack_by = ?, ack_at = ?, ack_until = ?, ack_mark_det = ?, ack_mark_sig = ?, "
-        "status = CASE WHEN status = 'new' THEN 'acknowledged' ELSE status END, updated_at = ? WHERE id = ?",
+        "UPDATE events SET ack_level = ?, ack_by = ?, ack_at = ?, ack_until = ?, ack_mark_det = COALESCE(ack_mark_det, ?), "
+        "ack_mark_sig = COALESCE(ack_mark_sig, ?), status = CASE WHEN status = 'new' THEN 'acknowledged' ELSE status END, updated_at = ? WHERE id = ?",
         (level, by, iso(now), until, det, sig, iso(now), event_id),
     )
     conn.execute("INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, 'acknowledge', ?, ?, ?)",
@@ -517,12 +521,15 @@ def _broken(conn, ev) -> str | None:
     return f"new {sig['kind'].replace('_', ' ')}" if sig else None
 
 
-def hold_tick(conn: sqlite3.Connection, now: datetime, is_sample: bool | None = None) -> None:
+def hold_tick(conn: sqlite3.Connection, now: datetime, is_sample: bool | None = None, skip_slugs=()) -> None:
     """End holds: new evidence breaks one, the clock expires one. Then replay the level the hold swallowed."""
     q = "SELECT * FROM events WHERE ack_until IS NOT NULL AND status != 'closed'"
     args: tuple = ()
     if is_sample is not None:
         q, args = q + " AND is_sample = ?", (int(is_sample),)
+    if skip_slugs:
+        q += f" AND (sample_slug IS NULL OR sample_slug NOT IN ({','.join('?' * len(skip_slugs))}))"
+        args = (*args, *skip_slugs)
     for ev in conn.execute(q, args).fetchall():
         why = _broken(conn, ev)
         if why is None and now < parse_iso(ev["ack_until"]):
@@ -536,10 +543,10 @@ def hold_tick(conn: sqlite3.Connection, now: datetime, is_sample: bool | None = 
             send(conn, duty[0], t_hold_expired(ev), "hold_expired", ev["id"], now, sample)
         conn.execute("INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, 'system', ?, ?)",
                      (ev["id"], "hold_broken" if why else "hold_expired", why or "clock", iso(now)))
-        resume(conn, ev["id"], now)
+        resume(conn, ev["id"], now, ev["ack_level"])
 
 
-def resume(conn: sqlite3.Connection, event_id: int, now: datetime) -> None:
+def resume(conn: sqlite3.Connection, event_id: int, now: datetime, level: str | None = None) -> None:
     """Replay the level a hold swallowed: fire on_level and any asks it skipped."""
     ev = _event(conn, event_id)
     if ev["status"] in ("dismissed",) or ev["recommendation"] in (None, "monitor"):
@@ -550,11 +557,17 @@ def resume(conn: sqlite3.Connection, event_id: int, now: datetime) -> None:
         asked = ask_neighbors(conn, _event(conn, event_id), now)
         state["asked"] = [a["contact_id"] for a in asked]
         _save(conn, event_id, state)
+    if level == "ladder":
+        state = _state(_event(conn, event_id))
+        if state.get("escalate_at") and not state.get("decision"):
+            state["ladder_resume_at"] = iso(now)
+            _save(conn, event_id, state)
 
 
 def release_hold(conn: sqlite3.Connection, event_id: int, now: datetime) -> None:
+    level = _event(conn, event_id)["ack_level"]
     clear_hold(conn, event_id)
-    resume(conn, event_id, now)
+    resume(conn, event_id, now, level)
 
 
 def _draft_mutual_aid(conn, ev, state: dict, reason: str, now: datetime) -> None:

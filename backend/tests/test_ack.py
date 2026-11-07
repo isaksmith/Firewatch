@@ -528,3 +528,83 @@ def test_stranger_post_near_held_event_attaches_with_no_signal():
         r = posts.create(conn, None, "+13165559003", "smoke near the creek", "smoke", False, at(10), True, at=FIRE)
         assert r.get("known") and r["event_id"] == eid
         assert conn.execute("SELECT COUNT(*) n FROM signals").fetchone()["n"] == n_sig
+
+
+# --- replay clock, ladder resume, unseen evidence, dismiss -----------------------------------------------
+
+
+def test_live_tick_leaves_holds_on_scenario_events_alone():
+    from app import main, scenario
+
+    slug = sorted(p.stem for p in scenario.SCENARIOS_DIR.glob("*.json"))[0]
+    with connect() as conn:
+        eid = escalated(conn)
+        conn.execute("UPDATE events SET sample_slug = ? WHERE id = ?", (slug, eid))
+        notify.acknowledge(conn, event_id=eid, by="Duty", role="duty_officer", now=at(9))
+        conn.commit()
+    main._tick_live()
+    with connect() as conn:
+        assert ev(conn, eid)["ack_until"] is not None, "the real clock must not expire a replay hold"
+        assert not out(conn, "hold_expired")
+
+
+def test_sms_simulate_uses_the_replay_clock(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app import scenario
+    from app.main import app
+
+    with connect() as conn:
+        eid = escalated(conn)
+        conn.commit()
+    monkeypatch.setattr(scenario, "running_now", lambda: at(9))
+    with TestClient(app) as client:
+        r = client.post("/api/sms/simulate", json={"from": DUTY, "body": "ACK"})
+        assert r.status_code == 200
+    with connect() as conn:
+        assert parse_iso(ev(conn, eid)["ack_until"]) == at(9) + timedelta(minutes=30)
+
+
+def test_ladder_waits_a_full_step_after_a_hold_ends():
+    with connect() as conn:
+        eid = escalated(conn)
+        notify.acknowledge(conn, event_id=eid, by="Duty", role="duty_officer", now=at(9))
+        notify.hold_tick(conn, at(40), is_sample=True)
+        assert len(out(conn, "hold_expired", eid)) == 1
+        notify.tick(conn, at(40), is_sample=True)
+        notify.tick(conn, at(42), is_sample=True)
+        assert not out(conn, "ladder", eid)
+        notify.tick(conn, at(43), is_sample=True)
+        assert len(out(conn, "ladder", eid)) == 1
+        notify.tick(conn, at(43.5), is_sample=True)
+        assert not out(conn, "ladder_dispatch", eid)
+        notify.tick(conn, at(49), is_sample=True)
+        assert len(out(conn, "ladder_dispatch", eid)) == 1
+
+
+def test_ladder_upgrade_keeps_marks_so_unseen_evidence_breaks_the_hold():
+    with connect() as conn:
+        eid = escalated(conn)
+        notify.acknowledge(conn, event_id=eid, by="Vol", role="volunteer", now=at(9))
+        _det(conn, eid, 10)
+        notify.acknowledge(conn, event_id=eid, by="Duty", role="duty_officer", now=at(11))
+        assert ev(conn, eid)["ack_level"] == "ladder"
+        notify.hold_tick(conn, at(12), is_sample=True)
+        assert ev(conn, eid)["ack_until"] is None
+        assert len(out(conn, "hold_broken", eid)) == 1
+
+
+def test_dismissed_event_gets_no_ladder_step():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with connect() as conn:
+        eid = escalated(conn)
+        conn.commit()
+    with TestClient(app) as client:
+        assert _act(client, eid, "dismiss").status_code == 200
+    with connect() as conn:
+        assert ev(conn, eid)["status"] == "dismissed"
+        notify.tick(conn, at(20), is_sample=True)
+        assert not out(conn, "ladder", eid)

@@ -105,10 +105,10 @@ def _minute(conn, sc: dict, t: int) -> None:
     for step in sc["timeline"]:
         if step["t"] == t:
             _apply(conn, sc, step, now)
+    hold_tick(conn, now, is_sample=True)
     tick(conn, now, is_sample=True)
     from . import posts
 
-    hold_tick(conn, now, is_sample=True)
     posts.tick(conn, now, is_sample=True)
 
 

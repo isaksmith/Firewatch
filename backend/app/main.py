@@ -85,8 +85,9 @@ def poll_jobs() -> dict:
 def _tick_live() -> None:
     with connect() as conn:
         now = utcnow()
+        notify.hold_tick(conn, now, is_sample=get_settings().mode == "sample",
+                         skip_slugs=[p.stem for p in scenario.SCENARIOS_DIR.glob("*.json")])
         notify.tick(conn, now, is_sample=False)
-        notify.hold_tick(conn, now, is_sample=get_settings().mode == "sample")
         posts.tick(conn, now, is_sample=get_settings().mode == "sample")
 
 
@@ -621,7 +622,8 @@ async def sms_inbound(request: Request):
 
     def handle():
         with connect() as conn:
-            notify.handle_inbound(conn, phone, text, utcnow(), is_sample=s.mode == "sample")
+            replay_now = scenario.running_now()
+            notify.handle_inbound(conn, phone, text, replay_now or utcnow(), is_sample=replay_now is not None or s.mode == "sample")
 
     await asyncio.to_thread(handle)
     return Response('<?xml version="1.0" encoding="UTF-8"?><Response/>', media_type="application/xml")
@@ -638,7 +640,7 @@ def sms_simulate(msg: SimulatedSms):
     if get_settings().mode != "sample":
         raise HTTPException(400, "simulated texts are only allowed in sample mode")
     with connect() as conn:
-        return notify.handle_inbound(conn, msg.from_, msg.body, utcnow(), is_sample=True)
+        return notify.handle_inbound(conn, msg.from_, msg.body, scenario.running_now() or utcnow(), is_sample=True)
 
 
 @api.get("/messages")
