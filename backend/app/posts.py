@@ -61,8 +61,10 @@ def _parent_for(conn, category: str, pt, is_sample: bool, now: datetime):
         return None
     km = _setting("post_join_km", 3.0)
     rows = conn.execute(
-        "SELECT * FROM posts WHERE category IN ('fire','smoke') AND status = 'open' AND parent_id IS NULL "
-        "AND lat IS NOT NULL AND is_sample = ? AND created_at > ? ORDER BY id",
+        "SELECT p.* FROM posts p LEFT JOIN events e ON e.id = p.event_id "
+        "WHERE p.category IN ('fire','smoke') AND p.status = 'open' AND p.parent_id IS NULL "
+        "AND (e.id IS NULL OR e.status NOT IN ('dismissed','closed')) "  # a new report beside a dismissed event is a new alarm
+        "AND p.lat IS NOT NULL AND p.is_sample = ? AND p.created_at > ? ORDER BY p.id",
         (int(is_sample), iso(now - timedelta(hours=EXPIRE_HOURS["fire"]))),
     ).fetchall()
     near = [(haversine_km(pt[0], pt[1], r["lat"], r["lon"]), r) for r in rows]

@@ -866,3 +866,16 @@ def test_page_after_a_post_text_never_pages_a_closed_event():
         r = notify.handle_inbound(conn, DUTY, "PAGE", at(8), is_sample=True)
         assert r["action"] == "help" and "no open alert" in r["reply"]
         assert not out(conn, "page")
+
+
+def test_new_post_beside_a_dismissed_event_starts_its_own_alarm(monkeypatch):
+    monkeypatch.setattr("app.confirm.fetch_weather", lambda conn, eid: WEATHER)
+    with connect() as conn:
+        sync_roster(conn)
+        first = posts.create(conn, None, "+13165559003", "smoke by road", "smoke", False, at(0), True, at=FIRE)["post_id"]
+        wes = conn.execute("SELECT * FROM contacts WHERE phone = ?", (WES,)).fetchone()
+        eid = posts.confirm(conn, first, wes, "see", at(1), True)["event_id"]
+        notify.decide(conn, eid, "no", "Duty", at(2))
+        r = posts.create(conn, None, "+13165559004", "flames now", "fire", False, at(3), True, at=(FIRE[0] + 0.009, FIRE[1]))
+        assert r["parent_id"] is None and r["flagged"] == 1
+        assert posts.tick(conn, at(9), True) == [r["post_id"]]
