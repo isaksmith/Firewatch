@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     poll_hms_s: int = 1800
     poll_goes_fire_s: int = 60
     poll_goes_lightning_s: int = 60
+    poll_goes_smoke_s: int = 300
     poll_landsat_nrt_s: int = 300  # only polled when a FIRMS key is set
     firms_sources: str = "VIIRS_SNPP_NRT,VIIRS_NOAA20_NRT,VIIRS_NOAA21_NRT,MODIS_NRT"
     scorer: str = "auto"  # auto (model if present, else rules) | model | rules
@@ -71,6 +72,7 @@ class Settings(BaseSettings):
             "hms": self.poll_hms_s,
             "goes_fire": self.poll_goes_fire_s,
             "goes_lightning": self.poll_goes_lightning_s,
+            "goes_smoke": self.poll_goes_smoke_s,
             "landsat_nrt": self.poll_landsat_nrt_s,
         }
 

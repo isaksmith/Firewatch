@@ -26,7 +26,6 @@ def forward(lat, lon, p=PROJ):
 
 def make_nc(tmp_path, spots):
     """Tiny 6x6 FDC file. spots: list of (lat, lon, mask, power, temp), pixel placed at the nearest grid cell."""
-    xs = np.linspace(*forward(38.0, -100.0)[:1], 1)  # placeholder
     pts = [forward(la, lo) for la, lo, *_ in spots]
     n = len(spots) + 2
     path = tmp_path / "fdc.nc"
