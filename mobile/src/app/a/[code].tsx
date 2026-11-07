@@ -17,6 +17,7 @@ export default function OpenCode() {
       if (!live) return;
       if (r.ok) router.replace({ pathname: '/alert/[pack]/[id]', params: { pack: r.alert.pack, id: String(r.alert.id) } });
       else if (r.reason === 'no_pack') setProblem(`This alert is for an area you have not downloaded (${r.pack}). Open Settings to add it.`);
+      else if (r.reason === 'not_from_dispatch') setProblem('This alert code is damaged or did not come from dispatch. Ask dispatch to resend.');
       else setProblem('This alert code is damaged. Ask dispatch to resend.');
     })();
     return () => { live = false; };

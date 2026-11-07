@@ -27,3 +27,6 @@ backend/ml/data/
 .DS_Store
 .idea/
 .vscode/
+
+# FW1 signing keys (private; never commit)
+backend/data/keys/

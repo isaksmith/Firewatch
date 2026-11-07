@@ -3,6 +3,7 @@ uvicorn[standard]>=0.30
 httpx>=0.27
 numpy>=1.26
 pydantic-settings>=2.4
+cryptography>=43
 contourpy>=1.2
 pillow>=10.4
 xgboost>=3.0

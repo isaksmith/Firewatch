@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import numpy as np
 
-from . import fw1_feed, livesend, mesh
+from . import fw1, fw1_feed, livesend, mesh
 from .config import get_settings
 from .db import iso, loads, parse_iso
 from .district import LADDER_ROLES, NEIGHBOR_ROLES, VOLUNTEER_ROLES, load_district
@@ -30,6 +30,14 @@ from .sim.spread import _arrival_many, interp_weather
 log = logging.getLogger(__name__)
 CENTRAL = ZoneInfo("America/Chicago")
 SMS_MAX = 160
+APP_LINK_PREFIX = "firewatch://a/"  # no label: the signed code needs the room (docs/mobile/FW1-CODEC.md, Signatures)
+SIGNED_FW1_RE = re.compile(r"FW1(?:\.[0-9a-z-]*){11}\.[A-Za-z0-9_-]{86}")
+
+
+def app_link_text(code: str) -> str | None:
+    """The app-link SMS for a feed code, signed when the server has its key; None if it would not fit one SMS."""
+    text = APP_LINK_PREFIX + fw1.sign(code)
+    return text if len(text) <= SMS_MAX else None
 HA_PER_ACRE = 0.404686
 HELPER_ROLES = ("water_truck", "disc")
 HELPER_RADIUS_KM = 10.0
@@ -218,6 +226,8 @@ def send(
     if not contact["opted_in"] and purpose != "reply":
         return None
     if len(body) > SMS_MAX:
+        if SIGNED_FW1_RE.search(body):  # cutting would chop the signature: refuse loudly instead
+            raise ValueError(f"{purpose} text is {len(body)} chars and carries a signed FW1 code; it must not be truncated")
         log.warning("%s text is %d chars; truncating", purpose, len(body))
         body = body[: SMS_MAX - 1] + "…"
     routes = []
@@ -250,7 +260,11 @@ def send(
     if first and purpose in APP_LINK_PURPOSES and event_id and "app" in contact.keys() and contact["app"] and "sms" in channels:
         row = conn.execute("SELECT code FROM fw1_feed WHERE event_id = ? ORDER BY seq DESC LIMIT 1", (event_id,)).fetchone()
         if row:
-            send(conn, contact, f"Firewatch app: firewatch://a/{row['code']}", "app_link", event_id, now, is_sample, channels=("sms",))
+            link = app_link_text(row["code"])
+            if link is None:  # never truncated: a cut code loses its signature, so the link is not sent at all
+                log.error("app link for event %s is over %d chars; not sent (code %s)", event_id, SMS_MAX, row["code"])
+            else:
+                send(conn, contact, link, "app_link", event_id, now, is_sample, channels=("sms",))
     return first
 
 

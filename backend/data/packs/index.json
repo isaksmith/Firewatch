@@ -8,7 +8,8 @@
     ],
     "version": "2026-11-07.1",
     "bytes": 449558,
-    "sha256": "18f92406ba8fe4968dd8afd575476c723a423e7c142c16105fa040c0b65a1911"
+    "sha256": "18f92406ba8fe4968dd8afd575476c723a423e7c142c16105fa040c0b65a1911",
+    "sig": "cZI2L-MIU0kS0YC2mov_Y-LZMaLrrE1q5m8fsu0HYL_WEG2v1SKVd4Wvd7ugxfH0wBUaks-Blp6cW4PP_kzNAg"
   },
   {
     "code": "ks-barber",
@@ -19,7 +20,8 @@
     ],
     "version": "2026-11-07.1",
     "bytes": 442451,
-    "sha256": "1c3e46f11be5a02f852a030a285fa981bc94b575fd6850715087c50fa15ff9ce"
+    "sha256": "1c3e46f11be5a02f852a030a285fa981bc94b575fd6850715087c50fa15ff9ce",
+    "sig": "lTBTgpLuKo7CWvPNcx2nZY9jyql20XPMTCCYwVLU2lMdbns8LqrgH8DENfTSiA-yQSZI2WJLIrFmeS0LYq6BDA"
   },
   {
     "code": "ks-clark",
@@ -30,7 +32,8 @@
     ],
     "version": "2026-11-07.1",
     "bytes": 360324,
-    "sha256": "69138e391509b348ef0c7014f2adacb37e3b553b54fa628e27bea6a03aa7a671"
+    "sha256": "69138e391509b348ef0c7014f2adacb37e3b553b54fa628e27bea6a03aa7a671",
+    "sig": "jNiqSIxOmy1i-ochu_xpMyUbd2-KF9RvZQZMItGoDs3xp6eIRw5XMsyyiwmfc4Lwc9tz0lIiFl9hYoE60fhZDQ"
   },
   {
     "code": "ks-comanche",
@@ -41,6 +44,7 @@
     ],
     "version": "2026-11-07.1",
     "bytes": 406761,
-    "sha256": "1cfbeb45341b6b458f7740aa7e6fb68735295a44b85a7be01b5c4f0f20428e0c"
+    "sha256": "1cfbeb45341b6b458f7740aa7e6fb68735295a44b85a7be01b5c4f0f20428e0c",
+    "sig": "EWxzchhuqT8y5IBDC_9qm58hBpi95T02TfDR-Wr2RV9xlLbvwYAirF4LipM5jh4LgLJEHeLD7w7VotsAaLCvAg"
   }
 ]

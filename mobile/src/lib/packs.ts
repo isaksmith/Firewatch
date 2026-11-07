@@ -1,5 +1,6 @@
 import * as Crypto from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
+import { APP_KEYS, verifySig, type TrustedKey } from './codec';
 import { getDb } from './db';
 import type { Pack, PackInfo } from './types';
 
@@ -84,15 +85,31 @@ export async function fetchPackIndex(server: string): Promise<PackInfo[]> {
   }
 }
 
+/** An index entry as the server sends it: PackInfo plus `sig` (FW1-CODEC.md, "Region packs are signed too"). */
+export type SignedPackInfo = PackInfo & { sig?: string };
+
+/** The text a pack's `sig` signs: `fwpack/1|<code>|<version>|<sha256 lowercase hex>`. */
+export function packMessage(code: string, version: string, sha256: string): string {
+  return `fwpack/1|${code}|${version}|${sha256.toLowerCase()}`;
+}
+
+const NOT_FROM_DISPATCH = 'This map did not come from your dispatch server, so the phone will not use it. Tell whoever runs the server.';
+
 export class PackDamaged extends Error {}
 /** A pack the phone will not use; the message is plain words that can be shown as is. */
 export class PackRefused extends PackDamaged {}
 
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 
-/** Check the hash and the shape of a downloaded pack. Returns the pack, or throws PackDamaged. */
-export async function verifyPackText(text: string, info: PackInfo): Promise<Pack> {
+/**
+ * Check the signature, hash and shape of a downloaded pack. Returns the pack, or throws PackDamaged (PackRefused
+ * when it has no safety check or its signature is missing or wrong). Packs built into the app never come here.
+ */
+export async function verifyPackText(text: string, info: SignedPackInfo, keys: readonly TrustedKey[] = APP_KEYS): Promise<Pack> {
   if (!info.sha256) throw new PackRefused('This map has no safety check, so the phone will not use it. Tell whoever runs the server.');
+  if (typeof info.sig !== 'string' || !verifySig(packMessage(info.code, String(info.version), info.sha256), info.sig, keys)) {
+    throw new PackRefused(NOT_FROM_DISPATCH);
+  }
   const got = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, text);
   if (got.toLowerCase() !== info.sha256.toLowerCase()) throw new PackDamaged('sha256 mismatch');
   let raw: Record<string, unknown>;
@@ -112,7 +129,7 @@ export async function verifyPackText(text: string, info: PackInfo): Promise<Pack
 }
 
 /** Download one pack, check its sha256 and shape, store it. Throws PackDamaged when it is not trustworthy. */
-export async function downloadPack(server: string, info: PackInfo): Promise<void> {
+export async function downloadPack(server: string, info: SignedPackInfo): Promise<void> {
   if (!isPackCode(info.code)) throw new PackDamaged();
   const r = await fetch(`${server}/api/m/packs/${info.code}`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);

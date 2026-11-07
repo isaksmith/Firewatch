@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { FlatList, Pressable, Text, View } from 'react-native';
 import { Body, Button, H1, Screen } from '@/components/ui';
 import type { StoredAlert } from '@/lib/alerts';
+import { findCodes, hasSig } from '@/lib/codec';
 import { slotItems } from '@/lib/extensions';
 import { ageText, whereFromStation } from '@/lib/geo';
 import { loadPack } from '@/lib/packs';
@@ -28,7 +29,7 @@ function Row({ a, pack, now }: { a: StoredAlert; pack: Pack | null; now: number 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${plainWords(a)}. ${where}. ${ageText(a.time, now)}`}
+      accessibilityLabel={`${plainWords(a)}. ${where}. ${ageText(a.time, now)}${a.verified ? '' : '. Not confirmed by dispatch'}`}
       onPress={() => router.push({ pathname: '/alert/[pack]/[id]', params: { pack: a.pack, id: String(a.id) } })}
       style={({ pressed }) => ({ flexDirection: 'row', backgroundColor: p.panel, borderColor: p.line, borderWidth: 1, borderRadius: 10, minHeight: 88, opacity: pressed ? 0.7 : 1, overflow: 'hidden' })}
     >
@@ -37,6 +38,7 @@ function Row({ a, pack, now }: { a: StoredAlert; pack: Pack | null; now: number 
         <Text style={{ color: p.text, fontFamily: font.bold, fontSize: 21 }}>{plainWords(a)}</Text>
         <Text style={{ color: p.text, fontFamily: font.regular, fontSize: 18 }}>{where}</Text>
         <Text style={{ color: p.muted, fontFamily: font.regular, fontSize: 16 }}>{cap(ageText(a.time, now))}</Text>
+        {!a.verified && <Text style={{ color: p.investigate, fontFamily: font.bold, fontSize: 16 }}>Not confirmed by dispatch</Text>}
       </View>
     </Pressable>
   );
@@ -63,7 +65,12 @@ export default function Home() {
     const text = await Clipboard.getStringAsync();
     const r = await openText(text, 'paste');
     if (r.kind === 'none') setMsg('No alert code found. Copy the whole text message, then tap Paste alert.');
-    else if (r.kind === 'damaged') setMsg('This alert code is damaged. Ask dispatch to resend.');
+    else if (r.kind === 'damaged') {
+      // A signed code that was refused may be forged as well as damaged, so say both.
+      setMsg(findCodes(text).some(hasSig)
+        ? 'This alert code is damaged or did not come from dispatch. Ask dispatch to resend.'
+        : 'This alert code is damaged. Ask dispatch to resend.');
+    }
     else if (r.kind === 'no_pack') setMsg(`This alert is for an area you have not downloaded (${r.pack}). Open Settings to add it.`);
   };
 

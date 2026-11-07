@@ -1,5 +1,7 @@
 import { checkDigits, decodeFw1 } from '../src/lib/codec';
-import { verifyPackText } from '../src/lib/packs';
+import { ed25519 } from '@noble/curves/ed25519';
+import vectors from '../../docs/mobile/codec-vectors.json';
+import { packMessage, verifyPackText } from '../src/lib/packs';
 import type { PackInfo } from '../src/lib/types';
 
 jest.mock('expo-crypto', () => ({
@@ -40,29 +42,55 @@ describe('decodeFw1 ranges', () => {
 describe('verifyPackText', () => {
   const sha = (t: string) => require('crypto').createHash('sha256').update(t).digest('hex');
   const pack = { format: 'fwpack/1', code: 'cwc', origin: { lat: 1, lon: 2 }, bbox: [0, 0, 1, 1] };
-  const info = (text: string, s?: string): PackInfo => ({ code: 'cwc', name: 'x', state: 'KS', counties: [], version: '1', bytes: 1, sha256: s ?? sha(text) });
+  // TEST-ONLY key from codec-vectors.json, injected; the app never trusts it on its own.
+  const seed = Uint8Array.from(Buffer.from(vectors.signing.test_only_seed_hex, 'hex'));
+  const keys = [{ id: 'test-only', key: vectors.signing.test_only_public_key }];
+  const b64url = (b: Uint8Array) => Buffer.from(b).toString('base64url');
+  const signFor = (s: string, version = '1', code = 'cwc', k = seed) => b64url(ed25519.sign(Buffer.from(packMessage(code, version, s), 'ascii'), k));
+  const info = (text: string, s?: string, sig?: string | null): PackInfo & { sig?: string } => {
+    const hash = s ?? sha(text);
+    return { code: 'cwc', name: 'x', state: 'KS', counties: [], version: '1', bytes: 1, sha256: hash, ...(sig === null ? {} : { sig: sig ?? signFor(hash) }) };
+  };
+  const verify = (t: string, i: PackInfo & { sig?: string }) => verifyPackText(t, i, keys);
   it('accepts a good pack and defaults missing arrays', async () => {
     const t = JSON.stringify(pack);
-    const p = await verifyPackText(t, info(t));
+    const p = await verify(t, info(t));
     expect(p.roads).toEqual([]);
     expect(p.places).toEqual([]);
   });
+  it('refuses a pack with no sig, a bad sig, a sig from another key, or a sig for another version', async () => {
+    const t = JSON.stringify(pack);
+    const h = sha(t);
+    const other = Uint8Array.from(Buffer.alloc(32, 9));
+    const good = signFor(h);
+    const flipped = good.slice(0, 20) + (good[20] === 'A' ? 'B' : 'A') + good.slice(21);
+    for (const sig of [null, '', flipped, signFor(h, '1', 'cwc', other), signFor(h, '2'), signFor(h, '1', 'ks-clark')]) {
+      await expect(verify(t, info(t, undefined, sig))).rejects.toThrow(/did not come from your dispatch server/);
+    }
+    // the app's own keys do not trust the test key
+    await expect(verifyPackText(t, info(t))).rejects.toThrow(/did not come from your dispatch server/);
+  });
+  it('accepts the uppercase sha256 spelling with the same signature', async () => {
+    const t = JSON.stringify(pack);
+    const h = sha(t);
+    await expect(verify(t, info(t, h.toUpperCase(), signFor(h)))).resolves.toBeTruthy();
+  });
   it('refuses a missing sha256', async () => {
     const t = JSON.stringify(pack);
-    await expect(verifyPackText(t, info(t, ''))).rejects.toThrow(/no safety check/);
+    await expect(verify(t, info(t, ''))).rejects.toThrow(/no safety check/);
   });
   it('refuses a wrong sha256', async () => {
     const t = JSON.stringify(pack);
-    await expect(verifyPackText(t, info(t, 'abc'))).rejects.toThrow(/sha256/);
+    await expect(verify(t, info(t, 'abc'))).rejects.toThrow(/sha256/);
   });
   it('refuses a pack without origin', async () => {
     const t = JSON.stringify({ ...pack, origin: undefined });
-    await expect(verifyPackText(t, info(t))).rejects.toThrow();
+    await expect(verify(t, info(t))).rejects.toThrow();
   });
   it('refuses a bad bbox or non-array roads', async () => {
     for (const bad of [{ bbox: [1, 2] }, { roads: {} }, { code: 'zzz' }]) {
       const t = JSON.stringify({ ...pack, ...bad });
-      await expect(verifyPackText(t, info(t))).rejects.toThrow();
+      await expect(verify(t, info(t))).rejects.toThrow();
     }
   });
 });

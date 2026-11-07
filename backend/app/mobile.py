@@ -2,14 +2,28 @@
 
 import hashlib
 import json
+import logging
 import re
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
+from . import fw1
 from .config import DATA_DIR
 from .db import connect
 
-router = APIRouter(prefix="/api/m")
+log = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def _lifespan(_app):
+    """One startup line: are FW1 codes signed, and with which public key (or why not)."""
+    status = fw1.signing_status()
+    (log.info if fw1.signing_key() else log.warning)(status)
+    yield
+
+
+router = APIRouter(prefix="/api/m", lifespan=_lifespan)
 PACKS_DIR = DATA_DIR / "packs"
 FEED_MAX = 50
 CODE_RE = re.compile(r"^[a-z0-9-]{1,32}$")
@@ -52,7 +66,8 @@ def feed(request: Request, pack: str | None = Query(None, max_length=32), since:
     args.append(FEED_MAX)
     with connect() as conn:
         rows = conn.execute(q, args).fetchall()
-    body = "".join(f"{r['seq']} {r['code']}\n" for r in rows)
+    key = fw1.signing_key()  # rows from before the key existed are signed on the way out; signed ones pass as is
+    body = "".join(f"{r['seq']} {fw1.sign(r['code'], key) if key else r['code']}\n" for r in rows)
     etag = f'"{hashlib.sha256(body.encode()).hexdigest()[:24]}"'
     if _not_modified(request, etag):
         return Response(status_code=304, headers={"ETag": etag})
