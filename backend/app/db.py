@@ -217,10 +217,12 @@ MIGRATIONS = {
                "ack_mark_det": "INTEGER", "ack_mark_sig": "INTEGER"},
     "contacts": {"mesh_id": "TEXT"},
     "messages": {"channel": "TEXT NOT NULL DEFAULT 'sms'", "post_id": "INTEGER"},
+    "posts": {"client_key": "TEXT", "queued_min": "INTEGER"},
 }
 POST_MIGRATION = """
 CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_mesh ON contacts(mesh_id);
 CREATE INDEX IF NOT EXISTS idx_messages_gateway ON messages(gateway_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_client_key ON posts(contact_id, client_key) WHERE client_key IS NOT NULL;
 """
 
 

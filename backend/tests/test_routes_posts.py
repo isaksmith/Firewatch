@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import main, notify, routes_posts
-from app.db import connect, iso, utcnow
+from app.db import connect, iso, parse_iso, utcnow
 from app.main import app
 from app.routes_posts import BADGE, _hash
 
@@ -776,3 +776,162 @@ def test_home_fallback_is_marked_estimated_and_reported():
         assert row["lat"] == 37.77 and row["estimated"] == 1
         r = c.post("/api/board/posts", headers=hd(member("Ann")), json={"category": "fire", "body": "Flames here", "lat": PT[0], "lon": PT[1]})
         assert r.json()["used_home"] is False and _row(r.json()["post_id"])["estimated"] == 0
+
+
+# ---- offline posting: client_key and queued_min ----
+
+KEY = "abcd1234efgh5678"
+
+
+def _send(c, tok, **extra):
+    body = {"category": "fire", "body": "Smoke over the ridge", "lat": PT[0], "lon": PT[1], **extra}
+    return c.post("/api/board/posts", json=body, headers=hd(tok))
+
+
+def _counts():
+    with connect() as conn:
+        return tuple(conn.execute(f"SELECT COUNT(*) n FROM {t}").fetchone()["n"] for t in ("posts", "events", "post_asks", "messages"))
+
+
+def test_repeat_client_key_is_one_post_one_event():
+    with TestClient(app) as c:
+        m = member()
+        start = _counts()
+        a = _send(c, m, client_key=KEY)
+        before = _counts()
+        b = _send(c, m, client_key=KEY)
+        assert a.status_code == b.status_code == 200
+        assert b.json()["post_id"] == a.json()["post_id"]
+        assert b.json()["duplicate"] is True
+        assert a.json().get("duplicate", False) is False
+        assert _counts() == before
+        assert before[0] == start[0] + 1 and before[1] == start[1] + 1
+
+
+def test_repeat_key_anonymous_makes_no_second_ask():
+    with TestClient(app) as c:
+        anon = device(c)
+        a = _send(c, anon, client_key=KEY)
+        before = _counts()
+        b = _send(c, anon, client_key=KEY)
+        assert b.json()["post_id"] == a.json()["post_id"] and b.json()["flagged"] == a.json()["flagged"]
+        assert b.json()["asked"] == a.json()["asked"]
+        assert _counts() == before
+
+
+def test_same_key_other_device_is_a_new_post():
+    with TestClient(app) as c:
+        a = _send(c, device(c), client_key=KEY).json()
+        b = _send(c, device(c), client_key=KEY).json()
+        assert a["post_id"] != b["post_id"]
+        assert not b.get("duplicate")
+
+
+def test_unique_index_stops_a_race(monkeypatch):
+    """Both sends pass the read check; the unique index makes the loser a duplicate with no extra rows."""
+    with TestClient(app) as c:
+        m = member()
+        a = _send(c, m, client_key=KEY).json()
+        before = _counts()
+        monkeypatch.setattr(routes_posts, "_first_by_key", lambda *a, **k: None)
+        b = _send(c, m, client_key=KEY)
+        assert b.status_code == 200 and b.json()["post_id"] == a["post_id"] and b.json()["duplicate"] is True
+        assert _counts() == before
+
+
+def test_repeat_key_still_counts_toward_rate_limit(monkeypatch):
+    calls = []
+    monkeypatch.setattr(routes_posts, "_limit", lambda *a, **k: calls.append(a[1]))
+    with TestClient(app) as c:
+        m = member()
+        _send(c, m, client_key=KEY)
+        _send(c, m, client_key=KEY)
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("extra", [
+    {"client_key": "short"}, {"client_key": "a" * 65}, {"client_key": "bad key chars!!!!"}, {"client_key": "é" * 20},
+    {"queued_min": 121}, {"queued_min": -1},
+])
+def test_offline_fields_422(extra):
+    with TestClient(app) as c:
+        assert _send(c, device(c), **extra).status_code == 422
+
+
+def test_queued_min_is_display_only():
+    with TestClient(app) as c:
+        m = member()
+        pid = _send(c, m, queued_min=25).json()["post_id"]
+        plain = _send(c, m, category="hazard", body="Line down on road").json()["post_id"]
+        with connect() as conn:
+            row = conn.execute("SELECT created_at FROM posts WHERE id = ?", (pid,)).fetchone()
+            assert abs((parse_iso(row["created_at"]) - utcnow()).total_seconds()) < 60
+        for tok in ("", member("Vol", "volunteer")):
+            items = {i["id"]: i for i in pub(c, tok)}
+            assert items[pid]["sent_late_min"] == 25
+            assert items[pid]["age_min"] == 0
+            assert items[plain]["sent_late_min"] is None
+        assert ids(pub(c))[:2] == [plain, pid]
+
+
+def test_queued_min_zero_is_null():
+    with TestClient(app) as c:
+        pid = _send(c, member(), queued_min=0).json()["post_id"]
+        assert {i["id"]: i for i in pub(c)}[pid]["sent_late_min"] is None
+
+
+# ---- compass direction: bearing and miles ----
+
+HOME = (37.5, -96.2)
+
+
+def _compass(c, tok, **extra):
+    body = {"category": "smoke", "body": "Smoke far off", "lat": HOME[0], "lon": HOME[1], "bearing": 312.0, "miles": 4, **extra}
+    return c.post("/api/board/posts", json=body, headers=hd(tok))
+
+
+def test_compass_stores_computed_point_estimated():
+    from app.where import Where, point_from
+    want = point_from(*HOME, Where(312.0, 4.0))
+    with TestClient(app) as c:
+        pid = _compass(c, member()).json()["post_id"]
+        with connect() as conn:
+            row = conn.execute("SELECT * FROM posts WHERE id = ?", (pid,)).fetchone()
+        assert (row["lat"], row["lon"]) == pytest.approx(want)
+        assert row["estimated"] == 1
+        pub_item = {i["id"]: i for i in pub(c)}[pid]
+        assert pub_item["estimated"] is True
+        assert (pub_item["lat"], pub_item["lon"]) == (round(want[0], 2), round(want[1], 2))
+
+
+@pytest.mark.parametrize("extra", [
+    {"bearing": 10.0, "miles": None}, {"bearing": None, "miles": 2}, {"miles": 3}, {"bearing": 360}, {"bearing": -1},
+])
+def test_compass_422(extra):
+    with TestClient(app) as c:
+        assert _compass(c, device(c), **extra).status_code == 422
+
+
+def test_compass_without_position_422():
+    with TestClient(app) as c:
+        r = c.post("/api/board/posts", json={"category": "smoke", "body": "x", "bearing": 10, "miles": 2}, headers=hd(device(c)))
+        assert r.status_code == 422
+
+
+def test_compass_miles_whole_number_accepted():
+    with TestClient(app) as c:
+        assert _compass(c, device(c), miles=2).status_code == 200
+        assert _compass(c, device(c), miles=0.5).status_code == 200
+
+
+def test_reporters_own_position_is_stored_nowhere():
+    own = (37.123456, -96.654321)
+    with TestClient(app) as c:
+        m = member()
+        pid = _compass(c, m, lat=own[0], lon=own[1]).json()["post_id"]
+        for tok in ("", member("Vol", "volunteer")):
+            blob = json.dumps({i["id"]: i for i in pub(c, tok)}[pid])
+            assert "37.1234" not in blob and "96.6543" not in blob
+        with connect() as conn:
+            dump = "\n".join(conn.iterdump())
+        assert "37.1234" not in dump and "96.6543" not in dump

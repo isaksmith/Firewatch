@@ -1,7 +1,9 @@
 """The public board API. Device token only: main.py mounts the token-guarded admin_router, never this module."""
 import hashlib
 import io
+import re
 import secrets
+import sqlite3
 import threading
 from datetime import timedelta
 from typing import Literal
@@ -17,6 +19,7 @@ from .config import get_settings
 from .db import connect, iso, parse_iso, utcnow
 from .confirm import burn_late, evaluate_event
 from .geo import haversine_km
+from .where import Where, point_from
 from .district import LADDER_ROLES, load_district
 from .keywords import classify
 from .ratelimit import LIMITS, client_ip
@@ -82,6 +85,10 @@ def _need(conn, token: str):
     return c
 
 
+_KEY = re.compile(r"[A-Za-z0-9_-]{16,64}", re.ASCII)
+COMPASS_MILES = (0.5, 2.0, 4.0, 7.0)
+
+
 class _Where(BaseModel):
     lat: float | None = None
     lon: float | None = None
@@ -112,6 +119,46 @@ class NewPost(_Where):
     body: str
     estimated: bool = False
     attach_location: bool = True
+    client_key: str | None = None
+    queued_min: int | None = None
+    bearing: float | None = None
+    miles: float | None = None
+
+    @field_validator("client_key")
+    @classmethod
+    def _key(cls, v):
+        if v is not None and not _KEY.fullmatch(v):
+            raise ValueError("client_key must be 16 to 64 of A-Z a-z 0-9 _ -")
+        return v
+
+    @field_validator("queued_min")
+    @classmethod
+    def _queued(cls, v):
+        if v is not None and not 0 <= v <= 120:
+            raise ValueError("queued_min out of range")
+        return v
+
+    @field_validator("bearing")
+    @classmethod
+    def _bearing(cls, v):
+        if v is not None and not 0 <= v < 360:
+            raise ValueError("bearing out of range")
+        return v
+
+    @field_validator("miles")
+    @classmethod
+    def _miles(cls, v):
+        if v is not None and v not in COMPASS_MILES:
+            raise ValueError("miles must be 0.5, 2, 4 or 7")
+        return v
+
+    @model_validator(mode="after")
+    def _compass(self):
+        if (self.bearing is None) != (self.miles is None):
+            raise ValueError("bearing and miles go together")
+        if self.bearing is not None and self.lat is None:
+            raise ValueError("a compass direction needs the reporter's position")
+        return self
 
     @field_validator("body")
     @classmethod
@@ -160,7 +207,8 @@ def _item(conn, r, station: bool, now) -> dict:
            "author": author, "confirms": r["n_counted"], "notes": r["n_notes"], "badge": BADGE if held else None,
            "unconfirmed": not member and not r["n_counted"],
            "has_photo": bool(r["has_photo"]), "thread_size": r["thread_size"],
-           "age_min": max(0, int((now - parse_iso(r["created_at"])).total_seconds() // 60))}
+           "age_min": max(0, int((now - parse_iso(r["created_at"])).total_seconds() // 60)),
+           "sent_late_min": r["queued_min"] or None}
     if station:  # the alert routes behind event_id are not public, so the public view has no link to them
         out["held"] = held
         out["event_id"] = r["event_id"]
@@ -271,11 +319,42 @@ def create_post(body: NewPost, request: Request, x_firewatch_device: str = Heade
         # With no GPS fix a member's report still sounds the alarm from their home, marked as an estimate: an alarm
         # placed roughly beats no alarm. The page tells them, so they are never told it has no location.
         used_home = body.attach_location and body.lat is None and c["lat"] is not None
-        r = posts.create(conn, c, c["phone"], body.body, body.category, classify(body.body).hearsay, now, is_sample,
-                         channel="web", at=(body.lat, body.lon) if body.lat is not None and body.attach_location else None,
-                         estimated=body.estimated or used_home, use_home=body.attach_location)
+        at = (body.lat, body.lon) if body.lat is not None and body.attach_location else None
+        est = body.estimated or used_home
+        if body.bearing is not None:
+            # The reporter's own fix is only the origin: the stored point is where they pointed.
+            at, est, used_home = point_from(body.lat, body.lon, Where(body.bearing, body.miles)), True, False
+        if body.client_key and (first := _first_by_key(conn, c["id"], body.client_key)):
+            return _answer(conn, first, duplicate=True)
+        try:
+            r = posts.create(conn, c, c["phone"], body.body, body.category, classify(body.body).hearsay, now, is_sample,
+                             channel="web", at=at, estimated=est, use_home=body.attach_location,
+                             client_key=body.client_key, queued_min=body.queued_min or None)
+        except sqlite3.IntegrityError:
+            # A concurrent send won the unique index. Every insert runs before any event or ask, so nothing is half written.
+            first = _by_key(conn, c["id"], body.client_key) if body.client_key else None
+            if first is None:
+                raise
+            return _answer(conn, first, duplicate=True)
     return {"post_id": r["post_id"], "flagged": r["flagged"], "asked": r["asked"], "known": r.get("known", False),
-            "used_home": used_home, "alerted": r["event_id"] is not None}
+            "used_home": used_home, "alerted": r["event_id"] is not None, "duplicate": False}
+
+
+def _first_by_key(conn, contact_id: int, key: str):
+    return _by_key(conn, contact_id, key)
+
+
+def _by_key(conn, contact_id: int, key: str):
+    return conn.execute("SELECT * FROM posts WHERE contact_id = ? AND client_key = ?", (contact_id, key)).fetchone()
+
+
+def _answer(conn, row, duplicate: bool) -> dict:
+    """The first send's answer, rebuilt from its row."""
+    asked = conn.execute("SELECT COUNT(*) n FROM post_asks WHERE post_id = ?", (row["id"],)).fetchone()["n"]
+    own = conn.execute("SELECT 1 FROM signals WHERE source LIKE ?", (f"web:post:{row['id']}",)).fetchone()
+    alerted = row["event_id"] is not None
+    return {"post_id": row["id"], "flagged": row["flagged"], "asked": asked, "known": alerted and not own and not row["flagged"],
+            "used_home": False, "alerted": alerted, "duplicate": duplicate}
 
 
 def _reencode(raw: bytes, ctype: str) -> tuple[bytes, int, int]:

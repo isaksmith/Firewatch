@@ -37,13 +37,14 @@ def _post(conn, post_id: int):
     return conn.execute("SELECT * FROM posts WHERE id = ?", (post_id,)).fetchone()
 
 
-def _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, flagged, parent_id, event_id, is_sample, now) -> int:
+def _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, flagged, parent_id, event_id, is_sample, now,
+            client_key=None, queued_min=None) -> int:
     lat, lon = pt if pt else (None, None)
     cur = conn.execute(
         "INSERT INTO posts(contact_id, phone, channel, category, body, lat, lon, estimated, hearsay, flagged, "
-        "parent_id, event_id, is_sample, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "parent_id, event_id, is_sample, created_at, updated_at, client_key, queued_min) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (contact["id"] if contact else None, phone, channel, category, body, lat, lon, int(estimated), int(hearsay),
-         int(flagged), parent_id, event_id, int(is_sample), iso(now), iso(now)),
+         int(flagged), parent_id, event_id, int(is_sample), iso(now), iso(now), client_key, queued_min),
     )
     return cur.lastrowid
 
@@ -94,7 +95,7 @@ def _known_hold(conn, pt, is_sample: bool, now: datetime):
 def create(
     conn: sqlite3.Connection, contact, phone: str, body: str, category: str, hearsay: bool, now: datetime,
     is_sample: bool = False, channel: str = "sms", at: tuple[float, float] | None = None,
-    estimated: bool = False, use_home: bool = True,
+    estimated: bool = False, use_home: bool = True, client_key: str | None = None, queued_min: int | None = None,
 ) -> dict:
     """Store a board post from free text or the web and do what the 'What a post does' table says.
 
@@ -104,11 +105,12 @@ def create(
     from .signals import add_signal
 
     pt = at or ((contact["lat"], contact["lon"]) if use_home and contact and contact["lat"] is not None else None)
+    extra = (client_key, queued_min)
     member = bool(contact and contact["registered"])
     out = {"post_id": None, "event_id": None, "asked": 0, "flagged": 0, "parent_id": None}
     if category in FIRE_LIKE:
         if member and not hearsay and pt:
-            pid = _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, False, None, None, is_sample, now)
+            pid = _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, False, None, None, is_sample, now, *extra)
             from .notify import ESTIMATE_JOIN_KM
 
             eid = add_signal(conn, "report", *pt, iso(now), f"{channel}:post:{pid}", body, contact["id"], is_sample,
@@ -120,17 +122,17 @@ def create(
         known = _known_hold(conn, pt, is_sample, now)
         if known:
             eid, parent_id = known
-            pid = _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, False, parent_id, eid, is_sample, now)
+            pid = _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, False, parent_id, eid, is_sample, now, *extra)
             out.update(post_id=pid, event_id=eid, parent_id=parent_id, known=True)
             return out
         parent = _parent_for(conn, category, pt, is_sample, now)
         pid = _insert(conn, contact, phone, channel, category, body, pt, estimated, hearsay, True,
-                      parent["id"] if parent else None, None, is_sample, now)
+                      parent["id"] if parent else None, None, is_sample, now, *extra)
         out.update(post_id=pid, flagged=1, parent_id=parent["id"] if parent else None)
         if parent is None and pt:
             out["asked"] = len(ask_ring(conn, _post(conn, pid), now))
         return out
-    pid = _insert(conn, contact, phone, channel, category, body, pt, False, hearsay, False, None, None, is_sample, now)
+    pid = _insert(conn, contact, phone, channel, category, body, pt, False, hearsay, False, None, None, is_sample, now, *extra)
     out["post_id"] = pid
     return out
 
