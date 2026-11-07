@@ -250,6 +250,12 @@ class BurnIn(BaseModel):
     def _window(self):
         if self.end <= self.start:
             raise ValueError("end must be after start")
+        # A logged burn hides real fires near it, so its window is bounded.
+        if self.end - self.start > timedelta(hours=24):
+            raise ValueError("a burn window can be at most 24 hours")
+        start = self.start if self.start.tzinfo else self.start.replace(tzinfo=timezone.utc)
+        if start - datetime.now(timezone.utc) > timedelta(days=14):
+            raise ValueError("a burn can be logged at most 14 days ahead")
         return self
 
 

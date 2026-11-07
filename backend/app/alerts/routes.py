@@ -1,8 +1,11 @@
 """HTTP routes for the Respond layer. Include with: app.include_router(router)."""
 
+import hmac
+import os
+import time
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -83,9 +86,29 @@ class NotifyIn(BaseModel):
     channels: list[str] = Field(default_factory=lambda: list(fanout.CHANNELS), max_length=8)
 
 
+_LIVE_COOLDOWN_S = 120
+_last_live: dict[int, float] = {}
+
+
+def _check_live_allowed(event_id: int, operator_token: str | None) -> None:
+    """Live sends reach real phones, so they need the operator token and are limited per alert. Dry-run stays open."""
+    if not fanout.is_live():
+        return
+    expected = os.environ.get("FIREWATCH_OPERATOR_TOKEN", "")
+    if not expected:
+        raise HTTPException(403, "Live sending is off until FIREWATCH_OPERATOR_TOKEN is set")
+    if not operator_token or not hmac.compare_digest(operator_token, expected):
+        raise HTTPException(401, "Operator token required to send live alerts")
+    now = time.monotonic()
+    if now - _last_live.get(event_id, -_LIVE_COOLDOWN_S) < _LIVE_COOLDOWN_S:
+        raise HTTPException(429, "This alert was just sent. Wait 2 minutes before sending it again")
+    _last_live[event_id] = now
+
+
 @router.post("/{event_id}/notify")
-def notify(event_id: int, body: NotifyIn):
+def notify(event_id: int, body: NotifyIn, x_firewatch_operator: str | None = Header(default=None)):
     ev = _event_or_404(event_id)
+    _check_live_allowed(event_id, x_firewatch_operator)
     msgs = _composed(ev)
     primary = msgs["chief"] if msgs["escalated"] else msgs["quiet"]
     recipients = [{"name": "Chief and duty officer", "text": primary}]
