@@ -284,6 +284,8 @@ The district (a 450 sq mi stand-in boundary centered on Coldwater in Comanche Co
 
 ## Hardware and field setup
 
+**Sensor node intro video (2 min):** [watch on YouTube](https://youtu.be/OYTUxd2nSDk). Design, parts and costs are in [sensors/README.md](sensors/README.md).
+
 <details>
 <summary><b>Mesh radios (Meshtastic)</b>: texts for volunteers and trucks out of cell coverage</summary>
 

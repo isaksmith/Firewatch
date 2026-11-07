@@ -16,6 +16,10 @@ The same radio, enclosure, and sensing architecture supports both builds. The ri
 
 ## FireWatch sensor network pitch
 
+[![FireWatch field sensor intro video](https://img.youtube.com/vi/OYTUxd2nSDk/hqdefault.jpg)](https://youtu.be/OYTUxd2nSDk)
+
+**[Watch the 2-minute sensor intro on YouTube](https://youtu.be/OYTUxd2nSDk)**: every part in the exploded view, the node installed in a Kansas field, how it fits FireWatch, and what it costs. The video file is also in [`video/`](video/firewatch-sensor-intro.mp4).
+
 Rural fire districts can have large areas to watch and few places with reliable cell service. FireWatch uses risk modeling to identify priority wildfire hotspots, then surveys those sites to decide where a small ground network can add useful observations. A county can start with one hotspot and expand to additional sites as the network demonstrates value.
 
 **Detect → confirm → respond.** Bare nodes measure gas resistance, temperature, humidity, and pressure. Rich nodes add optical particulate measurements and are intended to generate a local pre-warning when readings warrant a closer look. FireWatch’s planned confirmation workflow combines those readings with independent evidence such as utility line-fault reports, public reports, satellite detections, and NOAA weather and Red Flag forecasts. The app gives the duty officer the evidence behind a warning and supports coordination with county dispatch. See the [FireWatch system overview](../README.md).
