@@ -57,7 +57,7 @@ export function Dashboard() {
             noteFetchTime(performance.now() - t0)
             return r
           } catch (e) {
-            noteFetchFailure()
+            noteFetchFailure(performance.now() - t0)
             throw e
           }
         },

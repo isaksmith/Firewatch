@@ -8,7 +8,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api, type SimulationResult } from '../api'
 import { KV, RecTag, ScoreReadout } from '../components/ui'
 import { compass, pad3, trackId } from '../lib/format'
-import { useLowData } from '../lib/lowData'
+import { setLowData, useLowData } from '../lib/lowData'
 import { BLANK_STYLE, IMAGERY_TERRAIN_STYLE } from '../lib/map'
 
 const DURATION = 60
@@ -185,6 +185,15 @@ export function Spread3D() {
         </Map>
 
         <div className="pointer-events-none absolute inset-3 brackets" style={{ ['--b' as string]: '#e6e8eb66' }} />
+
+        {lowData && (
+          <div role="status" className="hud absolute bottom-28 left-1/2 flex -translate-x-1/2 items-center gap-3 px-4 py-2 text-[12.5px]">
+            <span className="text-degraded">Low data mode is on, so the 3D view skips aerial imagery and terrain.</span>
+            <button onClick={() => setLowData(false)} className="btn !h-7">
+              Turn off
+            </button>
+          </div>
+        )}
 
         <div className="hud pointer-events-none absolute top-6 left-6 px-4 py-3">
           <div className="label">Elapsed</div>

@@ -59,10 +59,13 @@ export function noteFetchTime(ms: number) {
   }
 }
 
-/** A failed alerts fetch counts toward the same streak as a slow one. Offline is not slow, so it is ignored. */
-export function noteFetchFailure() {
+/**
+ * A failed alerts fetch counts toward the same streak only if it was slow, like a timeout on a weak link.
+ * A fast failure means the server is down or restarting, and offline is not slow, so both are ignored.
+ */
+export function noteFetchFailure(ms: number) {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return
-  noteFetchTime(Infinity)
+  if (ms > SLOW_MS) noteFetchTime(ms)
 }
 
 export function dismissAutoBanner() {
