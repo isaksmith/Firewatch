@@ -114,7 +114,9 @@ The Vite dev server proxies `/api` to `http://127.0.0.1:8000` (override with `AP
 
 `MODE=sample` replays historical and synthetic Kansas events through the full pipeline offline, so it's the default for development and demos. On first start the backend loads all fixtures from `backend/data/samples/`; **Replay sample** in the top bar re-feeds them pass by pass over 60 seconds. Fixture weather was backfilled from the Open-Meteo archive with `.venv/bin/python -m scripts.backfill_sample_weather`.
 
-**Run scenario** in the top bar replays the Cottonwood Creek incident (1:50 pm line fault on a High fire-danger Saturday) at 2 seconds per scenario minute. A strip under the top bar compares today's timeline (on scene at T+62) with Firewatch's as it happens, and the drawer shows the evidence, the response, and every text. The district (a 450 sq mi stand-in boundary in Butler County, its settings, and a fictional roster) lives in `backend/data/districts/cottonwood-creek/`, and the script in `backend/data/scenarios/cottonwood-creek.json`.
+**Run scenario** in the top bar, in sample and live mode, replays the scenario picked beside it: the three packet replays, or the Cottonwood Creek incident (1:50 pm line fault on a High fire-danger Saturday) at 2 seconds per scenario minute. A strip under the top bar compares today's timeline (on scene at T+62) with Firewatch's as it happens, and the drawer shows the evidence, the response, and every text. The district (a 450 sq mi stand-in boundary in Butler County, its settings, and a fictional roster) lives in `backend/data/districts/cottonwood-creek/`, and the script in `backend/data/scenarios/cottonwood-creek.json`.
+
+Replays record SMS in the outbox and never send a real text, in any mode. A radio linked in the roster still gets its mesh message, so a demo can show one. The packet replays use the packet's facts: nobody answers, the driver has no signal until minute 31, and nobody is within 4 miles.
 
 On macOS, XGBoost needs OpenMP: `brew install libomp`.
 

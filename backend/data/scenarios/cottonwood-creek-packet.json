@@ -1,7 +1,7 @@
 {
   "slug": "cottonwood-creek-packet",
   "title": "Cottonwood Creek (packet): Tuesday line-down grass fire, co-op fault",
-  "story": "Packet weather and date: Tuesday Mar 17 2026, ignition 1:50 pm, south wind 35 mph gusting past 55, RH 11%, 78 F, fully dormant grass. Nobody within four miles. The co-op feeder locks out at minute 0; a propane driver sees smoke at 27.",
+  "story": "Packet weather and date: Tuesday Mar 17 2026, ignition 1:50 pm, south wind 35 mph gusting past 55, RH 11%, 78 F, fully dormant grass. Nobody within four miles. The co-op feeder locks out at minute 0; a propane driver sees smoke at 27 and has no signal until 31. Ignition is the ring scenarios' point, 4.1 mi from the nearest contact.",
   "district": "cottonwood-creek",
   "synthetic": true,
   "red_flag": true,
@@ -9,8 +9,8 @@
   "t0_local": "1:50 pm CDT, Tue Mar 17 2026",
   "duration_min": 62,
   "ignition": {
-    "lat": 37.77,
-    "lon": -96.66,
+    "lat": 37.7156,
+    "lon": -96.609,
     "cause": "downed distribution line"
   },
   "weather": {
@@ -59,21 +59,21 @@
       "t": 0,
       "type": "signal",
       "kind": "line_fault",
-      "lat": 37.77,
-      "lon": -96.66,
+      "lat": 37.7156,
+      "lon": -96.609,
       "source": "coop:feeder-4",
       "value": "lockout",
       "note": "Co-op SCADA: feeder 4 recloser locks out"
     },
     {
-      "t": 27,
+      "t": 31,
       "type": "signal",
       "kind": "report",
-      "lat": 37.77,
-      "lon": -96.66,
+      "lat": 37.7156,
+      "lon": -96.609,
       "source": "sms:+13165550199",
       "value": "smoke",
-      "note": "Propane driver (4+ mi away, unregistered) sees smoke; located at the fire for matching"
+      "note": "Propane driver (4+ mi away, unregistered) saw smoke at 27 with no signal and reaches a phone at 31 (packet 2:21); located at the fire for matching"
     },
     {
       "t": 38,
@@ -83,8 +83,8 @@
         {
           "source": "VIIRS_NOAA20_NRT",
           "satellite": "N20",
-          "lat": 37.7776,
-          "lon": -96.6565,
+          "lat": 37.7232,
+          "lon": -96.6055,
           "brightness_k": 352.1,
           "frp_mw": 28.4,
           "confidence": "nominal",
@@ -95,8 +95,8 @@
         {
           "source": "VIIRS_NOAA20_NRT",
           "satellite": "N20",
-          "lat": 37.7844,
-          "lon": -96.6534,
+          "lat": 37.73,
+          "lon": -96.6024,
           "brightness_k": 367.0,
           "frp_mw": 61.7,
           "confidence": "high",
@@ -107,8 +107,8 @@
         {
           "source": "VIIRS_NOAA20_NRT",
           "satellite": "N20",
-          "lat": 37.7912,
-          "lon": -96.6503,
+          "lat": 37.7368,
+          "lon": -96.5993,
           "brightness_k": 359.8,
           "frp_mw": 44.2,
           "confidence": "high",

@@ -9,8 +9,8 @@
   "t0_local": "1:50 pm CDT, Tue Mar 17 2026",
   "duration_min": 62,
   "ignition": {
-    "lat": 37.77,
-    "lon": -96.66,
+    "lat": 37.7156,
+    "lon": -96.609,
     "cause": "downed distribution line"
   },
   "weather": {
@@ -60,8 +60,8 @@
       "type": "ngfs",
       "feature_tracking_id": "ngfs-assumed-1",
       "type_description": "Possible Wildland Fire",
-      "lat": 37.77,
-      "lon": -96.66,
+      "lat": 37.7156,
+      "lon": -96.609,
       "note": "ASSUMED NGFS scan of a tracked feature at the ignition (not measured)"
     },
     {
@@ -69,19 +69,19 @@
       "type": "ngfs",
       "feature_tracking_id": "ngfs-assumed-1",
       "type_description": "Possible Wildland Fire",
-      "lat": 37.77,
-      "lon": -96.66,
+      "lat": 37.7156,
+      "lon": -96.609,
       "note": "ASSUMED NGFS scan of a tracked feature at the ignition (not measured)"
     },
     {
-      "t": 27,
+      "t": 31,
       "type": "signal",
       "kind": "report",
-      "lat": 37.77,
-      "lon": -96.66,
+      "lat": 37.7156,
+      "lon": -96.609,
       "source": "sms:+13165550199",
       "value": "smoke",
-      "note": "Propane driver (4+ mi away, unregistered) sees smoke; located at the fire for matching"
+      "note": "Propane driver (4+ mi away, unregistered) saw smoke at 27 with no signal and reaches a phone at 31 (packet 2:21); located at the fire for matching"
     },
     {
       "t": 38,
@@ -91,8 +91,8 @@
         {
           "source": "VIIRS_NOAA20_NRT",
           "satellite": "N20",
-          "lat": 37.7776,
-          "lon": -96.6565,
+          "lat": 37.7232,
+          "lon": -96.6055,
           "brightness_k": 352.1,
           "frp_mw": 28.4,
           "confidence": "nominal",
@@ -103,8 +103,8 @@
         {
           "source": "VIIRS_NOAA20_NRT",
           "satellite": "N20",
-          "lat": 37.7844,
-          "lon": -96.6534,
+          "lat": 37.73,
+          "lon": -96.6024,
           "brightness_k": 367.0,
           "frp_mw": 61.7,
           "confidence": "high",
@@ -115,8 +115,8 @@
         {
           "source": "VIIRS_NOAA20_NRT",
           "satellite": "N20",
-          "lat": 37.7912,
-          "lon": -96.6503,
+          "lat": 37.7368,
+          "lon": -96.5993,
           "brightness_k": 359.8,
           "frp_mw": 44.2,
           "confidence": "high",

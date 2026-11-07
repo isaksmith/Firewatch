@@ -297,7 +297,7 @@ function ResponseSection({ a }: { a: AlertDetail }) {
           <div className="flex justify-between">
             <span className="label">Next hour</span>
             <span className="num text-text">
-              ~{r.plan.acres_60} AC · WIND {r.plan.wind.from} {r.plan.wind.mph} MPH
+              UP TO {r.plan.acres_60} AC · WIND {r.plan.wind.from} {r.plan.wind.mph} MPH
             </span>
           </div>
           {r.plan.downwind.length > 0 && (
@@ -305,7 +305,7 @@ function ResponseSection({ a }: { a: AlertDetail }) {
               {r.plan.downwind.map((d) => (
                 <li key={d.contact_id} className="flex justify-between">
                   <span>{d.name}</span>
-                  <span className="num text-investigate">~{d.eta_min} MIN</span>
+                  <span className="num text-investigate">AS SOON AS {d.eta_min} MIN</span>
                 </li>
               ))}
             </ul>

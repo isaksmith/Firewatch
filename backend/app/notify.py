@@ -125,7 +125,7 @@ def t_dispatch_ladder(ev, why: str) -> str:
 def t_page(ev, plan: dict) -> str:
     w = plan["wind"]
     return (
-        f"FIRE {_short_place(ev)}. Grass, wind {w['from']} {w['mph']} mph, ~{plan['acres_60']} ac in 1 hr. "
+        f"FIRE {_short_place(ev)}. Grass, wind {w['from']} {w['mph']} mph, up to {plan['acres_60']} ac in 1 hr. "
         f"{ev['lat']:.4f},{ev['lon']:.4f} Reply R if responding"
     )
 
@@ -135,7 +135,7 @@ def t_page_dispatch(ev, short_name: str, by: str) -> str:
 
 
 def t_downwind(ev, contact, eta: int, short_name: str) -> str:
-    return f"{short_name}: grass fire {_rel(ev, contact)} of you, moving your way. Could reach you in ~{eta} min. Move stock and vehicles. Crews paged."
+    return f"{short_name}: grass fire {_rel(ev, contact)} of you, moving your way. Could reach you in as little as {eta} min. Move stock and vehicles. Crews paged."
 
 
 def t_helper(ev, contact, short_name: str) -> str:
@@ -150,7 +150,7 @@ def t_mutual_aid_draft(reason: str, neighbor: str) -> str:
 def t_mutual_aid(ev, short_name: str, plan: dict, n_resp: int) -> str:
     return (
         f"{short_name} requests mutual aid: grass fire {_short_place(ev)}, {ev['lat']:.4f},{ev['lon']:.4f}, "
-        f"~{plan['acres_60']} ac in 1 hr, {n_resp} responding."
+        f"up to {plan['acres_60']} ac in 1 hr, {n_resp} responding."
     )
 
 
@@ -429,7 +429,7 @@ def decide(conn: sqlite3.Connection, event_id: int, action: str, by: str, now: d
         if plan["area_60_ha"] > cap_ha:
             _draft_mutual_aid(
                 conn, ev, state,
-                f"~{plan['acres_60']} ac in 1 hr, over the {round(cap_ha / HA_PER_ACRE)} ac 2 trucks can hold",
+                f"up to {plan['acres_60']} ac in 1 hr, over the {round(cap_ha / HA_PER_ACRE)} ac 2 trucks can hold",
                 now,
             )
         conn.execute("UPDATE events SET status = 'escalated' WHERE id = ? AND status IN ('new', 'acknowledged')", (event_id,))
