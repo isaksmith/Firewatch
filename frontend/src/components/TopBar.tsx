@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Box, Flame, Play, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
-import { api, type SourceHealth } from '../api'
+import { api, type ScenarioSummary, type SourceHealth } from '../api'
 import { setOperator, useOperator } from '../lib/operator'
 import { Mark } from './ui'
 
@@ -29,6 +29,26 @@ function SourceStatus({ name, h }: { name: string; h: SourceHealth }) {
   )
 }
 
+function SourceChips({ sources }: { sources: Record<string, SourceHealth> }) {
+  const entries = Object.entries(sources)
+  const others = entries.filter(([k]) => !(k in SOURCE_LABELS))
+  const working = others.filter(([, h]) => h.status === 'ok' || h.status === 'sample').length
+  const detail = others.map(([k, h]) => `${k}: ${h.status}`).join('\n')
+  return (
+    <>
+      {entries.filter(([k]) => k in SOURCE_LABELS).map(([k, h]) => <SourceStatus key={k} name={k} h={h} />)}
+      {others.length > 0 && (
+        <span className="flex items-center gap-2" title={detail}>
+          <span className="label">Feeds</span>
+          <span className={`num text-[10px] tracking-[0.1em] ${working === others.length ? 'text-ok' : 'text-investigate'}`}>
+            {working}/{others.length}
+          </span>
+        </span>
+      )}
+    </>
+  )
+}
+
 function Clock() {
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
@@ -45,16 +65,29 @@ function Clock() {
   )
 }
 
+const SCENARIO_LABEL: Record<string, string> = {
+  'cottonwood-creek': 'Demo fire',
+  'cottonwood-creek-packet': 'Packet: line fault',
+  'cottonwood-creek-packet-no-fault': 'Packet: no line fault',
+  'cottonwood-creek-packet-ngfs': 'Packet: no fault, NGFS',
+}
+
 const Divider = () => <span className="h-4 w-px bg-line-2" />
 
 export function TopBar({
   onRunScenario,
   scenarioRunning,
+  scenarios,
+  scenarioSlug,
+  onPickScenario,
   threeDId,
   threeDSelected,
 }: {
   onRunScenario?: () => void
   scenarioRunning?: boolean
+  scenarios?: ScenarioSummary[]
+  scenarioSlug?: string
+  onPickScenario?: (slug: string) => void
   threeDId?: number | null
   threeDSelected?: boolean
 }) {
@@ -118,18 +151,34 @@ export function TopBar({
       )}
       <Divider />
       <div className="hidden items-center gap-5 lg:flex">
-        {health.data && Object.entries(health.data.sources).map(([k, v]) => <SourceStatus key={k} name={k} h={v} />)}
+        {health.data && <SourceChips sources={health.data.sources} />}
         {health.isError && <span className="num text-[10px] tracking-[0.12em] text-escalate">BACKEND UNREACHABLE</span>}
       </div>
 
-      <div className="ml-auto flex items-center gap-4">
+      <div className="ml-auto flex shrink-0 items-center gap-4">
         <Clock />
         <Divider />
         <label className="flex items-center gap-2">
           <span className="label">OP</span>
           <input value={operator} onChange={(e) => setOperator(e.target.value)} className="field w-28 !h-6 uppercase" aria-label="Operator name" />
         </label>
-        {mode === 'sample' && onRunScenario && (
+        {onRunScenario && scenarios && scenarios.length > 1 && (
+          <select
+            value={scenarioSlug}
+            onChange={(e) => onPickScenario?.(e.target.value)}
+            disabled={scenarioRunning}
+            aria-label="Scenario to replay"
+            title={scenarios.find((s) => s.slug === scenarioSlug)?.story}
+            className="field hidden !h-6 max-w-44 md:block"
+          >
+            {scenarios.map((s) => (
+              <option key={s.slug} value={s.slug}>
+                {SCENARIO_LABEL[s.slug] ?? s.title}
+              </option>
+            ))}
+          </select>
+        )}
+        {onRunScenario && (
           <button onClick={onRunScenario} disabled={scenarioRunning} className="btn btn-danger !h-6">
             <Flame size={11} /> {scenarioRunning ? 'Scenario running' : 'Run scenario'}
           </button>

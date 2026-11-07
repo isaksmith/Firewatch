@@ -204,6 +204,12 @@ export interface District {
 
 export const SCENARIO = 'cottonwood-creek'
 
+export interface ScenarioSummary {
+  slug: string
+  title: string
+  story: string
+}
+
 export interface SimulationResult {
   event_id: number
   assumptions: Record<string, string | number>
@@ -416,6 +422,7 @@ export const api = {
     request<AlertDetail>(`/alerts/${id}/decision`, { method: 'POST', body: JSON.stringify({ action, operator }) }),
   district: () => request<District>('/district'),
   meshNodes: () => request<MeshNode[]>('/mesh/nodes'),
+  scenarios: () => request<ScenarioSummary[]>('/scenarios'),
   scenario: (slug: string) => request<ScenarioStatus>(`/scenario/${slug}`),
   runScenario: (slug: string) => request<{ status: string }>(`/scenario/${slug}/run`, { method: 'POST' }),
   plannerRegions: () => request<PlannerRegions>('/planner/regions'),

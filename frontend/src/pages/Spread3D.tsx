@@ -305,7 +305,7 @@ function SidePanel({ s, t, override, setOverride, shownWind, setWind, fetching }
 
       <div className="flex h-8 items-center justify-between border-t border-b border-line px-4">
         <span className="label">Impacts · 60 min</span>
-        <span className="num text-[10px] text-dim">ETA</span>
+        <span className="num text-[10px] text-dim">SOONEST, WORST CASE</span>
       </div>
       <ul className="space-y-1.5 px-4 py-3">
         {(s?.impacts ?? []).map((i) => {
