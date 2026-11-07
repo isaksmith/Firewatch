@@ -543,11 +543,11 @@ def handle_inbound(
                 # event_id=None and a purpose outside DECIDERS keep the text from being a PAGE/NO target,
                 # and nothing is written to the event. Dedupe is per sender over a window, not per event.
                 # The prefix is matched from the start of the body, so text a sender writes can never match it.
-                # A mesh row counts only once a radio acked it; an unacked one must not block a retry.
+                # A mesh row counts only once the recipient confirmed it: relayed is just a rebroadcast.
                 prefix = f"FIREWATCH report outside district from {phone} at "
                 recent = conn.execute(
                     "SELECT 1 FROM messages WHERE direction = 'out' AND purpose = 'duty_fyi_outside' "
-                    "AND ((channel = 'sms' AND status = 'sent') OR status IN ('relayed', 'delivered')) "
+                    "AND ((channel = 'sms' AND status = 'sent') OR status = 'delivered') "
                     "AND is_sample = ? AND created_at > ? AND created_at <= ? AND substr(body, 1, ?) = ? LIMIT 1",
                     (int(is_sample), iso(now - timedelta(minutes=OUTSIDE_FYI_WINDOW_MIN)), iso(now), len(prefix), prefix),
                 ).fetchone()

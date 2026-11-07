@@ -60,6 +60,19 @@ def _escalated_event(conn) -> int:
     return eid
 
 
+def test_an_ack_from_a_third_radio_is_not_delivery(radio):
+    with connect() as conn:
+        eid = _escalated_event(conn)
+        gid = conn.execute(
+            "SELECT gateway_id FROM messages WHERE event_id = ? AND purpose = 'duty_escalate' AND channel = 'mesh'", (eid,)
+        ).fetchone()[0]
+        req = int(gid.removeprefix("mesh-"))
+        mesh.handle_packet(conn, _packet(SAM_RADIO, "ROUTING_APP", requestId=req, routing={}), GATEWAY)
+        assert conn.execute("SELECT status FROM messages WHERE gateway_id = ?", (gid,)).fetchone()[0] == "relayed"
+        mesh.handle_packet(conn, _packet(DUTY_RADIO, "ROUTING_APP", requestId=req, routing={}), GATEWAY)
+        assert conn.execute("SELECT status FROM messages WHERE gateway_id = ?", (gid,)).fetchone()[0] == "delivered"
+
+
 def test_alerts_go_out_by_sms_and_mesh_with_ack(radio):
     with connect() as conn:
         eid = _escalated_event(conn)
