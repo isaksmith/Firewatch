@@ -22,7 +22,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import climate, mesh, notify, planner, posts, sample, scenario
+from . import climate, mesh, notify, planner, posts, routes_posts, sample, scenario
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
@@ -654,7 +654,7 @@ def list_contacts():
     with connect() as conn:
         return [
             {**dict(r), "phone": _mask(r["phone"])}
-            for r in conn.execute("SELECT * FROM contacts ORDER BY ladder_rank IS NULL, ladder_rank, role, name")
+            for r in conn.execute("SELECT * FROM contacts WHERE phone NOT LIKE 'web:%' ORDER BY ladder_rank IS NULL, ladder_rank, role, name")
         ]
 
 
@@ -780,6 +780,8 @@ async def load_scenario_now(slug: str):
     return scenario.status(slug)
 
 
+api.include_router(routes_posts.public_router)
+api.include_router(routes_posts.admin_router, dependencies=[Depends(require_token)])
 app.include_router(api)
 
 
