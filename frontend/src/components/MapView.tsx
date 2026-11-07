@@ -2,7 +2,8 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronDown } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Map, { Layer, Marker, NavigationControl, ScaleControl, Source, useMap, type MapRef } from 'react-map-gl/maplibre'
-import { api, type AlertSummary, type MeshNode, type SensorReadings } from '../api'
+import { api, type AdminPost, type AlertSummary, type MeshNode, type SensorReadings } from '../api'
+import { catMeta, isPinnable, useBoardPosts } from '../lib/board'
 import { REC_META, latLon, trackId } from '../lib/format'
 import { AOI_BBOX, BASEMAP_STYLE, KANSAS_VIEW, ringPolygon } from '../lib/map'
 import { FEEDS, LiveLayers, LiveToggles, useLiveFeeds, type FeedKey } from './LiveFeeds'
@@ -14,6 +15,7 @@ interface Props {
   hoveredId: number | null
   onSelect: (id: number) => void
   onHover: (id: number | null) => void
+  onBoardPin: (post: AdminPost) => void
 }
 
 const SIZE = { escalate: 18, investigate: 14, monitor: 9 }
@@ -34,7 +36,7 @@ const AOI: GeoJSON.Feature = {
   },
 }
 
-type LayerKey = 'power_lines' | 'static_sources' | 'flint_hills' | 'aoi' | 'district' | 'distribution_lines' | 'dry_grid' | 'wind_lines' | 'mesh'
+type LayerKey = 'power_lines' | 'static_sources' | 'flint_hills' | 'aoi' | 'district' | 'distribution_lines' | 'dry_grid' | 'wind_lines' | 'mesh' | 'board'
 
 const SWATCH: Record<LayerKey, string> = {
   aoi: 'h-0 w-4 border-t border-dashed border-sample/70',
@@ -46,6 +48,7 @@ const SWATCH: Record<LayerKey, string> = {
   dry_grid: 'h-2 w-2 rounded-full bg-[#ffb21a]',
   wind_lines: 'h-0.5 w-4 bg-[#ff5c5c]',
   mesh: 'h-2 w-2 rotate-45 bg-ok',
+  board: 'h-2 w-2 border border-dashed border-escalate',
 }
 
 const MESH_FRESH_MIN = 30
@@ -59,6 +62,41 @@ function sensorLine(s: SensorReadings | null): { text: string; high: boolean } |
     s.rh_pct != null && `RH ${Math.round(s.rh_pct)}%`,
   ].filter(Boolean)
   return parts.length ? { text: parts.join(' · '), high: (s.pm25 ?? 0) >= PM25_HIGH } : null
+}
+
+function BoardPin({ p, onPick }: { p: AdminPost; onPick: (p: AdminPost) => void }) {
+  const [tip, setTip] = useState(false)
+  const m = catMeta(p.category)
+  return (
+    <Marker longitude={p.lon!} latitude={p.lat!} anchor="center">
+      <div className="relative">
+        <button
+          type="button"
+          aria-label={`${m.label} post: ${p.body}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            onPick(p)
+          }}
+          onMouseEnter={() => setTip(true)}
+          onMouseLeave={() => setTip(false)}
+          onFocus={() => setTip(true)}
+          onBlur={() => setTip(false)}
+          className="flex h-6 w-6 items-center justify-center"
+        >
+          <span className={`block h-3 w-3 ${p.estimated ? `border border-dashed ${m.border} bg-void` : m.bg}`} />
+        </button>
+        {tip && (
+          <span className="hud pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 w-56 -translate-x-1/2 px-2 py-1.5 text-left text-[11.5px] leading-snug text-text">
+            <span className={`label block ${m.text}`}>
+              {m.label}
+              {p.estimated ? ' · approx location' : ''}
+            </span>
+            {p.body}
+          </span>
+        )}
+      </div>
+    </Marker>
+  )
 }
 
 function MeshMarker({ n }: { n: MeshNode }) {
@@ -88,7 +126,7 @@ function MeshMarker({ n }: { n: MeshNode }) {
   )
 }
 
-export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Props) {
+export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBoardPin }: Props) {
   const mapRef = useRef<MapRef>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   // One side panel at a time: opening an alert closes the layers panel.
@@ -105,12 +143,15 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
     dry_grid: false,
     wind_lines: false,
     mesh: true,
+    board: true,
   })
   const [liveOn, setLiveOn] = useState<Record<FeedKey, boolean>>(() => Object.fromEntries(FEEDS.map((f) => [f.key, false])) as Record<FeedKey, boolean>)
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, retry: false })
   const keyConfigured = !!health.data?.firms_key_configured
   const feeds = useLiveFeeds(liveOn, keyConfigured)
   const meshNodes = useQuery({ queryKey: ['mesh-nodes'], queryFn: api.meshNodes, refetchInterval: 10_000 })
+  const boardPosts = useBoardPosts()
+  const pins = (boardPosts.data ?? []).filter(isPinnable)
   const placed = (meshNodes.data ?? []).filter((n) => n.lat != null && n.lon != null)
   const district = useQuery({ queryKey: ['district'], queryFn: api.district, retry: false })
   const lines = useQuery({ queryKey: ['layer', 'power_lines'], queryFn: () => api.layer('power_lines') })
@@ -257,6 +298,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
         })}
         <LiveLayers feeds={feeds} />
         {layers.mesh && placed.map((n) => <MeshMarker key={n.node_id} n={n} />)}
+        {layers.board && pins.map((p) => <BoardPin key={p.id} p={p} onPick={onBoardPin} />)}
         <CursorReadout />
       </Map>
 
@@ -283,6 +325,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
                   ['distribution_lines', 'Distribution (partial)'],
                   ['dry_grid', 'Dry air grid'],
                   ['wind_lines', 'Lines under wind'],
+                  ...(pins.length > 0 ? ([['board', `Community posts (${pins.length})`]] as const) : []),
                   ...(placed.length > 0 ? ([['mesh', `Mesh radios (${placed.length})`]] as const) : []),
                 ] as const
               ).map(([k, label]) => (

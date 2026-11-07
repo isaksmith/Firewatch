@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Box, Flame, Play, RefreshCw } from 'lucide-react'
+import { Box, Flame, MessageSquare, Play, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { api, type ScenarioSummary, type SourceHealth } from '../api'
@@ -81,6 +81,8 @@ export function TopBar({
   onPickScenario,
   threeDId,
   threeDSelected,
+  boardOpen,
+  onToggleBoard,
 }: {
   onRunScenario?: () => void
   scenarioRunning?: boolean
@@ -89,6 +91,8 @@ export function TopBar({
   onPickScenario?: (slug: string) => void
   threeDId?: number | null
   threeDSelected?: boolean
+  boardOpen?: boolean
+  onToggleBoard?: () => void
 }) {
   const qc = useQueryClient()
   const operator = useOperator()
@@ -166,6 +170,18 @@ export function TopBar({
             <input value={operator} onChange={(e) => setOperator(e.target.value)} className="field w-28 !h-6 uppercase" aria-label="Operator name" />
           </label>
         </div>
+        {onToggleBoard && (
+          <button
+            type="button"
+            onClick={onToggleBoard}
+            aria-pressed={boardOpen}
+            aria-label="Community board"
+            title="Community board"
+            className={`btn !h-6 ${boardOpen ? '!border-sample !text-sample' : ''}`}
+          >
+            <MessageSquare size={11} /> <span className="hidden md:inline">Board</span>
+          </button>
+        )}
         {onRunScenario && scenarios && scenarios.length > 1 && (
           <select
             value={scenarioSlug}

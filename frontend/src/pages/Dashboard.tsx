@@ -7,6 +7,7 @@ import { AlertDrawer } from '../components/AlertDrawer'
 import { AlertList } from '../components/AlertList'
 import { MapView } from '../components/MapView'
 import { ScenarioStrip } from '../components/ScenarioStrip'
+import { CommunityBoard } from '../components/CommunityBoard'
 import { TopBar } from '../components/TopBar'
 import { SUPPRESSION_LABEL } from '../lib/format'
 import { filterQueue, type QueueTab } from '../lib/queue'
@@ -20,6 +21,8 @@ export function Dashboard() {
   const [tab, setTab] = useState<QueueTab>('active')
   const [scenarioHidden, setScenarioHidden] = useState(false)
   const [slug, setSlug] = useState(SCENARIO)
+  const [boardOpen, setBoardOpen] = useState(false)
+  const [boardPostId, setBoardPostId] = useState<number | null>(null)
 
   const scenarios = useQuery({ queryKey: ['scenarios'], queryFn: api.scenarios, staleTime: Infinity })
   const scenario = useQuery({
@@ -74,6 +77,12 @@ export function Dashboard() {
         onPickScenario={setSlug}
         threeDId={selectedId ?? onMap[0]?.id ?? null}
         threeDSelected={selectedId != null}
+        boardOpen={boardOpen}
+        onToggleBoard={() => {
+          if (!boardOpen && selectedId != null) navigate('/')
+          setBoardPostId(null)
+          setBoardOpen(!boardOpen)
+        }}
       />
       {showStrip && (
         <ScenarioStrip
@@ -93,8 +102,30 @@ export function Dashboard() {
           onSelect={(id) => navigate(`/alerts/${id}`)}
           onHover={setHoveredId}
         />
-        <MapView alerts={onMap} selectedId={selectedId} hoveredId={hoveredId} onSelect={(id) => navigate(`/alerts/${id}`)} onHover={setHoveredId} />
+        <MapView
+          alerts={onMap}
+          selectedId={selectedId}
+          hoveredId={hoveredId}
+          onSelect={(id) => {
+            setBoardOpen(false)
+            navigate(`/alerts/${id}`)
+          }}
+          onHover={setHoveredId}
+          onBoardPin={(post) => {
+            if (post.event_id != null) {
+              setBoardOpen(false)
+              navigate(`/alerts/${post.event_id}`)
+            } else {
+              if (selectedId != null) navigate('/')
+              setBoardPostId(post.id)
+              setBoardOpen(true)
+            }
+          }}
+        />
         {selectedId != null && <AlertDrawer id={selectedId} onClose={close} />}
+        {boardOpen && selectedId == null && (
+          <CommunityBoard focusId={boardPostId} onClose={() => setBoardOpen(false)} />
+        )}
       </div>
 
       <footer className="num flex h-7 shrink-0 items-center gap-5 overflow-hidden border-t border-line bg-void px-4 text-[10px] tracking-[0.08em] whitespace-nowrap text-dim">

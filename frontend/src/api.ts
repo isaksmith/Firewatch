@@ -422,6 +422,16 @@ export const api = {
     request<AlertDetail>(`/alerts/${id}/decision`, { method: 'POST', body: JSON.stringify({ action, operator }) }),
   district: () => request<District>('/district'),
   meshNodes: () => request<MeshNode[]>('/mesh/nodes'),
+  boardAdminPosts: () => request<AdminPost[]>('/board/admin/posts'),
+  boardStation: (id: number, action: StationAction, operator: string) =>
+    request<StationResult>(`/board/admin/posts/${id}/station`, {
+      method: 'POST',
+      body: JSON.stringify({ action, operator }),
+    }),
+  pendingMembers: () => request<PendingMember[]>('/members/pending'),
+  approveMember: (id: number, lat: number, lon: number) =>
+    request<ApproveResult>(`/members/${id}/approve`, { method: 'POST', body: JSON.stringify({ lat, lon }) }),
+  rejectMember: (id: number) => request<{ ok: boolean }>(`/members/${id}/reject`, { method: 'POST' }),
   scenarios: () => request<ScenarioSummary[]>('/scenarios'),
   scenario: (slug: string) => request<ScenarioStatus>(`/scenario/${slug}`),
   runScenario: (slug: string) => request<{ status: string }>(`/scenario/${slug}/run`, { method: 'POST' }),
@@ -503,6 +513,32 @@ export interface BoardPost {
   held?: boolean
   event_status?: string | null
 }
+
+export interface AdminPost extends BoardPost {
+  held: boolean
+  event_id: number | null
+  event_status: string | null
+}
+
+export interface StationResult {
+  ok: boolean
+  event_id: number | null
+  repeat?: boolean
+}
+
+export interface PendingMember {
+  id: number
+  name: string
+  phone: string
+}
+
+export interface ApproveResult {
+  token: string | null
+  link: string | null
+  texted: boolean
+}
+
+export const BOARD_ADMIN_KEY = ['board-admin-posts'] as const
 
 export interface PostResult {
   post_id: number
