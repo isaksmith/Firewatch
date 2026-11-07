@@ -105,3 +105,90 @@ def test_outside_report_reply_is_honest_when_nobody_can_be_told():
         r = notify.handle_inbound(conn, "+13165559992", "FIRE 5 MI N", NOW, at=far, is_sample=True)
         assert _fyi(conn) == []
     assert "being told" not in r["reply"] and "911" in r["reply"] and len(r["reply"]) <= notify.SMS_MAX
+
+
+FAR = (45.0, -90.0)
+
+
+def _outside(conn):
+    return [m for m in _fyi(conn) if "outside district" in m["body"]]
+
+
+def _duty(conn):
+    return notify._ladder(conn)[0]
+
+
+def test_outside_fyi_is_never_a_decision_target():
+    with connect() as conn:
+        sync_roster(conn)
+        duty = _duty(conn)
+        inside = notify.handle_inbound(conn, "+13165559991", "FIRE", NOW, at=HERE, is_sample=True)["event_id"]
+        notify.send(conn, duty, "alert", "duty_escalate", inside, NOW, True)
+        notify.handle_inbound(conn, "+13165559992", "FIRE 5 MI N", NOW, at=FAR, is_sample=True)
+        r = notify.handle_inbound(conn, duty["phone"], "PAGE", NOW, is_sample=True)
+        assert r["event_id"] == inside
+        assert _outside(conn) and all(m["event_id"] is None for m in _outside(conn))
+
+
+def test_outside_fyi_sent_once_per_event():
+    with connect() as conn:
+        sync_roster(conn)
+        a = notify.handle_inbound(conn, "+13165559992", "FIRE", NOW, at=FAR, is_sample=True)
+        b = notify.handle_inbound(conn, "+13165559993", "FIRE", NOW, at=FAR, is_sample=True)
+        assert a["event_id"] == b["event_id"]
+        assert len(_outside(conn)) == 1
+        assert "being told" in b["reply"]
+
+
+def test_fyi_follows_the_event_position_not_the_report_point():
+    # A report just outside the boundary that joins an in-district event: no FYI.
+    with connect() as conn:
+        sync_roster(conn)
+        d = notify.load_district()
+        a = notify.handle_inbound(conn, "+13165559991", "FIRE", NOW, at=HERE, is_sample=True)
+        ev = notify._event(conn, a["event_id"])
+        assert d.contains(ev["lat"], ev["lon"])
+        notify.handle_inbound(conn, "+13165559992", "FIRE", NOW, at=HERE, is_sample=True)
+        assert _outside(conn) == []
+    with connect() as conn:
+        sync_roster(conn)
+        b = notify.handle_inbound(conn, "+13165559993", "FIRE", NOW, at=FAR, is_sample=True)
+        assert not notify.load_district().contains(*FAR)
+        assert len(_outside(conn)) == 1 and b["event_id"]
+
+
+def test_fyi_skips_events_whose_averaged_position_is_inside(monkeypatch):
+    with connect() as conn:
+        sync_roster(conn)
+        a = notify.handle_inbound(conn, "+13165559991", "FIRE", NOW, at=HERE, is_sample=True)
+        # report point outside, but the event it joined sits inside
+        monkeypatch.setattr("app.signals.add_signal", lambda *a_, **k: a["event_id"])
+        notify.handle_inbound(conn, "+13165559992", "FIRE", NOW, at=FAR, is_sample=True)
+        assert _outside(conn) == []
+
+
+class _FailingGateway:
+    name = "fail"
+
+    def send(self, to, body):
+        raise notify.httpx.ConnectError("down")
+
+
+def test_outside_reply_is_honest_when_every_send_fails(monkeypatch):
+    monkeypatch.setattr(notify, "gateway_for", lambda s: _FailingGateway())
+    with connect() as conn:
+        sync_roster(conn)
+        r = notify.handle_inbound(conn, "+13165559992", "FIRE 5 MI N", NOW, at=FAR, is_sample=True)
+    assert "being told" not in r["reply"] and "911" in r["reply"]
+
+
+def test_outside_fyi_falls_through_to_next_ladder_contact(monkeypatch):
+    with connect() as conn:
+        sync_roster(conn)
+        ladder = notify._ladder(conn)
+        assert len(ladder) > 1
+        conn.execute("UPDATE contacts SET opted_in = 0 WHERE id = ?", (ladder[0]["id"],))
+        r = notify.handle_inbound(conn, "+13165559992", "FIRE 5 MI N", NOW, at=FAR, is_sample=True)
+        rows = _outside(conn)
+    assert len(rows) == 1 and rows[0]["contact_id"] == ladder[1]["id"]
+    assert "being told" in r["reply"]
