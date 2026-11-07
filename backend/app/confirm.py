@@ -246,13 +246,8 @@ def decide_level(
     return level, reason, evidence, suppression
 
 
-def _registered_burn(conn, ev, signals) -> tuple[dict | None, list[str], bool]:
-    """The burn notice covering this event today, why it counts as escaped (empty if it hasn't), and
-    whether it is `late`: sent after the event started, so only a claim and never a reason to stay quiet.
-
-    Escape needs evidence: any report (the notice tells the burner to text FIRE), a "1" (sees smoke) from
-    someone other than the burner, or fire seen outside the notice. Fire danger is a condition, not evidence,
-    and a satellite detection is not evidence either: a registered burn is visible from space."""
+def pick_burn(conn, ev) -> tuple[dict | None, bool]:
+    """The burn notice covering this event today and whether it is `late` (sent after the event started)."""
     burn_date = parse_iso(ev["first_seen"]).astimezone(CENTRAL).date().isoformat()
     rows = conn.execute(
         "SELECT b.*, c.name FROM burn_notices b JOIN contacts c ON c.id = b.contact_id "
@@ -263,9 +258,28 @@ def _registered_burn(conn, ev, signals) -> tuple[dict | None, list[str], bool]:
     covering = [dict(b) for b in rows if haversine_km(ev["lat"], ev["lon"], b["lat"], b["lon"]) <= b["radius_km"]]
     on_time = [b for b in covering if parse_iso(b["created_at"]) <= first]
     burn = (on_time or covering or [None])[0]
+    return burn, burn is not None and not on_time
+
+
+def burn_late(conn, burn: dict) -> bool:
+    """True when an event this notice covers started before it was sent and no earlier notice covered it."""
+    for ev in conn.execute("SELECT * FROM events WHERE is_sample = ?", (burn["is_sample"],)):
+        picked, late = pick_burn(conn, dict(ev))
+        if late and picked is not None and picked["id"] == burn["id"]:
+            return True
+    return False
+
+
+def _registered_burn(conn, ev, signals) -> tuple[dict | None, list[str], bool]:
+    """The burn notice covering this event today, why it counts as escaped (empty if it hasn't), and
+    whether it is `late`: sent after the event started, so only a claim and never a reason to stay quiet.
+
+    Escape needs evidence: any report (the notice tells the burner to text FIRE), a "1" (sees smoke) from
+    someone other than the burner, or fire seen outside the notice. Fire danger is a condition, not evidence,
+    and a satellite detection is not evidence either: a registered burn is visible from space."""
+    burn, late = pick_burn(conn, ev)
     if burn is None:
         return None, [], False
-    late = not on_time
     escaped = []
     limit = burn["radius_km"] + BURN_ESCAPE_OUTSIDE_KM
     points = [(d["lat"], d["lon"]) for d in conn.execute("SELECT lat, lon FROM detections WHERE event_id = ?", (ev["id"],))]
