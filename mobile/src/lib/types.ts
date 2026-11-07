@@ -1,0 +1,31 @@
+export type LonLat = [number, number];
+export type RoadKind = 'highway' | 'state' | 'county' | 'local' | 'track';
+export type Pack = {
+  format: 'fwpack/1';
+  code: string;
+  name: string;
+  state: string;
+  counties: string[];
+  version: string;
+  tz?: string;
+  origin: { lat: number; lon: number };
+  bbox: [number, number, number, number];
+  boundary: { type: 'Polygon'; coordinates: LonLat[][] };
+  roads: { name?: string; kind: RoadKind; line: LonLat[] }[];
+  towns: { name: string; lon: number; lat: number }[];
+  buildings: { lon: number; lat: number; kind: 'home' | 'farm' | 'commercial' | 'other'; name?: string }[];
+  stations: { name: string; lon: number; lat: number }[];
+  power_lines: { line: LonLat[] }[];
+  places: { id: string; name: string; kind: string; lon: number; lat: number }[];
+};
+export type PackInfo = {
+  code: string;
+  name: string;
+  state: string;
+  counties: string[];
+  version: string;
+  bytes: number;
+  sha256: string;
+};
+export type Role = 'chief' | 'firefighter';
+export type Source = 'text' | 'paste' | 'feed' | 'radio';
