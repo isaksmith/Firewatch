@@ -2,7 +2,8 @@
 
 `sync_event` runs wherever an alert's level or status can change. It compares the alert with the last row it wrote
 for that event and adds a row only when something changed, so every change is coded, fed and radioed exactly once.
-The rows serve GET /api/m/feed and go out on the Meshtastic district channel as the bare code.
+The rows serve GET /api/m/feed and go out on the Meshtastic district channel as the bare code. Each code is signed
+(13th field) when the server has its FW1 signing key, so the feed, the app-link text and the radio all carry it.
 """
 
 import json
@@ -163,12 +164,12 @@ def _sync(conn, event_id: int, now: datetime, red_flag: bool | None) -> str | No
         flags.append("mutual_aid")
     if len(counted) >= 2:
         flags.append("two_sources")
-    code = fw1.encode(
+    code = fw1.sign(fw1.encode(
         {"pack": pack, "kind": kind, "level": level, "id": event_id,
          "score": ev["score"] if ev["score"] is not None else DEFAULT_SCORE[level],
          "lat": ev["lat"], "lon": ev["lon"], "time": now, "toward_deg": toward, "mph": mph, "flags": flags},
         pack_origin(pack),
-    )
+    ))  # signed when the server has its key (spec: Signatures); unsigned otherwise
     conn.execute(
         "INSERT INTO fw1_feed(pack, event_id, kind, level, flags, code, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (pack, event_id, kind, level, sum(fw1.FLAGS[f] for f in flags), code, iso(now)),

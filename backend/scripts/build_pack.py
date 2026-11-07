@@ -3,6 +3,10 @@
     .venv/bin/python -m scripts.build_pack --district cottonwood-creek      # pack "cwc"
     .venv/bin/python -m scripts.build_pack --county "Comanche,KS"           # pack "ks-comanche"
     .venv/bin/python -m scripts.build_pack --all                            # cwc plus Comanche, Clark, Barber
+    .venv/bin/python -m scripts.build_pack --sign-index                     # re-sign index.json from the packs on disk
+
+Every index entry carries `sig`: Ed25519 over `fwpack/1|<code>|<version>|<sha256>` with the FW1 signing key
+(FW1_SIGNING_KEY_FILE). The phone refuses a downloaded pack without a good one, so the key must exist to build.
 
 Roads come from OpenStreetMap (Overpass), cached under data/cache/overpass/ so a rerun works offline. If Overpass
 is down and nothing is cached, the pack is built without roads and says so. Packs carry no phone numbers and no
@@ -22,6 +26,7 @@ from pathlib import Path
 
 import httpx
 
+from app import fw1
 from app.config import DATA_DIR
 from app.district import _dir, load_district
 
@@ -280,12 +285,33 @@ def write_pack(pack: dict, code: str, note: str, elements: list | None) -> dict:
     raw, gz = size_of(pack)
     PACKS_DIR.mkdir(parents=True, exist_ok=True)
     (PACKS_DIR / f"{code}.json").write_bytes(raw)
-    meta = {"code": code, "name": pack["name"], "state": pack["state"], "counties": pack["counties"],
-            "version": pack["version"], "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+    meta = index_entry(pack, raw)
     print(f"{code}: {len(raw):,} bytes raw, {gz:,} gzipped ({'OK' if gz <= TARGET_GZ else 'OVER 1.5 MB TARGET'}); "
           f"roads={len(pack['roads'])} towns={len(pack['towns'])} buildings={len(pack['buildings'])} "
           f"stations={len(pack['stations'])} power_lines={len(pack['power_lines'])} places={len(pack['places'])}; {note}; {'; '.join(notes)}")
     return meta
+
+
+def index_entry(pack: dict, raw: bytes, key=None) -> dict:
+    """The pack's line in index.json, signed. Raises SystemExit without a signing key: the phone would refuse it."""
+    key = key if key is not None else fw1.signing_key()
+    if key is None:
+        raise SystemExit(f"No FW1 signing key at {fw1.key_path()}. Run scripts/make_signing_key.py first.")
+    sha = hashlib.sha256(raw).hexdigest()
+    return {"code": pack["code"], "name": pack["name"], "state": pack["state"], "counties": pack["counties"],
+            "version": pack["version"], "bytes": len(raw), "sha256": sha,
+            "sig": fw1.sign_text(fw1.pack_message(pack["code"], pack["version"], sha), key)}
+
+
+def sign_index() -> list:
+    """Rebuild every index entry from the pack files on disk (no download), with fresh sha256 and sig."""
+    metas = []
+    for f in sorted(PACKS_DIR.glob("*.json")):
+        if f.name == "index.json":
+            continue
+        raw = f.read_bytes()
+        metas.append(index_entry(json.loads(raw), raw))
+    return metas
 
 
 def write_index(metas: list) -> None:
@@ -300,7 +326,11 @@ def main(argv=None) -> int:
     ap.add_argument("--district")
     ap.add_argument("--county", help='for example "Comanche,KS"')
     ap.add_argument("--all", action="store_true")
+    ap.add_argument("--sign-index", action="store_true", help="re-sign index.json from the packs already built")
     a = ap.parse_args(argv)
+    if a.sign_index:
+        write_index(sign_index())
+        return 0
     jobs = []
     if a.district or a.all:
         jobs.append(lambda: district_pack(a.district or "cottonwood-creek"))

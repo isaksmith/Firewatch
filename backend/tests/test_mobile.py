@@ -68,10 +68,10 @@ def test_replay_fills_the_feed_and_chief_gets_the_app_text():
     with connect() as conn:
         chief = conn.execute("SELECT id FROM contacts WHERE role = 'chief'").fetchone()["id"]
         msgs = conn.execute("SELECT body, is_sample, purpose FROM messages WHERE contact_id = ? AND direction = 'out' ORDER BY id", (chief,)).fetchall()
-        links = [m for m in msgs if m["body"].startswith("Firewatch app: firewatch://a/")]
+        links = [m for m in msgs if m["body"].startswith("firewatch://a/")]
         assert links and all(m["is_sample"] == 1 for m in links)
         code = links[0]["body"].split("/a/")[1]
         assert fw1.decode(code, ORIGIN)["pack"] == "cwc"
         # people who are not app users get no second text
-        other = conn.execute("SELECT COUNT(*) FROM messages m JOIN contacts c ON c.id = m.contact_id WHERE c.app = 0 AND m.body LIKE 'Firewatch app:%'").fetchone()[0]
+        other = conn.execute("SELECT COUNT(*) FROM messages m JOIN contacts c ON c.id = m.contact_id WHERE c.app = 0 AND m.body LIKE 'firewatch://a/%'").fetchone()[0]
         assert other == 0

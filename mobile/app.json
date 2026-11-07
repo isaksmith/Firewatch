@@ -9,7 +9,8 @@
     "userInterfaceStyle": "dark",
     "backgroundColor": "#08090b",
     "ios": {
-      "bundleIdentifier": "org.firewatch.app",
+      "bundleIdentifier": "com.shandraco.firewatch",
+      "buildNumber": "1",
       "supportsTablet": false,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -21,7 +22,8 @@
       }
     },
     "android": {
-      "package": "org.firewatch.app",
+      "package": "com.shandraco.firewatch",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#08090b",
         "foregroundImage": "./assets/images/android-icon-foreground.png"
@@ -68,6 +70,14 @@
     "experiments": {
       "typedRoutes": false,
       "reactCompiler": true
+    },
+    "extra": {
+      "fw1Keys": [
+        {
+          "id": "firewatch-demo-2026-11",
+          "key": "nDEaj4AToPPGeHu2fFhDp72_XCiTBq8v_DM9QpuZmM8"
+        }
+      ]
     }
   }
 }

@@ -61,6 +61,12 @@ export default function AlertScreen() {
           <Button label="Back" tone="quiet" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} style={{ alignSelf: 'flex-start', minHeight: 56, paddingHorizontal: 24 }} />
           <View style={{ height: 6, backgroundColor: color, marginTop: 8 }} />
           <H1>{plainWords(alert)}</H1>
+          {!alert.verified && (
+            <View accessibilityRole="text" style={{ alignSelf: 'flex-start', borderColor: p.investigate, borderWidth: 2, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
+              <Text style={{ color: p.investigate, fontFamily: font.bold, fontSize: 18 }}>Not confirmed by dispatch</Text>
+              <Text style={{ color: p.text, fontFamily: font.regular, fontSize: 16 }}>Call dispatch before you act on it.</Text>
+            </View>
+          )}
           <Text style={{ color: p.muted, fontFamily: font.regular, fontSize: 16 }}>
             {cap(ageText(alert.time, now))}, by {sourceWords(alert.source)}
           </Text>
