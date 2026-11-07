@@ -17,7 +17,7 @@ LIMITS = {
     "post_anon": [("device", 6, 600), ("ip", 30, 600)],
     "post_member": [("device", 30, 600)],
     "confirm": [("device", 30, 3600), ("ip", 120, 3600)],
-    "photo": [("device", 10, 3600)],
+    "photo": [("device", 10, 3600), ("ip", 30, 3600)],
     "read": [("ip", 120, 60)],
     "station": [("device", 60, 60)],
 }

@@ -22,7 +22,7 @@ def load_fixtures() -> list[dict]:
 def clear_sample_data() -> None:
     with connect() as conn:
         ids = [r["id"] for r in conn.execute("SELECT id FROM events WHERE is_sample = 1")]
-        for t in ("post_confirms", "post_asks"):
+        for t in ("post_photos", "post_confirms", "post_asks"):
             conn.execute(f"DELETE FROM {t} WHERE post_id IN (SELECT id FROM posts WHERE is_sample = 1)")
         conn.execute("DELETE FROM posts WHERE is_sample = 1")
         for table in ("scores", "actions", "messages"):

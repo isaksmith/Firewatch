@@ -149,3 +149,51 @@ def test_item_fields_both_views():
             assert by[solo]["thread_size"] == 1
             assert by[root]["has_photo"] is True and by[solo]["has_photo"] is False
             assert all(isinstance(i["age_min"], int) and i["age_min"] >= 0 for i in items)
+
+
+def test_too_many_pixels_refused_before_decode():
+    """48 million pixels compress to a small PNG; Pillow only warns under 80 million, so it would decode it."""
+    m = member("Big")
+    with TestClient(app) as c:
+        pid = post(c, m, "fire", "Smoke column")
+        out = io.BytesIO()
+        Image.new("L", (8000, 6000)).save(out, "PNG")
+        assert len(out.getvalue()) < 2 * 1024 * 1024
+        assert up(c, m, pid, out.getvalue(), "image/png").status_code == 415
+        assert stored(pid) is None
+
+
+def test_public_photo_follows_the_list_window_and_sample_flag():
+    m = member("Window")
+    with TestClient(app) as c:
+        pid = post(c, m, "fire", "Smoke column")
+        assert up(c, m, pid, jpeg_bytes((200, 100), exif=False)).status_code == 200
+        assert c.get(f"/api/board/posts/{pid}/photo").status_code == 200
+        with connect() as conn:
+            conn.execute("UPDATE posts SET is_sample = 0 WHERE id = ?", (pid,))
+        assert c.get(f"/api/board/posts/{pid}/photo").status_code == 404
+        with connect() as conn:
+            conn.execute("UPDATE posts SET is_sample = 1, created_at = '2020-01-01T00:00:00Z' WHERE id = ?", (pid,))
+        assert c.get(f"/api/board/posts/{pid}/photo").status_code == 404
+        assert c.get(f"/api/board/admin/posts/{pid}/photo").status_code == 200
+
+
+def test_sample_clear_removes_photos():
+    from app import sample
+    m = member("Clear")
+    with TestClient(app) as c:
+        pid = post(c, m, "fire", "Smoke column")
+        assert up(c, m, pid, jpeg_bytes((200, 100), exif=False)).status_code == 200
+    sample.clear_sample_data()
+    with connect() as conn:
+        assert conn.execute("SELECT COUNT(*) n FROM post_photos").fetchone()["n"] == 0
+
+
+def test_photo_ip_limit_30_an_hour(pc):
+    small = jpeg_bytes((64, 64), exif=False)
+    codes = []
+    for i in range(4):
+        m = member(f"Ip{i}")
+        for _ in range(8):
+            codes.append(up(pc, m, post(pc, m, "fire", "Smoke column"), small).status_code)
+    assert codes[:30] == [200] * 30 and codes[30] == 429

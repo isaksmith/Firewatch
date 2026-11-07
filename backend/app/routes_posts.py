@@ -5,6 +5,7 @@ import secrets
 from datetime import timedelta
 from typing import Literal
 
+from starlette.concurrency import run_in_threadpool
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 from PIL import Image, ImageOps
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -24,7 +25,10 @@ STATION_ROLES = ("volunteer", *LADDER_ROLES)
 MAX_PHOTO = 2 * 1024 * 1024
 PHOTO_TYPES = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
 PHOTO_SIDE = 1600
-Image.MAX_IMAGE_PIXELS = 40_000_000
+PHOTO_PIXELS = 40_000_000
+Image.MAX_IMAGE_PIXELS = PHOTO_PIXELS
+# The public view: one rule for the list and the photo route.
+PUBLIC_WHERE = "AND p.status = 'open' AND (e.id IS NULL OR e.status NOT IN ('dismissed', 'closed')) "
 BADGE = "Fire department is aware. Call 911 if you are in danger."
 
 
@@ -170,7 +174,7 @@ def _list(conn, now, is_sample: bool, station: bool) -> list[dict]:
     if not station:
         # Everyone sees every open post at once, so people nearby can confirm it (Michael, 2026-11-07).
         # A post from a non-member with no counted confirm is marked unconfirmed.
-        q += "AND p.status = 'open' AND (e.id IS NULL OR e.status NOT IN ('dismissed', 'closed')) "
+        q += PUBLIC_WHERE
     q += "ORDER BY " + ("p.flagged DESC, " if station else "") + "p.created_at DESC, p.id DESC LIMIT 200"
     rows = conn.execute(q, (iso(now - timedelta(hours=24)), int(is_sample))).fetchall()
     return [_item(conn, r, station, now) for r in rows]
@@ -214,6 +218,11 @@ def _reencode(raw: bytes, ctype: str) -> tuple[bytes, int, int]:
         with Image.open(io.BytesIO(raw)) as img:
             if img.format != PHOTO_TYPES[ctype]:
                 raise ValueError("format mismatch")
+            # Pillow only refuses past twice its limit, so check the header size before anything is decoded.
+            if img.width * img.height > PHOTO_PIXELS:
+                raise ValueError("too many pixels")
+            if img.format == "JPEG":
+                img.draft("RGB", (PHOTO_SIDE, PHOTO_SIDE))
             img = ImageOps.exif_transpose(img).convert("RGB")
             img.thumbnail((PHOTO_SIDE, PHOTO_SIDE))
             out = io.BytesIO()
@@ -231,6 +240,11 @@ async def add_photo(post_id: int, request: Request, x_firewatch_device: str = He
     if declared.isdigit() and int(declared) > MAX_PHOTO:
         raise HTTPException(413, "Photo too large")
     raw = await request.body()
+    # Decoding and the database are blocking work: keep them off the event loop.
+    return await run_in_threadpool(_store_photo, post_id, request, x_firewatch_device, raw, ctype, now)
+
+
+def _store_photo(post_id: int, request: Request, x_firewatch_device: str, raw: bytes, ctype: str, now) -> dict:
     with connect() as conn:
         c = _need(conn, x_firewatch_device)
         _limit(request, "photo", c)
@@ -266,11 +280,13 @@ def _photo(conn, post_id: int):
 @public_router.get("/board/posts/{post_id}/photo")
 def get_photo(post_id: int, request: Request):
     _limit(request, "read")
+    now, is_sample = _clock()
     with connect() as conn:
         visible = conn.execute(
             "SELECT 1 FROM posts p LEFT JOIN posts par ON par.id = p.parent_id "
             "LEFT JOIN events e ON e.id = COALESCE(p.event_id, par.event_id) "
-            "WHERE p.id = ? AND p.status = 'open' AND (e.id IS NULL OR e.status NOT IN ('dismissed', 'closed'))", (post_id,)).fetchone()
+            "WHERE p.id = ? AND p.created_at >= ? AND p.is_sample = ? " + PUBLIC_WHERE,
+            (post_id, iso(now - timedelta(hours=24)), int(is_sample))).fetchone()
         if visible is None:
             raise HTTPException(404, "No photo")
         return _photo_response(_photo(conn, post_id))
