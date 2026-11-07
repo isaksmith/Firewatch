@@ -4,6 +4,7 @@
   "story": "Same packet fire with no co-op line-fault feed, which is what the $300 to $500 a year buys. Only the propane driver's report (minute 27) and the afternoon satellite pass see it.",
   "district": "cottonwood-creek",
   "synthetic": true,
+  "red_flag": true,
   "t0": "2026-03-17T18:50:00Z",
   "t0_local": "1:50 pm CDT, Tue Mar 17 2026",
   "duration_min": 62,

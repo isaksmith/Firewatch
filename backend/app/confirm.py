@@ -20,6 +20,7 @@ from .features.enrich import build_features, context_features
 from .fire_weather import gfdi_band
 from .geo import KM_PER_MILE, bearing_deg, compass, haversine_km
 from .ingest.weather import weather_at
+from .redflag import red_flag_active
 from .scoring.score import LEVELS, persist_score
 
 log = logging.getLogger(__name__)
@@ -50,12 +51,14 @@ def _district() -> District | None:
 
 
 def evaluate_event(
-    conn: sqlite3.Connection, event_id: int, weather: dict | None = None, now: datetime | None = None
+    conn: sqlite3.Connection, event_id: int, weather: dict | None = None, now: datetime | None = None,
+    red_flag: bool | None = None,
 ) -> dict:
     """Re-level an event from all its evidence and start the response if the level rose.
 
     `weather` None reuses the weather stored on the event, fetching it live if there is none.
     `now` is the response clock (the scenario replay passes its own).
+    `red_flag` None reads the stored NWS Red Flag Warning; a replay passes its scenario's explicit flag.
     """
     now = now or utcnow()
     ev = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
@@ -73,7 +76,9 @@ def evaluate_event(
             parse_iso(ev["first_seen"]), parse_iso(ev["last_seen"]), weather,
         )
     district = _district()
-    level, reason, evidence, suppression = decide_level(conn, ev, f, sat, district)
+    if red_flag is None:
+        red_flag = red_flag_active(conn, ev["lat"], ev["lon"], now)
+    level, reason, evidence, suppression = decide_level(conn, ev, f, sat, district, red_flag)
 
     prev_level = ev["recommendation"]
     status, reraised = ev["status"], 0
@@ -99,7 +104,7 @@ def evaluate_event(
 
 
 def decide_level(
-    conn: sqlite3.Connection, ev: sqlite3.Row, f: dict, sat, district: District | None
+    conn: sqlite3.Connection, ev: sqlite3.Row, f: dict, sat, district: District | None, red_flag: bool = False
 ) -> tuple[str, str, list[dict], str | None]:
     """Returns (level, reason, evidence, suppression). Evidence `counts` is strong | yes | weak | no:
     `yes` sources are independent and two of them escalate; `weak` ones only reach Investigate."""
@@ -110,6 +115,7 @@ def decide_level(
     independent: dict[str, str] = {}  # source key -> label
     weak: list[str] = []
     strong = False
+    red_flag_fault = False
 
     if sat is not None:
         last = conn.execute("SELECT MAX(acq_time) t FROM detections WHERE event_id = ?", (ev["id"],)).fetchone()["t"]
@@ -142,6 +148,9 @@ def decide_level(
                 item["note"] = "not counted: " + ", ".join(why_not)
             else:
                 independent.setdefault("line", "power line lockout")
+                if red_flag:
+                    red_flag_fault = True
+                    item["note"] = "inside the district on a Red Flag day: escalates on its own"
         elif s["kind"] == "report":
             who = s["contact_name"] if s["contact_id"] else "unregistered number"
             item["label"] = f"Text report from {who}" + (f": “{s['value']}”" if s["value"] else "")
@@ -184,7 +193,9 @@ def decide_level(
     labels = list(independent.values())
     if burn is not None and not escaped:
         return "monitor", f"Monitor: {burn['name']}'s registered burn, inside its notice and not escaped", evidence, "registered_burn"
-    if strong or n >= 2:
+    if red_flag_fault and district is not None and district.contains(ev["lat"], ev["lon"]):
+        level, reason = "escalate", "Escalate: Line fault on a Red Flag day"
+    elif strong or n >= 2:
         level = "escalate"
         reason = "Escalate: " + (" + ".join(labels) if n >= 2 else "strong satellite detection")
     elif n == 1 or weak:

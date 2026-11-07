@@ -9,6 +9,7 @@ from functools import lru_cache
 
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
+from .redflag import replay_red_flag
 from .db import connect, iso, loads, parse_iso
 from .district import load_district, sync_roster
 from .fire_weather import default_curing, gfdi, gfdi_band
@@ -69,10 +70,14 @@ def _apply(conn, sc: dict, step: dict, now: datetime) -> None:
 def _minute(conn, sc: dict, t: int) -> None:
     t0 = parse_iso(sc["t0"])
     now = t0 + timedelta(minutes=t)
-    for step in sc["timeline"]:
-        if step["t"] == t:
-            _apply(conn, sc, step, now)
-    tick(conn, now, is_sample=True)
+    token = replay_red_flag.set(bool(sc.get("red_flag", False)))
+    try:
+        for step in sc["timeline"]:
+            if step["t"] == t:
+                _apply(conn, sc, step, now)
+        tick(conn, now, is_sample=True)
+    finally:
+        replay_red_flag.reset(token)
 
 
 def _pre_steps(sc: dict) -> list[int]:

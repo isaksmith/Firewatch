@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 
 import pytest
@@ -294,15 +295,74 @@ def _first_out_minute(conn, slug: str, purpose: str, t0: str):
     return None if row["t"] is None else round((parse_iso(row["t"]) - parse_iso(t0)).total_seconds() / 60)
 
 
-@pytest.mark.parametrize("slug,fyi", [("cottonwood-creek-packet", 0), ("cottonwood-creek-packet-no-fault", 27)])
-def test_packet_scenarios_report_the_worse_number(slug, fyi):
-    # Findings, not tuning: the packet baseline pages the district at 33; Firewatch escalates at 38.
+@pytest.mark.parametrize(
+    "slug,fyi,escalate,dispatch",
+    [("cottonwood-creek-packet", None, 0, 9), ("cottonwood-creek-packet-no-fault", 27, 38, 47)],
+)
+def test_packet_scenarios_report_the_worse_number(slug, fyi, escalate, dispatch):
+    # Measured, not tuned. With the line fault on a Red Flag day Firewatch escalates at minute 0 (no FYI
+    # first); the no-fault packet has no fault to lean on and escalates at 38. Neither asks to page.
     # One scenario per DB: a second replay in the same DB loses its duty_fyi (finding, not fixed here).
     t0 = "2026-03-17T18:50:00Z"
     scenario.run_now(slug)
     with connect() as conn:
         assert _first_out_minute(conn, slug, "duty_fyi", t0) == fyi
-        assert _first_out_minute(conn, slug, "duty_escalate", t0) == 38
-        assert _first_out_minute(conn, slug, "ladder_dispatch", t0) == 47
+        assert _first_out_minute(conn, slug, "duty_escalate", t0) == escalate
+        assert _first_out_minute(conn, slug, "ladder_dispatch", t0) == dispatch
     fw = {m["key"]: m["t"] for m in scenario.status(slug)["firewatch"]}
-    assert fw["escalate"] == 38 and fw["page"] is None
+    assert fw["escalate"] == escalate and fw["page"] is None
+
+
+# --- line fault on a Red Flag day -----------------------------------------------------------------------
+
+def _nws(conn, fetched_min=0, onset_min=-60, expires_min=600, geometry="box", event="Red Flag Warning"):
+    box = {"type": "Polygon", "coordinates": [[[-97.0, 37.5], [-96.3, 37.5], [-96.3, 38.0], [-97.0, 38.0], [-97.0, 37.5]]]}
+    alert = {"id": "x", "event": event, "onset": iso(_at(onset_min)), "expires": iso(_at(expires_min)),
+             "geometry": box if geometry == "box" else geometry}
+    conn.execute(
+        "INSERT OR REPLACE INTO feed_snapshots(source, fetched_at, payload) VALUES ('nws_alerts', ?, ?)",
+        (iso(_at(fetched_min)), json.dumps({"count": 1, "alerts": [alert]})),
+    )
+
+
+def _fault_level(**nws):
+    with connect() as conn:
+        sync_roster(conn)
+        if nws is not None:
+            _nws(conn, **nws)
+        eid = add_signal(conn, "line_fault", *FIRE, iso(_at(0)), "coop:feeder-4", "lockout", is_sample=True)
+        # No red_flag passed: the live path reads the stored NWS feed.
+        return evaluate_event(conn, eid, WEATHER, _at(0))
+
+
+def test_line_fault_on_a_red_flag_day_escalates_alone():
+    out = _fault_level()
+    assert out["level"] == "escalate" and "Line fault on a Red Flag day" in out["reason"]
+
+
+def test_line_fault_without_a_warning_stays_at_investigate():
+    with connect() as conn:
+        sync_roster(conn)
+        eid = add_signal(conn, "line_fault", *FIRE, iso(_at(0)), "coop:feeder-4", "lockout", is_sample=True)
+        assert evaluate_event(conn, eid, WEATHER, _at(0))["level"] == "investigate"
+
+
+def test_other_nws_alerts_and_expired_or_distant_warnings_do_not_count():
+    assert _fault_level(event="Wind Advisory")["level"] == "investigate"
+    assert _fault_level(expires_min=-5)["level"] == "investigate"
+    assert _fault_level(onset_min=30)["level"] == "investigate"
+    far = {"type": "Polygon", "coordinates": [[[-99, 37], [-98, 37], [-98, 38], [-99, 38], [-99, 37]]]}
+    assert _fault_level(geometry=far)["level"] == "investigate"
+
+
+def test_stale_or_geometry_less_nws_feed_does_not_count():
+    assert _fault_level(fetched_min=-30)["level"] == "investigate"  # 30 min old, polled every minute
+    assert _fault_level(geometry=None)["level"] == "investigate"
+
+
+def test_momentary_trip_on_a_red_flag_day_does_not_escalate():
+    with connect() as conn:
+        sync_roster(conn)
+        _nws(conn)
+        eid = add_signal(conn, "line_fault", *FIRE, iso(_at(0)), "coop:feeder-4", "momentary", is_sample=True)
+        assert evaluate_event(conn, eid, WEATHER, _at(0))["level"] != "escalate"
