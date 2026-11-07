@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api, BOARD_ADMIN_KEY, type AdminPost } from '../api'
+import { timeAgo } from './format'
 
 // Category styling reuses tokens already in the dashboard: fire is the escalate red,
 // smoke the investigate amber, hazard the sample cyan, burn the ok green.
@@ -24,3 +25,17 @@ export function useBoardPosts() {
 }
 
 export const isPinnable = (p: AdminPost) => p.status === 'open' && p.lat != null && p.lon != null
+
+export const threadLine = (p: { thread_size?: number }) =>
+  p.thread_size != null && p.thread_size > 1 ? `Part of ${p.thread_size} reports in this area` : null
+
+/** Server age_min when present (replay posts carry old timestamps), else the browser clock. */
+export function postAge(p: { age_min?: number; created_at: string }): string {
+  if (p.age_min == null) return timeAgo(p.created_at)
+  const mins = Math.max(0, Math.round(p.age_min))
+  if (mins < 1) return 'NOW'
+  if (mins < 60) return `T+${mins}M`
+  const hours = Math.round(mins / 60)
+  if (hours < 48) return `T+${hours}H`
+  return `T+${Math.round(hours / 24)}D`
+}

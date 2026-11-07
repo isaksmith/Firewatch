@@ -513,6 +513,9 @@ export interface BoardPost {
   unconfirmed: boolean
   held?: boolean
   event_status?: string | null
+  has_photo?: boolean
+  thread_size?: number
+  age_min?: number
 }
 
 export interface AdminPost extends BoardPost {
@@ -600,7 +603,23 @@ async function withDevice<T>(call: () => Promise<T>): Promise<T & { reissued: bo
   return { ...(await call()), reissued: true }
 }
 
+export const boardPhotoUrl = (id: number) => `${BASE}/board/posts/${id}/photo`
+export const boardAdminPhotoUrl = (id: number) => `${BASE}/board/admin/posts/${id}/photo`
+
+async function uploadPhoto(postId: number, blob: Blob): Promise<void> {
+  await ensureDevice()
+  const headers: Record<string, string> = { 'Content-Type': blob.type }
+  const token = getDeviceToken()
+  if (token) headers['X-Firewatch-Device'] = token
+  const res = await fetch(`${BASE}/board/posts/${postId}/photo`, { method: 'POST', headers, body: blob })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new BoardError(typeof body.detail === 'string' ? body.detail : `${res.status} ${res.statusText}`, res.status)
+  }
+}
+
 export const boardApi = {
+  uploadPhoto,
   /** With no token there is no identity to look up, so no request goes out. */
   me: async (token?: string): Promise<BoardMe | null> => {
     const t = token ?? getDeviceToken()

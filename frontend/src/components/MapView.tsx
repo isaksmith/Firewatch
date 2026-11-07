@@ -64,15 +64,18 @@ function sensorLine(s: SensorReadings | null): { text: string; high: boolean } |
   return parts.length ? { text: parts.join(' · '), high: (s.pm25 ?? 0) >= PM25_HIGH } : null
 }
 
-function BoardPin({ p, onPick }: { p: AdminPost; onPick: (p: AdminPost) => void }) {
+function BoardPin({ group, onPick }: { group: AdminPost[]; onPick: (p: AdminPost) => void }) {
   const [tip, setTip] = useState(false)
+  // Newest post in the group is the one the panel opens on.
+  const p = group.reduce((a, b) => (b.id > a.id ? b : a))
   const m = catMeta(p.category)
+  const n = group.length
   return (
     <Marker longitude={p.lon!} latitude={p.lat!} anchor="center">
       <div className="relative">
         <button
           type="button"
-          aria-label={`${m.label} post: ${p.body}`}
+          aria-label={n > 1 ? `${n} community posts here, newest: ${p.body}` : `${m.label} post: ${p.body}`}
           onClick={(e) => {
             e.stopPropagation()
             onPick(p)
@@ -81,17 +84,27 @@ function BoardPin({ p, onPick }: { p: AdminPost; onPick: (p: AdminPost) => void 
           onMouseLeave={() => setTip(false)}
           onFocus={() => setTip(true)}
           onBlur={() => setTip(false)}
-          className="flex h-6 w-6 items-center justify-center"
+          className="flex h-6 min-w-6 items-center justify-center gap-0.5"
         >
           <span className={`block h-3 w-3 ${p.estimated ? `border border-dashed ${m.border} bg-void` : m.bg}`} />
+          {n > 1 && <span className="num text-[10px] font-semibold text-text">{n}</span>}
         </button>
         {tip && (
           <span className="hud pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 w-56 -translate-x-1/2 px-2 py-1.5 text-left text-[11.5px] leading-snug text-text">
             <span className={`label block ${m.text}`}>
               {m.label}
               {p.estimated ? ' · approx location' : ''}
+              {n > 1 ? ` · ${n} posts` : ''}
             </span>
-            {p.body}
+            {group
+              .slice()
+              .sort((a, b) => b.id - a.id)
+              .slice(0, 3)
+              .map((g) => (
+                <span key={g.id} className="block break-words">
+                  {g.body}
+                </span>
+              ))}
           </span>
         )}
       </div>
@@ -152,6 +165,12 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
   const meshNodes = useQuery({ queryKey: ['mesh-nodes'], queryFn: api.meshNodes, refetchInterval: 10_000 })
   const boardPosts = useBoardPosts()
   const pins = (boardPosts.data ?? []).filter(isPinnable)
+  const pinGroups = useMemo(() => {
+    const g = new globalThis.Map<string, AdminPost[]>()
+    for (const p of pins) g.set(`${p.lat},${p.lon}`, [...(g.get(`${p.lat},${p.lon}`) ?? []), p])
+    return [...g.entries()]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardPosts.data])
   const placed = (meshNodes.data ?? []).filter((n) => n.lat != null && n.lon != null)
   const district = useQuery({ queryKey: ['district'], queryFn: api.district, retry: false })
   const lines = useQuery({ queryKey: ['layer', 'power_lines'], queryFn: () => api.layer('power_lines') })
@@ -298,7 +317,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
         })}
         <LiveLayers feeds={feeds} />
         {layers.mesh && placed.map((n) => <MeshMarker key={n.node_id} n={n} />)}
-        {layers.board && pins.map((p) => <BoardPin key={p.id} p={p} onPick={onBoardPin} />)}
+        {layers.board && pinGroups.map(([k, g]) => <BoardPin key={k} group={g} onPick={onBoardPin} />)}
         <CursorReadout />
       </Map>
 

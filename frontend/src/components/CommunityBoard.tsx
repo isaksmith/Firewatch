@@ -1,9 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, BOARD_ADMIN_KEY, type AdminPost, type PendingMember, type StationAction } from '../api'
-import { catMeta, useBoardPosts } from '../lib/board'
-import { timeAgo } from '../lib/format'
+import { api, BOARD_ADMIN_KEY, boardAdminPhotoUrl, type AdminPost, type PendingMember, type StationAction } from '../api'
+import { catMeta, postAge, threadLine, useBoardPosts } from '../lib/board'
 import { useOperator } from '../lib/operator'
 
 const PENDING_KEY = ['members-pending'] as const
@@ -82,9 +81,15 @@ function PostRow({ post, child, focused }: { post: AdminPost; child?: boolean; f
         {post.event_id != null && <Mark tone="text-sample">{`Alert ${post.event_status ?? ''}`.trim()}</Mark>}
       </div>
       <p className="mt-1 text-[12.5px] leading-snug break-words text-text">{post.body}</p>
+      {post.has_photo && (
+        <a href={boardAdminPhotoUrl(post.id)} target="_blank" rel="noreferrer" aria-label="Open photo full size" className="mt-2 block h-16 w-24 border border-line">
+          <img src={boardAdminPhotoUrl(post.id)} alt="Photo from the reporter" loading="lazy" className="h-full w-full object-cover" />
+        </a>
+      )}
       <p className="num mt-1 text-[10px] text-dim">
-        {post.author ?? 'Unknown'} · {timeAgo(post.created_at)} · {post.confirms} confirms · {post.notes ?? 0} notes
+        {post.author ?? 'Unknown'} · {postAge(post)} · {post.confirms} confirms · {post.notes ?? 0} notes
       </p>
+      {threadLine(post) && <p className="mt-1 text-[12px] text-muted">{threadLine(post)}</p>}
 
       {open && (
         <div className="mt-2 flex flex-wrap gap-2">

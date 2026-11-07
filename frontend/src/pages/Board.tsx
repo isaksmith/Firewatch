@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import {
   boardApi,
+  boardPhotoUrl,
   BoardError,
   getDeviceToken,
   isWellFormedToken,
@@ -12,6 +13,7 @@ import {
   type StationAction,
 } from '../api'
 import { Mark } from '../components/ui'
+import { threadLine } from '../lib/board'
 
 const CATEGORIES: { key: BoardCategory; label: string }[] = [
   { key: 'fire', label: 'Fire' },
@@ -38,13 +40,57 @@ function getPosition(): Promise<Position> {
 function ago(iso: string, now: number): string {
   const t = Date.parse(iso.endsWith('Z') || /[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z')
   if (Number.isNaN(t)) return ''
-  const s = Math.max(0, Math.round((now - t) / 1000))
-  if (s < 60) return 'just now'
-  const m = Math.round(s / 60)
+  return agoMin(Math.max(0, (now - t) / 60000))
+}
+
+function agoMin(min: number): string {
+  if (min < 1) return 'just now'
+  const m = Math.round(min)
   if (m < 60) return `${m} min ago`
   const h = Math.round(m / 60)
   if (h < 24) return `${h} hr ago`
   return `${Math.round(h / 24)} d ago`
+}
+
+/** Server age_min when present (replay posts carry old timestamps), else the browser clock. */
+function postAgo(p: BoardPost, now: number): string {
+  return p.age_min != null ? agoMin(Math.max(0, p.age_min)) : ago(p.created_at, now)
+}
+
+const MAX_PHOTO_BYTES = 2 * 1024 * 1024
+const MAX_VIDEO_SECONDS = 15
+
+function canvasJpeg(bmp: ImageBitmap, longest: number, quality: number): Promise<Blob | null> {
+  const scale = Math.min(1, longest / Math.max(bmp.width, bmp.height))
+  const c = document.createElement('canvas')
+  c.width = Math.max(1, Math.round(bmp.width * scale))
+  c.height = Math.max(1, Math.round(bmp.height * scale))
+  const ctx = c.getContext('2d')
+  if (!ctx) return Promise.resolve(null)
+  ctx.drawImage(bmp, 0, 0, c.width, c.height)
+  return new Promise((resolve) => c.toBlob(resolve, 'image/jpeg', quality))
+}
+
+/** Shrink on the phone. Redrawing through a canvas also drops EXIF, including location. */
+async function shrinkPhoto(file: File): Promise<Blob> {
+  const bmp = await createImageBitmap(file)
+  try {
+    let out = await canvasJpeg(bmp, 1600, 0.75)
+    if (out && out.size > MAX_PHOTO_BYTES) out = await canvasJpeg(bmp, 1280, 0.6)
+    if (!out) throw new Error('no blob')
+    return out
+  } finally {
+    bmp.close()
+  }
+}
+
+function uploadMessage(e: unknown): { text: string; retry: boolean } {
+  if (e instanceof BoardError) {
+    if (e.status === 413) return { text: 'That photo is too large. Try again with a new one.', retry: false }
+    if (e.status === 415) return { text: 'That file is not a photo we can use.', retry: false }
+    if (e.status === 429) return { text: e.message, retry: true }
+  }
+  return { text: 'Posted. The photo did not send.', retry: true }
 }
 
 function seeText(n: number): string {
@@ -71,17 +117,91 @@ function confirmMessage(reason: string, counted: boolean): string {
   }
 }
 
-function NewPost({ onPosted }: { onPosted: () => void }) {
+function NewPost({ onPosted, onVideoSaved }: { onPosted: () => void; onVideoSaved: (postId: number, url: string) => void }) {
   const [category, setCategory] = useState<BoardCategory>('fire')
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
   const [attach, setAttach] = useState(true)
   const [msg, setMsg] = useState<{ text: string; bad?: boolean } | null>(null)
+  const [photo, setPhoto] = useState<{ blob: Blob; url: string } | null>(null)
+  const [video, setVideo] = useState<string | null>(null)
+  const [retry, setRetry] = useState<{ postId: number; blob: Blob } | null>(null)
+  const photoInput = useRef<HTMLInputElement>(null)
+  const videoInput = useRef<HTMLInputElement>(null)
+  const live = useRef<{ photo: string | null; video: string | null }>({ photo: null, video: null })
+  live.current = { photo: photo?.url ?? null, video }
+
+  // Revoke blob URLs still held by the form when the page goes away.
+  useEffect(
+    () => () => {
+      if (live.current.photo) URL.revokeObjectURL(live.current.photo)
+      if (live.current.video) URL.revokeObjectURL(live.current.video)
+    },
+    [],
+  )
+
+  function clearPhoto() {
+    if (photo) URL.revokeObjectURL(photo.url)
+    setPhoto(null)
+  }
+  function clearVideo() {
+    if (video) URL.revokeObjectURL(video)
+    setVideo(null)
+  }
+
+  async function pickPhoto(file: File | undefined) {
+    if (!file) return
+    try {
+      const blob = await shrinkPhoto(file)
+      if (photo) URL.revokeObjectURL(photo.url)
+      setPhoto({ blob, url: URL.createObjectURL(blob) })
+      setMsg(null)
+    } catch {
+      setMsg({ text: 'Could not read that photo.', bad: true })
+    }
+  }
+
+  function pickVideo(file: File | undefined) {
+    if (!file) return
+    const url = URL.createObjectURL(file)
+    const probe = document.createElement('video')
+    probe.preload = 'metadata'
+    probe.onloadedmetadata = () => {
+      if (!(probe.duration <= MAX_VIDEO_SECONDS)) {
+        URL.revokeObjectURL(url)
+        setMsg({ text: 'Keep videos under 15 seconds.', bad: true })
+        return
+      }
+      if (video) URL.revokeObjectURL(video)
+      setVideo(url)
+      setMsg(null)
+    }
+    probe.onerror = () => {
+      URL.revokeObjectURL(url)
+      setMsg({ text: 'Could not read that video.', bad: true })
+    }
+    probe.src = url
+  }
+
+  async function sendPhoto(postId: number, blob: Blob) {
+    setRetry(null)
+    setMsg({ text: 'Posted. Sending photo...' })
+    try {
+      await boardApi.uploadPhoto(postId, blob)
+      setMsg({ text: 'Photo sent.' })
+      onPosted()
+    } catch (e) {
+      const m = uploadMessage(e)
+      setMsg({ text: m.text, bad: true })
+      if (m.retry) setRetry({ postId, blob })
+    }
+  }
 
   async function submit() {
     if (busy || !body.trim()) return
     setBusy(true)
     setMsg(null)
+    setRetry(null)
     try {
       const pos = attach ? await getPosition() : null
       const r = await boardApi.post({ category, body: body.trim(), lat: pos?.lat ?? null, lon: pos?.lon ?? null, attach_location: attach })
@@ -95,9 +215,20 @@ function NewPost({ onPosted }: { onPosted: () => void }) {
       if (r.used_home) text += ' We could not get your location, so we used your home address on file.'
       else if (attach && !pos) text += ' This post has no location, because we could not get yours.'
       if (r.reissued) text += ' Your sign-in had expired, so this went in as a community post.'
+      if (video) {
+        text += ' Video saved on this phone. It sends when you have better signal.'
+        // The blob URL now belongs to the board page, which shows it on the author's card.
+        onVideoSaved(r.post_id, video)
+        setVideo(null)
+      }
       setMsg({ text })
       setBody('')
       onPosted()
+      if (photo) {
+        const sending = photo
+        clearPhoto()
+        await sendPhoto(r.post_id, sending.blob)
+      }
     } catch (e) {
       setMsg({ text: `Could not post: ${e instanceof Error ? e.message : 'try again'}`, bad: true })
     } finally {
@@ -142,6 +273,62 @@ function NewPost({ onPosted }: { onPosted: () => void }) {
           <span className="block text-[12px] text-muted">Helps the fire district find it. The public sees it rounded to about a kilometer.</span>
         </span>
       </label>
+      <div className="mt-3 grid grid-cols-2 gap-1.5">
+        <button type="button" className="btn !h-11" disabled={busy} onClick={() => photoInput.current?.click()}>
+          Add photo
+        </button>
+        <button type="button" className="btn !h-11" disabled={busy} onClick={() => videoInput.current?.click()}>
+          Add video
+        </button>
+      </div>
+      <input
+        ref={photoInput}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        aria-label="Photo file"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          e.target.value = ''
+          void pickPhoto(f)
+        }}
+      />
+      {/* The video upload is a mock on purpose: the file stays in page memory and nothing reaches the server. */}
+      <input
+        ref={videoInput}
+        type="file"
+        accept="video/*"
+        capture="environment"
+        className="hidden"
+        aria-label="Video file"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          e.target.value = ''
+          pickVideo(f)
+        }}
+      />
+      {photo && (
+        <div className="mt-3">
+          <div className="relative inline-block max-w-full">
+            <img src={photo.url} alt="Photo to send" className="block max-h-40 max-w-full border border-line" />
+            <button type="button" aria-label="Remove photo" onClick={clearPhoto} className="btn absolute top-1 right-1 !h-11 !w-11 !px-0">
+              x
+            </button>
+          </div>
+          <p className="mt-1 text-[12px] text-muted">Location data is removed from photos.</p>
+        </div>
+      )}
+      {video && (
+        <div className="mt-3">
+          <div className="relative inline-block max-w-full">
+            <video src={video} muted playsInline controls className="block max-h-40 max-w-full border border-line" />
+            <button type="button" aria-label="Remove video" onClick={clearVideo} className="btn absolute top-1 right-1 !h-11 !w-11 !px-0">
+              x
+            </button>
+          </div>
+          <p className="mt-1 text-[12px] text-muted">Video sends when you have better signal. For now it stays on this phone.</p>
+        </div>
+      )}
       <button type="button" onClick={submit} disabled={busy || !body.trim()} className="btn btn-primary mt-3 !h-11 w-full">
         {busy ? 'Posting' : 'Post'}
       </button>
@@ -149,6 +336,11 @@ function NewPost({ onPosted }: { onPosted: () => void }) {
         <p role="status" className={`mt-3 text-[13px] leading-snug ${msg.bad ? 'text-escalate' : 'text-text'}`}>
           {msg.text}
         </p>
+      )}
+      {retry && (
+        <button type="button" className="btn mt-2 !h-11" onClick={() => void sendPhoto(retry.postId, retry.blob)}>
+          Try again
+        </button>
       )}
     </section>
   )
@@ -159,17 +351,20 @@ function PostCard({
   now,
   station,
   canPage,
+  videoUrl,
   onChanged,
 }: {
   post: BoardPost
   now: number
   station: boolean
   canPage: boolean
+  videoUrl?: string
   onChanged: () => void
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [note, setNote] = useState<{ text: string; bad?: boolean } | null>(null)
   const [pageArmed, setPageArmed] = useState(false)
+  const [zoom, setZoom] = useState(false)
   const open = post.status === 'open'
 
   useEffect(() => {
@@ -177,6 +372,15 @@ function PostCard({
     const t = setTimeout(() => setPageArmed(false), 6000)
     return () => clearTimeout(t)
   }, [pageArmed])
+
+  useEffect(() => {
+    if (!zoom) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setZoom(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [zoom])
 
   async function confirm(kind: ConfirmKind) {
     if (busy) return
@@ -238,10 +442,34 @@ function PostCard({
 
       <p className="mt-2 text-[15px] leading-snug break-words whitespace-pre-wrap text-text">{post.body}</p>
 
+      {post.has_photo && (
+        <button type="button" aria-label="Enlarge photo" onClick={() => setZoom(true)} className="mt-2 block min-h-11 w-full">
+          <img src={boardPhotoUrl(post.id)} alt="Photo from the reporter" loading="lazy" className="block h-auto w-full border border-line" />
+        </button>
+      )}
+      {zoom && (
+        <button
+          type="button"
+          aria-label="Close photo"
+          onClick={() => setZoom(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-void/90 p-2"
+        >
+          <img src={boardPhotoUrl(post.id)} alt="Photo from the reporter" className="max-h-full max-w-full object-contain" />
+        </button>
+      )}
+      {videoUrl && (
+        <div className="mt-2">
+          <p className="label mb-1">Video waiting to send</p>
+          <video src={videoUrl} muted playsInline controls className="block max-h-48 max-w-full border border-line" />
+        </div>
+      )}
+
       <p className="mt-2 text-[12px] text-muted">
-        {post.author ?? 'A neighbor'} <span className="text-dim">·</span> {ago(post.created_at, now)} <span className="text-dim">·</span>{' '}
+        {post.author ?? 'A neighbor'} <span className="text-dim">·</span> {postAgo(post, now)} <span className="text-dim">·</span>{' '}
         <span className="text-text">{seeText(post.confirms)}</span>
       </p>
+
+      {threadLine(post) && <p className="mt-2 text-[12px] text-muted">{threadLine(post)}</p>}
 
       {typeof post.notes === 'number' && post.notes > 0 && (
         <p className="mt-2 text-[12px] text-muted">
@@ -309,6 +537,16 @@ export function Board() {
   const qc = useQueryClient()
   const [now, setNow] = useState(() => Date.now())
   const lastGood = useRef<BoardPost[] | null>(null)
+  // Mock video: blob URLs for this phone's own posts, page memory only.
+  const [videos, setVideos] = useState<Record<number, string>>({})
+  const videosRef = useRef(videos)
+  videosRef.current = videos
+  useEffect(
+    () => () => {
+      Object.values(videosRef.current).forEach((u) => URL.revokeObjectURL(u))
+    },
+    [],
+  )
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000)
@@ -420,7 +658,7 @@ export function Board() {
           </p>
         )}
 
-        <NewPost onPosted={refresh} />
+        <NewPost onPosted={refresh} onVideoSaved={(id, url) => setVideos((v) => ({ ...v, [id]: url }))} />
 
         <section className="flex flex-col gap-3" aria-label="Posts">
           <h2 className="label">Last 24 hours</h2>
@@ -437,7 +675,7 @@ export function Board() {
           )}
           {list && list.length === 0 && <p className="text-[13px] text-muted">Nothing posted in the last 24 hours.</p>}
           {list?.map((p) => (
-            <PostCard key={p.id} post={p} now={now} station={station} canPage={canPage} onChanged={refresh} />
+            <PostCard key={p.id} post={p} now={now} station={station} canPage={canPage} videoUrl={videos[p.id]} onChanged={refresh} />
           ))}
         </section>
       </main>
