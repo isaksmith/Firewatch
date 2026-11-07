@@ -16,6 +16,54 @@ In the challenge scenario (Cottonwood Creek Fire District: 450 sq mi, 18 volunte
 
 Humans decide every page. Every signal, text, and decision is logged on the event.
 
+```mermaid
+flowchart LR
+  subgraph Detect
+    LF["Co-op line fault<br/>(lockout, High fire danger)"]
+    SAT["Satellite hotspot<br/>VIIRS / MODIS / GOES"]
+    TXT["Texted report<br/>FIRE"]
+  end
+
+  subgraph Confirm
+    EV["One event per fire<br/>(3 km / 6 h)"]
+    ML["ML score + guardrails"]
+    BURN{"Registered burn,<br/>not escaped?"}
+    LVL{"Independent<br/>sources"}
+    ASK["Ask 3 nearest neighbors<br/>1 smoke · 2 no · 3 my burn"]
+  end
+
+  subgraph Respond
+    MON["Monitor<br/>texts nobody"]
+    FYI["Investigate<br/>duty officer FYI"]
+    ESC["Escalate<br/>duty officer: Reply PAGE"]
+    LAD["No answer:<br/>chief at 3 min, dispatch at 9 min"]
+    PAGE["PAGE<br/>county dispatch + volunteers"]
+    DW["Downwind ranchers:<br/>arrival estimate"]
+    EQ["Water truck / disc:<br/>can you help?"]
+    MA["Mutual aid draft<br/>chief replies SEND"]
+  end
+
+  LF --> EV
+  SAT --> EV
+  TXT --> EV
+  SAT --> ML --> EV
+  EV --> BURN
+  BURN -- yes --> MON
+  BURN -- no --> LVL
+  LVL -- none --> MON
+  LVL -- one --> FYI
+  FYI --> ASK
+  ASK -- "reply 1" --> EV
+  LVL -- "two, or strong satellite" --> ESC
+  ESC -.-> LAD
+  ESC -- "duty officer replies PAGE" --> PAGE
+  PAGE --> DW
+  PAGE --> EQ
+  PAGE -- "too big for 2 trucks,<br/>or under 2 responding" --> MA
+```
+
+In the Cottonwood Creek replay this chain pages at T+9 instead of today's 911 call at T+31. The first truck arrives at T+40 to about 220 acres instead of 520 at T+62 (spread model estimate, not field data).
+
 **Status:** the satellite path (ingest, clustering, enrichment, ML scoring, map, 3D spread, logged actions) is built and evaluated on real Kansas data. The whole chain also runs end to end in the **Cottonwood Creek replay**: line fault, neighbor texts, two-source confirmation, PAGE by text, downwind warnings with arrival estimates, mutual aid, and a registered burn that texts nobody. Texts go to a simulated outbox. Twilio sending is written but not yet tried on a real phone. The plan, honest cost numbers, and failure modes are in [docs/PLAN.md](docs/PLAN.md).
 
 ## Docs
