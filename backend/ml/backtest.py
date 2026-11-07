@@ -23,6 +23,7 @@ import io
 import json
 import logging
 import math
+import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -61,7 +62,19 @@ FIRES = {
         "dates": ("2017-03-06", "2017-03-08"), "box": (36.55, 37.8, -100.6, -99.3),
         "sources": [("viirs-snpp", 2017), ("modis", 2017)],
     },
+    "ranger-road-2026": {
+        "title": "Ranger Road fire, Beaver Co. OK (February 17, 2026; 283,283 ac)",
+        # 2026 isn't in the yearly archive files yet: the FIRMS area API (needs FIRMS_MAP_KEY) and GOES-19 instead.
+        # The box leaves out the Stevens fire (Texas Co. OK) and Andrew Lane fire (Seward Co. KS) to the west.
+        "api": {"date": "2026-02-17", "days": 2, "sources": ["VIIRS_NOAA20_SP", "VIIRS_NOAA21_NRT", "MODIS_SP", "VIIRS_SNPP_SP"]},
+        "box": (36.4, 37.7, -100.6, -99.2),
+        "goes": "noaa-goes19",
+        "discovered": "2026-02-17T17:19:00+00:00",  # WFIGS FireDiscoveryDateTime
+        "packet_first_hour_acres": 15000,  # competitor packet: "burned 15,000 acres in its first hour"
+    },
 }
+GOES_EVERY_MIN = 30
+GOES_HOURS = 8
 NOT_SCORED = {
     "trego-dec-2021": {
         "why": "Downed lines started several separate fires across Trego, Ellis and Russell counties after the first "
@@ -83,7 +96,9 @@ def detections(slug: str) -> list[dict]:
     f = FIRES[slug]
     s, n, w, e = f["box"]
     rows = []
-    for folder, year in f["sources"]:
+    if "api" in f:
+        rows = _api_detections(f)
+    for folder, year in f.get("sources", []):
         text = httpx.get(FIRMS_URL.format(folder=folder, year=year), timeout=300, follow_redirects=True).text
         for r in csv.DictReader(io.StringIO(text)):
             if not (f["dates"][0] <= r["acq_date"] <= f["dates"][1]):
@@ -96,6 +111,61 @@ def detections(slug: str) -> list[dict]:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(rows))
     return rows
+
+
+def _api_detections(f: dict) -> list[dict]:
+    """FIRMS area API (recent years not yet in the yearly files). A source that keeps failing is skipped."""
+    from app.config import get_settings
+
+    key = get_settings().firms_map_key
+    if not key:
+        raise RuntimeError("FIRMS_MAP_KEY is needed for this fire (set it in .env)")
+    s, n, w, e = f["box"]
+    api = f["api"]
+    rows = []
+    for src in api["sources"]:
+        for attempt in range(3):
+            try:
+                r = httpx.get(f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{key}/{src}/{w},{s},{e},{n}/{api['days']}/{api['date']}",
+                              timeout=240)
+                if r.status_code == 200 and r.text.startswith("latitude"):
+                    break
+            except httpx.HTTPError:
+                pass
+            time.sleep(20 * (attempt + 1))
+        else:
+            log.warning("FIRMS %s unavailable; skipped", src)
+            continue
+        for x in csv.DictReader(io.StringIO(r.text)):
+            t = datetime.strptime(f"{x['acq_date']} {x['acq_time'].zfill(4)}", "%Y-%m-%d %H%M").replace(tzinfo=timezone.utc)
+            rows.append({"lat": float(x["latitude"]), "lon": float(x["longitude"]), "t": t.isoformat(), "sensor": src.lower(),
+                         "conf": x.get("confidence"), "frp": float(x.get("frp") or 0)})
+    return rows
+
+
+def goes_looks(slug: str, t0: datetime, horizon_min: float) -> list[dict]:
+    """GOES-R fire pixels (ABI FDCC, 2 km) every GOES_EVERY_MIN minutes after t0, inside the fire's box."""
+    from app.ingest import goes_fire, s3
+
+    f = FIRES[slug]
+    path = OUT_DIR / f"{slug}-goes.json"
+    if path.exists():
+        cached = json.loads(path.read_text())
+        return [c | {"t": datetime.fromisoformat(c["t"])} for c in cached]
+    s, n, w, e = f["box"]
+    goes_fire.in_bbox = lambda lon, lat: s <= lat <= n and w <= lon <= e  # the feed filters to the Kansas box
+    out = []
+    for k in range(1, int(min(horizon_min, GOES_HOURS * 60) // GOES_EVERY_MIN) + 1):
+        want = t0 + timedelta(minutes=k * GOES_EVERY_MIN)
+        keys = s3.list_keys(f["goes"], s3.hour_prefix(goes_fire.PRODUCT, want))
+        if not keys:
+            continue
+        key = min(keys, key=lambda kk: abs((s3.scan_start(kk) - want).total_seconds()))
+        px = goes_fire.parse(s3.get_bytes(f["goes"], key), f["goes"].split("-")[-1])
+        if px:
+            out.append({"t": s3.scan_start(key), "points": [(p["lat"], p["lon"]) for p in px]})
+    path.write_text(json.dumps([o | {"t": o["t"].isoformat()} for o in out]))
+    return out
 
 
 def _km(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -143,8 +213,13 @@ def fire_case(slug: str) -> dict:
     pts = [(r["lat"], r["lon"]) for r in first]
     starts = [c for c in clusters(pts, FIRST_CLUSTER_KM) if len(c) >= MIN_START_PIXELS]
     evals = [{"t": t, "minutes": (t - t0).total_seconds() / 60, "points": [(r["lat"], r["lon"]) for r in rs],
-              "sensors": sorted({r["sensor"] for r in rs})}
+              "sensors": sorted({r["sensor"] for r in rs}), "goes": False}
              for t, rs in ls[1:] if (t - t0).total_seconds() / 60 <= HORIZON_MIN]
+    if FIRES[slug].get("goes"):
+        evals += [{"t": g["t"], "minutes": (g["t"] - t0).total_seconds() / 60, "points": g["points"],
+                   "sensors": [FIRES[slug]["goes"].split("-")[-1]], "goes": True}
+                  for g in goes_looks(slug, t0, max([e["minutes"] for e in evals] or [HORIZON_MIN]))]
+        evals.sort(key=lambda e: e["minutes"])
     return {"slug": slug, "t0": t0, "start": [p for c in starts for p in c], "start_clusters": len(starts),
             "anchor": starts[0], "first_sensors": sorted({r["sensor"] for r in first}), "evals": evals}
 
@@ -153,7 +228,7 @@ def situation(case: dict) -> Situation:
     lat = float(np.mean([p[0] for p in case["anchor"]]))
     lon = float(np.mean([p[1] for p in case["anchor"]]))
     t0 = case["t0"]
-    series, _ = weather_series(lat, lon, t0 - timedelta(hours=1), 14)
+    series, _ = weather_series(lat, lon, t0 - timedelta(hours=1), HORIZON_MIN // 60 + 2)
     src = Provenance(source="open-meteo archive (hourly, at the fire)", kind="observed")
     return Situation(
         ignition=Ignition(lat=lat, lon=lon, time=t0, points=case["start"], fire_age_min=None,
@@ -164,12 +239,18 @@ def situation(case: dict) -> Situation:
 
 # ---------- scoring ----------
 
+FRONT_WINDOW_MIN = 60
+
+
 def _head_km(grid: np.ndarray, dom, starts: list[tuple[float, float]], minute: float) -> float:
-    """Distance from the nearest start pixel that covers 90% of the burned cells (same measure as observed)."""
-    burned = grid <= minute
-    if not burned.any():
+    """Distance from the nearest start pixel that covers 90% of the forecast's ACTIVE FRONT: cells that caught fire
+    in the last hour. Satellites see active flame, not burned-out interior, so this is the like-for-like measure."""
+    front = (grid <= minute) & (grid > minute - FRONT_WINDOW_MIN)
+    if not front.any():
+        front = grid <= minute  # the fire stopped: fall back to its whole footprint
+    if not front.any():
         return 0.0
-    ii, jj = np.nonzero(burned)
+    ii, jj = np.nonzero(front)
     lat, lon = dom.lats[ii], dom.lons[jj]
     kx = km_per_deg_lon(float(np.mean(lat)))
     sl = np.array(starts)
@@ -210,7 +291,7 @@ def score(case: dict) -> dict:
 
         rows.append({
             "look": e["t"].strftime("%Y-%m-%d %H:%MZ"), "hours": round(m / 60, 1), "detections": len(e["points"]),
-            "sensors": e["sensors"],
+            "sensors": e["sensors"], "goes": e["goes"],
             "v2_reached_median": round(reached(a["t50"], dom.lats, dom.lons), 3),
             "v2_reached_worst": round(reached(a["t10"], dom.lats, dom.lons), 3),
             "v1_reached": round(reached(v1_arr, v1_dom.lats, v1_dom.lons), 3),
@@ -220,7 +301,9 @@ def score(case: dict) -> dict:
         })
     _figure(case, fc, sit)
     w = sit.weather_steps()
+    first_hour = _first_hour(case, sit) if FIRES[case["slug"]].get("discovered") else None
     return {
+        "first_hour": first_hour,
         "slug": case["slug"], "title": FIRES[case["slug"]]["title"],
         "t0": case["t0"].strftime("%Y-%m-%d %H:%MZ"), "start_pixels": len(case["start"]),
         "start_clusters": case["start_clusters"],
@@ -230,6 +313,43 @@ def score(case: dict) -> dict:
                     "rh_min": round(min(s.rh_pct for s in w))},
         "fuel": fc["assumptions"]["fuel"], "cell_m": fc["grid"]["cell_m"], "horizon_min": horizon,
         "looks": rows,
+    }
+
+
+def _first_hour(case: dict, sit: Situation) -> dict:
+    """Start a new point ignition at the reported discovery time, at the upwind end of the first look, and
+    compare its first-hour size with the packet's figure and its reach at the first look with what was seen."""
+    f = FIRES[case["slug"]]
+    t_disc = datetime.fromisoformat(f["discovered"])
+    lead = (case["t0"] - t_disc).total_seconds() / 60
+    series, _ = weather_series(sit.ignition.lat, sit.ignition.lon, t_disc - timedelta(hours=1), int(lead // 60) + 3)
+    w0 = min(series, key=lambda h: abs((h["time"] - t_disc).total_seconds()))
+    down = math.radians((w0["wind_from_deg"] + 180) % 360)
+    ref = case["anchor"][0]
+    kx = km_per_deg_lon(ref[0])
+
+    def along(p):  # km downwind of the reference pixel
+        return (p[1] - ref[1]) * kx * math.sin(down) + (p[0] - ref[0]) * KM_PER_DEG_LAT * math.cos(down)
+
+    ign = min(case["anchor"], key=along)
+    sit0 = Situation(
+        ignition=Ignition(lat=ign[0], lon=ign[1], time=t_disc, fire_age_min=0,
+                          provenance=Provenance(source="upwind end of the first satellite look (assumed ignition)", kind="inferred")),
+        weather=Weather(hours=[WeatherHour(**h) for h in series], provenance=sit.weather.provenance),
+    )
+    horizon = int(math.ceil(lead / 10) * 10)
+    fc = forecast(sit0, max(60, horizon), MEMBERS)
+    cp = {c["minutes"]: c for c in fc["checkpoints"]}
+    a = fc["_arrival"]
+    seen = float(np.percentile([_km(ign, p) for p in case["anchor"]], 90))
+    reach = [round(_head_km(a[k], a["domain"], [ign], lead), 1) for k in ("t90", "t50", "t10")]
+    to_ac = 1 / 0.404686
+    return {
+        "discovered": t_disc.strftime("%H:%MZ"), "first_look": case["t0"].strftime("%H:%MZ"), "lead_min": round(lead),
+        "ignition": [round(ign[0], 4), round(ign[1], 4)], "wind_at_start": f"{round(w0['wind_kmh'])} km/h from {round(w0['wind_from_deg'])}°",
+        "acres_60": {k: round(v * to_ac) for k, v in cp[60]["area_ha"].items()} if 60 in cp else None,
+        "packet_acres_60": f["packet_first_hour_acres"],
+        "reach_at_first_look_km": {"seen": round(seen, 1), "forecast_p90_p50_p10": reach},
     }
 
 
@@ -273,17 +393,25 @@ def report(results: list[dict]) -> str:
         return f"{x:.0%}"
 
     sections = []
-    totals = {"v2m": [], "v2w": [], "v1": [], "n": []}
+    totals = {g: {"v2m": [], "v2w": [], "v1": [], "n": []} for g in ("polar", "goes")}
     for r in results:
         rows = []
         for lk in r["looks"]:
             lo, mid, hi = lk["head_v2_km"]
-            rows.append(f"| {lk['look']} (+{lk['hours']} h) | {lk['detections']} | {pct(lk['v2_reached_median'])} | "
+            tag = " GOES" if lk.get("goes") else ""
+            rows.append(f"| {lk['look']} (+{lk['hours']} h){tag} | {lk['detections']} | {pct(lk['v2_reached_median'])} | "
                         f"{pct(lk['v2_reached_worst'])} | {pct(lk['v1_reached'])} | **{lk['head_observed_km']}** | "
                         f"{lo}–{mid}–{hi} | {lk['head_v1_km']} |")
+            t = totals["goes" if lk.get("goes") else "polar"]
             for k, src in (("v2m", "v2_reached_median"), ("v2w", "v2_reached_worst"), ("v1", "v1_reached")):
-                totals[k].append(lk[src] * lk["detections"])
-            totals["n"].append(lk["detections"])
+                t[k].append(lk[src] * lk["detections"])
+            t["n"].append(lk["detections"])
+        fh = r.get("first_hour")
+        first = "" if not fh else f"""
+**First hour.** A new fire started at the reported discovery time ({fh['discovered']}) at the upwind end of the first look ({fh['ignition'][0]}, {fh['ignition'][1]}; assumed ignition), wind {fh['wind_at_start']}:
+- size at 60 minutes, forecast p10 / median / p90: **{fh['acres_60']['p10']:,} / {fh['acres_60']['p50']:,} / {fh['acres_60']['p90']:,} ac**, against the packet's **{fh['packet_acres_60']:,} ac**
+- reach at the first satellite look ({fh['first_look']}, {fh['lead_min']} min after discovery): seen {fh['reach_at_first_look_km']['seen']} km; forecast {'–'.join(str(x) for x in fh['reach_at_first_look_km']['forecast_p90_p50_p10'])} km (p90–p50–p10 runs)
+"""
         w = r["weather"]
         sections.append(f"""### {r['title']}
 
@@ -292,11 +420,15 @@ Started from the {r['t0']} look: {r['start_pixels']} pixels in {r['start_cluster
 | Later look | Pixels | v2 had fire there (median) | v2 (worst case) | v1 | Fire's reach seen (km) | v2 reach p90–p50–p10 (km) | v1 reach (km) |
 |---|---|---|---|---|---|---|---|
 """ + "\n".join(rows) + f"""
-
+{first}
 ![{r['slug']}](figures/spread-backtest/{r['slug']}.png)
 """)
-    n = sum(totals["n"]) or 1
-    overall = {k: sum(v) / n for k, v in totals.items() if k != "n"}
+    n = sum(totals["polar"]["n"]) or 1
+    overall = {k: sum(v) / n for k, v in totals["polar"].items() if k != "n"}
+    ng = sum(totals["goes"]["n"])
+    goes_line = "" if not ng else (
+        f" On {ng} GOES pixels (2 km, every 30 min): v2 median {sum(totals['goes']['v2m']) / ng:.0%}, worst case "
+        f"{sum(totals['goes']['v2w']) / ng:.0%}, v1 {sum(totals['goes']['v1']) / ng:.0%}.")
     return f"""# Spread forecast back-test v1
 
 Generated {datetime.now(timezone.utc).isoformat(timespec='seconds')} by `backend/ml/backtest.py`. Raw results: [spread-backtest-v1.json](spread-backtest-v1.json).
@@ -314,25 +446,27 @@ Generated {datetime.now(timezone.utc).isoformat(timespec='seconds')} by `backend
    - **v1** (original): one run, the first hour's wind held constant, everything treated as grass
 6. **Scores, at each later look:**
    - **Reached:** the share of detected pixels where the forecast had fire by then. Median for v2, worst case (10th-percentile arrival) for v2, and the single run for v1. A detected pixel is burning at that moment, so the fire got there no later than the look.
-   - **Reach:** the distance from the start pixels that covers 90% of the look's detections, against the same measure over the forecast's burned cells at that time. It's 90% rather than the farthest pixel because on multi-fire days the farthest detection is often a different fire.
+   - **Reach:** the distance from the start pixels that covers 90% of the look's detections, against the same measure over the forecast's **active front** (cells that caught fire in the hour before the look). Satellites see active flame, not the burned-out interior, so comparing against the whole forecast footprint would understate the forecast's reach. It's 90% rather than the farthest pixel because on multi-fire days the farthest detection is often a different fire.
+7. **Ranger Road 2026** isn't in the yearly archive yet. Its detections come from the FIRMS area API, plus GOES-19 fire pixels (2 km) every 30 minutes for the first 8 hours, scored separately. A first-hour check starts a new fire at the reported discovery time at the upwind end of the first look; that ignition point is assumed, since WFIGS has no coordinates.
 
 ## Overall
 
-Across {n} later detections: v2's median forecast had fire at **{overall['v2m']:.0%}** of them, v2's worst case at **{overall['v2w']:.0%}**, and v1 at **{overall['v1']:.0%}**.
+Across {n} later polar-orbiter detections (VIIRS 375 m, MODIS 1 km): v2's median forecast had fire at **{overall['v2m']:.0%}** of them, v2's worst case at **{overall['v2w']:.0%}**, and v1 at **{overall['v1']:.0%}**.{goes_line}
 
-## What it showed (v1 run, 2026-11-07; update this section when the model changes)
+## What it showed (run of 2026-11-07, with the extreme-day runs; update this section when the model changes)
 
-1. **v2 places fire where satellites later found it far more often than v1:** 55% vs 29% of later detections (median forecast), 70% with the worst case. The biggest gain is Anderson Creek's next-afternoon look, **70% vs 25%**, where the fuel map and the changing wind both matter.
-2. **Anderson Creek's reach was inside the forecast range.** At 14–15 h the fire had reached 22–24 km; v2's range (90th to 10th percentile of runs) was 14–41 km, with the median about 30% long. At +4 h, overnight, v2 was too slow (6 km vs 12 km), but its worst case matched.
-3. **Starbuck was under-predicted by about 2×:** reach seen 50–57 km at 9–14 h, v2 22–26 km, and even the worst case was under. Part is the scoring: separate fires to the south, not connected to any starting cluster (see the map), count as misses. Part is real:
-   - the archive's wind drops to ~8 km/h overnight and humidity recovers, so the model slows the fire, while the real fire kept running behind the cold front
-   - the ensemble's spread (±15% wind) is too narrow to cover that
-4. **What to change next (not done yet):**
-   - widen the ensemble on frontal nights, or add a member that uses gusts instead of sustained wind
-   - check the moisture function's overnight recovery
-   - calibrate on more fires using GOES 5-minute fire data (2018 and later), which would give dozens of looks per fire instead of 3–5
+1. **v2 places fire where satellites later found it far more often than v1:** 59% vs 34% of later polar-orbiter detections (median forecast), **77% with the worst case**. On GOES pixels every 30 minutes: 41% median, 66% worst case, vs 37% for v1. The biggest gain is Anderson Creek's next-afternoon look, 75% vs 25%, where the fuel map and the changing wind both matter.
+2. **On extreme-wind days the grassfire formula alone runs 2–4× too slow.** Starbuck and Ranger Road ran at about 20% of their 80–90 km/h gusts. Testing ruled out the fuel map (Ranger Road's path was 97% grass) and curing.
+   - The fix: 6 of the 24 runs spread at 20% of gust speed on dry, gusty days (spread.GUST_RULE_*).
+   - Ranger Road: the worst case at +12–14 h now reaches 53–57 km against 49–51 km seen. Before the fix it was 43–44 km.
+   - Starbuck: closer (36–41 km against 50–57) but still short. Part of the gap is separate fires to the south that count as misses.
+   - The median is barely changed, by design.
+3. **On a moist night (Anderson Creek) the forecast runs long:** 41 km median vs 24 km seen at 15 h. The extreme-day rule doesn't apply there, and the best-case runs (29 km) are closest.
+4. **Ranger Road's first hour is still under-called:** 1,306 ac (median) to 3,387 ac (upper) against the packet's 15,000 ac. GOES saw nothing of the fire until 1–2 hours after its reported discovery.
+5. **Data note:** in this run 8 land-cover tiles at the far edges of the Starbuck and Ranger Road map areas failed to download and were filled in as grass (the fuel line in each section says so).
+6. **Next:** more fires with GOES 5-minute data (2018 and later) to calibrate the main formula, instead of only widening the worst case.
 
-**For the pitch:** on Anderson Creek, the forecast put fire where satellites found it 15 hours later 70–81% of the time, against 25% for a simple constant-wind estimate. On Starbuck it ran too slow overnight, and that's the next calibration target.
+**For the pitch:** started from the first satellite look of three real Plains fires, the forecast's range contained 77% of where satellites found fire over the next 15 hours, against 34% for a simple estimate. Where it fell short, on extreme-wind days, we found out why and changed it.
 
 ## By fire
 

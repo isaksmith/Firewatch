@@ -6,9 +6,11 @@ receipt once done. The model is in decision.py (docs/DESIGN.md section 5.9).
 ensemble forecast): no trucks roll, but they are ready, which shortens mutual aid's arrival.
 """
 
+import json
 import math
 import sqlite3
 from datetime import datetime, timedelta
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -16,12 +18,12 @@ import numpy as np
 
 from . import decision, notify, scenario
 from .db import iso, loads, parse_iso, utcnow
-from .district import VOLUNTEER_ROLES, load_district
+from .district import VOLUNTEER_ROLES, _dir, load_district
 from .fire_weather import gfdi, gfdi_band
 from .geo import KM_PER_DEG_LAT, KM_PER_MILE, compass, km_per_deg_lon
 from .sim.ensemble import forecast
 from .sim.fuels import FUEL_KEYS
-from .sim.spread import Domain, interp_weather
+from .sim.spread import Domain, _arrival_many, interp_weather
 from .situation import Curing, Ignition, Provenance, Situation, Weather, WeatherHour, scenario_situation
 
 CENTRAL = ZoneInfo("America/Chicago")
@@ -130,6 +132,13 @@ class Fire:
         a = fc["_arrival"]
         self.dom: Domain = a["domain"]
         self.t10, self.t50 = a["t10"], a["t50"]
+        # Sites a fire can damage: OpenStreetMap building sites plus the roster's ranches and leases.
+        st = _sites(load_district().slug)
+        places = conn.execute(
+            "SELECT lat, lon FROM contacts WHERE lat IS NOT NULL AND role IN ('rancher', 'pumper')").fetchall()
+        lats = np.concatenate([st[0], [r["lat"] for r in places]])
+        lons = np.concatenate([st[1], [r["lon"] for r in places]])
+        self.site_t50 = _arrival_many(self.t50, self.dom.lats, self.dom.lons, lats, lons) if len(lats) else np.array([])
         self.d = load_district()
         self.cfg = self.d.settings
         self.state = loads(ev["response_json"], {}) or {}
@@ -185,6 +194,9 @@ def risk_context(f: Fire) -> list[str]:
         f.fuel, f"Fuel at the fire: {f.fuel.replace('_', ' ')}"))
     likely = f.acres_at(f.now_min + 60)
     out.append(f"Likely ~{likely:,} ac in an hour; 2 trucks hold ~{round(f.cap_ha / HA_PER_ACRE)}")
+    n_sites = sites_reached(f, f.now_min + 60)
+    if n_sites:
+        out.append(f"{n_sites} building site{'s' if n_sites != 1 else ''} (homes, farmsteads, leases) in the likely 60-min path")
     hist = decision.large_fire_share(f.danger)
     if hist:
         out.append(f"On {f.danger} days, {hist['p']:.0%} of reported Kansas wildfires grew past 1,000 ac ({hist['k']} of {hist['n']}, 2016-2025)")
@@ -201,6 +213,21 @@ def _heads_up_sent(conn, f: Fire) -> bool:
                         (f.ev["id"], iso(f.now))).fetchone() is not None
 
 
+@lru_cache(maxsize=4)
+def _sites(slug: str) -> tuple[np.ndarray, np.ndarray]:
+    """Building sites (scripts/fetch_district_structures.py) as lat and lon arrays; empty if not fetched."""
+    path = _dir(slug) / "structures.geojson"
+    if not path.exists():
+        return np.array([]), np.array([])
+    feats = json.loads(path.read_text())["features"]
+    return (np.array([x["geometry"]["coordinates"][1] for x in feats]),
+            np.array([x["geometry"]["coordinates"][0] for x in feats]))
+
+
+def sites_reached(f: Fire, minute: float) -> int:
+    return int((f.site_t50 <= minute).sum()) if len(f.site_t50) else 0
+
+
 def holdable(f: Fire, arrive_min: float) -> bool:
     """Two trucks hold the fire if, left alone, it stays under their capacity for the hold window after they arrive."""
     return f.acres_at(arrive_min + f.w["hold_window_min"]) <= f.cap_ha / HA_PER_ACRE
@@ -215,12 +242,15 @@ def outcome(f: Fire, page_min: float, ma_request_min: float | None, heads_up: bo
     w = f.w
     first = f.first_truck(page_min)
     if holdable(f, first):
-        return {"help_min": first, "acres": f.acres_at(first), "help": "first truck; 2 trucks can hold it"}
-    if ma_request_min is None:
-        return {"help_min": None, "acres": f.acres_at(f.horizon), "help": "no mutual aid: grows past what 2 trucks hold"}
-    travel = w["mutual_aid_travel_min"] - (w["heads_up_saves_min"] if heads_up else 0)
-    t = max(first, ma_request_min + travel)
-    return {"help_min": t, "acres": f.acres_at(t), "help": "mutual aid" + (" (heads-up given)" if heads_up else "")}
+        t, help_ = first, "first truck; 2 trucks can hold it"
+    elif ma_request_min is None:
+        t, help_ = f.horizon, "no mutual aid: grows past what 2 trucks hold"
+    else:
+        travel = w["mutual_aid_travel_min"] - (w["heads_up_saves_min"] if heads_up else 0)
+        t, help_ = max(first, ma_request_min + travel), "mutual aid" + (" (heads-up given)" if heads_up else "")
+    acres, sites = f.acres_at(t), sites_reached(f, t)
+    return {"help_min": None if ma_request_min is None and not holdable(f, first) else t, "acres": acres, "sites": sites,
+            "loss": acres + sites * w["cost_site_acres"], "help": help_}
 
 
 def _candidates(conn, f: Fire, decision_id: str) -> list[dict]:
@@ -237,7 +267,8 @@ def _candidates(conn, f: Fire, decision_id: str) -> list[dict]:
 
     def add(oid, title, page_min, ma_min, heads_up, if_not, if_not_text, effects):
         o = outcome(f, page_min, ma_min, heads_up)
-        out.append({"id": oid, "title": title, "page_min": page_min, "if_fire_acres": o["acres"], "help_min": o["help_min"],
+        out.append({"id": oid, "title": title, "page_min": page_min, "if_fire_acres": o["acres"], "if_fire_sites": o["sites"],
+                    "if_fire_loss": o["loss"], "help_min": o["help_min"],
                     "help": o["help"], "if_not_cost": if_not, "if_not_text": if_not_text, "effects": effects,
                     "stations": len(stations) if heads_up and not hu_sent else 0})
 
@@ -312,7 +343,7 @@ def options(conn: sqlite3.Connection, ev, now: datetime | None = None) -> dict:
     if decision_id:
         cands = _candidates(conn, f, decision_id)
         for c in cands:
-            c["expected_loss"] = decision.expected_loss(p, c["if_fire_acres"], c["if_not_cost"])
+            c["expected_loss"] = decision.expected_loss(p, c["if_fire_loss"], c["if_not_cost"])
         cands.sort(key=lambda c: c["expected_loss"])
         shown = cands[:3]
         best = shown[0]
@@ -355,7 +386,9 @@ def _metrics(f: Fire, c: dict, decision_id: str) -> list[dict]:
         out.append({"label": "District paged", "value": "now" if c["page_min"] <= f.now_min + 0.5 else f"~{f.clock(c['page_min'])} if confirmed"})
     help_at = f"~{f.clock(c['help_min'])}" if c["help_min"] is not None else "never"
     out += [
-        {"label": "If it's a fire", "value": f"~{c['if_fire_acres']:,} ac by the time enough help is there ({help_at}, {c['help']})"},
+        {"label": "If it's a fire", "value": f"~{c['if_fire_acres']:,} ac" + (
+            f" and {c['if_fire_sites']} building site{'s' if c['if_fire_sites'] != 1 else ''}" if c["if_fire_sites"] else "")
+            + f" by the time enough help is there ({help_at}, {c['help']})"},
         {"label": "If it's not", "value": f"{c['if_not_text']} (~{c['if_not_cost']:,.0f} ac-eq)"},
         {"label": "Expected loss", "value": f"~{c['expected_loss']:,.0f} ac-equivalent"},
     ]

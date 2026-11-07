@@ -578,6 +578,7 @@ Sanity tests: zero wind on flat ground produces near-circular isochrones; doubli
   
   Member 0 is unperturbed. The seed is fixed, so results are reproducible.
 - These spreads are assumptions sized to typical hourly forecast error, not calibrated values.
+- **Extreme-day runs.** A quarter of the members (6 of 24) use a second rule on dry, gusty days (dead fuel moisture under 8%, gusts of 60+ km/h): the head runs at least 20% of the gust speed, the grassfire rule of thumb (Cruz, Alexander & Kilinc 2022) applied to gusts. The back-test found the CSIRO rate 2–4× too slow on Starbuck 2017 and Ranger Road 2026, and the worst case missed them. With these runs the worst case widens on such days and the median barely moves. On moist nights (Anderson Creek) the condition isn't met and nothing changes.
 - Outputs:
   - `isochrones`: median arrival
   - `isochrones_early`: 10th-percentile arrival, i.e. "could be there this soon"

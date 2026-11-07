@@ -66,6 +66,10 @@ def _stakes_promotion(conn: sqlite3.Connection, event_id: int, level: str, reaso
     d = p["decision"]
     if not d or d["id"] != "respond":
         return level, reason
+    from .decision import weights
+
+    if p["probability"]["p"] < weights(load_district().settings)["promote_min_p"]:
+        return level, reason  # too unlikely to text anyone about, whatever the stakes
     best = next(o for o in d["options"] if o["recommended"])
     target = PROMOTE_TO.get(best["id"])
     if target is None or LEVELS.index(target) <= LEVELS.index(level):

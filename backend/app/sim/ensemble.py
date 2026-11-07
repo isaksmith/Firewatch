@@ -33,17 +33,25 @@ class Member:
     dir_offset: float
     rh_offset: float
     fuel_scale: float
+    gust_rule: bool = False  # on dry, gusty days run at 20% of gust speed (spread.GUST_RULE_*)
+
+
+GUST_RULE_SHARE = 0.25
 
 
 def draw_members(n: int, seed: int) -> list[Member]:
+    """Member 0 is the central run. The last quarter use the extreme-day gust rule, so the worst case (10th
+    percentile) reflects it on days it applies, and the median doesn't."""
     rng = np.random.default_rng(seed)
     out = [Member(1.0, 0.0, 0.0, 1.0)]
-    for _ in range(n - 1):
+    n_gust = int(n * GUST_RULE_SHARE)
+    for i in range(1, n):
         out.append(Member(
             wind_scale=float(np.exp(rng.normal(0, WIND_SPEED_SD))),
             dir_offset=float(rng.normal(0, WIND_DIR_SD_DEG)),
             rh_offset=float(rng.normal(0, RH_SD_PCT)),
             fuel_scale=float(np.exp(rng.normal(0, FUEL_SD))),
+            gust_rule=i >= n - n_gust,
         ))
     return out
 
@@ -66,7 +74,7 @@ def forecast(sit: Situation, minutes: int = 120, members: int = 24, seed: int = 
     draws = draw_members(members, seed)
     member_rates, member_heads = [], []
     for m in draws:
-        rates, heads = block_rates(blocks, inp.curing_pct, m.wind_scale, m.dir_offset, m.rh_offset)
+        rates, heads = block_rates(blocks, inp.curing_pct, m.wind_scale, m.dir_offset, m.rh_offset, m.gust_rule)
         member_rates.append([[r * m.fuel_scale for r in row] for row in rates])
         member_heads.append([h * m.fuel_scale for h in heads])
     dom = build_domain(inp, blocks, max(max(h) for h in member_heads))
@@ -80,7 +88,8 @@ def forecast(sit: Situation, minutes: int = 120, members: int = 24, seed: int = 
     return {
         "assumptions": assumptions(inp, first, dom, steps) | {
             "ensemble": f"{members} members: wind speed ±{round(WIND_SPEED_SD * 100)}%, direction ±{round(WIND_DIR_SD_DEG)}°, "
-                        f"RH ±{round(RH_SD_PCT)} pts, fuel load ±{round(FUEL_SD * 100)}% (1 sigma)",
+                        f"RH ±{round(RH_SD_PCT)} pts, fuel load ±{round(FUEL_SD * 100)}% (1 sigma); "
+                        f"{int(members * GUST_RULE_SHARE)} runs spread at 20% of gust speed on dry days with gusts of 60+ km/h",
         },
         "provenance": {
             "weather": sit.weather.provenance.model_dump(mode="json"),

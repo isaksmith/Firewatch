@@ -45,6 +45,8 @@ DEFAULTS: dict[str, dict] = {
     # --- what a false alarm costs, in acres burned we'd accept to avoid it ---
     "cost_false_page_acres": {"value": 100.0, "source": "Assumption, set by the chief: 18 volunteers leave work; budget is 2 false pages a month"},
     "cost_false_mutual_aid_acres": {"value": 250.0, "source": "Assumption: pulls a neighbor's crew off its own red-flag day"},
+    "cost_site_acres": {"value": 500.0, "source": "Assumption, set by the chief: each building site (farmstead, town block, lease) the fire reaches before enough help is there counts as this many acres burned. Pasture loses ~$50-150 an acre; a farmstead is worth hundreds of thousands, so 500 is conservative. People aren't priced: warnings handle them"},
+    "promote_min_p": {"value": 0.02, "source": "Assumption: the model only raises an alert's level (which sends texts automatically) when P(fire) is at least 2%. Faults are common on windy days; texting neighbors below that would cause alarm fatigue"},
     "cost_heads_up_acres": {"value": 3.0, "source": "Assumption: a no-action text to a station"},
     "cost_neighbor_text_acres": {"value": 1.0, "source": "Assumption: one 'see smoke?' text to a neighbor"},
     # --- timing ---
@@ -200,13 +202,14 @@ def _likelihood_ratio(e: dict, w: dict) -> tuple[float, str]:
     return 1.0, ""
 
 
-def expected_loss(p: float, acres_if_fire: float, cost_if_not: float) -> float:
-    return p * acres_if_fire + (1 - p) * cost_if_not
+def expected_loss(p: float, loss_if_fire: float, cost_if_not: float) -> float:
+    """loss_if_fire: acres burned plus the acre-equivalent of building sites reached."""
+    return p * loss_if_fire + (1 - p) * cost_if_not
 
 
 def break_even(best: dict, other: dict) -> float | None:
     """P(fire) at which `other` and `best` have equal expected loss, or None if they never cross in (0, 1)."""
-    a1, f1, a2, f2 = best["if_fire_acres"], best["if_not_cost"], other["if_fire_acres"], other["if_not_cost"]
+    a1, f1, a2, f2 = best["if_fire_loss"], best["if_not_cost"], other["if_fire_loss"], other["if_not_cost"]
     denom = (a1 - f1) - (a2 - f2)
     if denom == 0:
         return None

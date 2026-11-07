@@ -34,8 +34,8 @@ def test_satellite_score_is_a_likelihood_ratio_on_the_even_prior():
 
 
 def test_break_even_is_where_expected_losses_cross():
-    page = {"if_fire_acres": 300, "if_not_cost": 100}
-    wait = {"if_fire_acres": 900, "if_not_cost": 0}
+    page = {"if_fire_loss": 300, "if_not_cost": 100}
+    wait = {"if_fire_loss": 900, "if_not_cost": 0}
     x = decision.break_even(page, wait)
     assert abs(decision.expected_loss(x, 300, 100) - decision.expected_loss(x, 900, 0)) < 1e-9
 
@@ -188,3 +188,14 @@ def test_two_sources_still_escalate_and_texts_use_the_forecast():
                 c = conn.execute("SELECT lat, lon FROM contacts WHERE id = ?", (d["contact_id"],)).fetchone()
                 t10 = float(_arrival_many(f.t10, f.dom.lats, f.dom.lons, np.array([c["lat"]]), np.array([c["lon"]]))[0])
                 assert abs(d["eta_min"] - max(5, 5 * round((t10 - f.now_min) / 5))) <= 5
+
+
+def test_building_sites_in_the_path_count_in_the_loss():
+    """Waiting 30 min for the next satellite pass lets the scenario fire reach a ranch; that costs cost_site_acres."""
+    with TestClient(app):
+        eid = _fire_at(0)
+        p = client_options = TestClient(app).get(f"/api/alerts/{eid}/options").json()
+        recheck = next(o for o in p["decision"]["options"] if o["id"] == "heads_up_recheck")
+        fire = next(m["value"] for m in recheck["metrics"] if m["label"] == "If it's a fire")
+        assert "building site" in fire
+        assert {m["key"] for m in client_options["model"]} >= {"cost_site_acres"}

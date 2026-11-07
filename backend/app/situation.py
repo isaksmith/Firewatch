@@ -100,7 +100,7 @@ class Situation(BaseModel):
         return sorted(
             (WeatherStep(
                 t_min=(h.time - t0).total_seconds() / 60, wind_kmh=h.wind_kmh, wind_from_deg=h.wind_from_deg,
-                temp_c=h.temp_c, rh_pct=h.rh_pct,
+                temp_c=h.temp_c, rh_pct=h.rh_pct, gust_kmh=h.gust_kmh,
             ) for h in self.weather.hours),
             key=lambda s: s.t_min,
         )

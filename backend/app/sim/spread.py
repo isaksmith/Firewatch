@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import contourpy
 import numpy as np
 
-from ..fire_weather import head_ros_kmh, length_to_breadth
+from ..fire_weather import dead_fuel_moisture, head_ros_kmh, length_to_breadth
 from ..geo import KM_PER_DEG_LAT, km_per_deg_lon
 from ..layers import point_index, segment_index
 from ..terrain import TerrainUnavailable, elevation_grid
@@ -25,6 +25,13 @@ MAX_SLOPE_DEG = 20.0
 # Point-ignition acceleration toward the equilibrium rate, ROS(t) = ROS * (1 - exp(-a t)), with
 # a = 0.115 / min for open fuels (Canadian FBP System, Forestry Canada Fire Danger Group 1992).
 ACCEL_PER_MIN = 0.115
+# Extreme-day runs. The back-test (docs/research/spread-backtest-v1.md) found the CSIRO rate 2-4x too slow on
+# Starbuck 2017 and Ranger Road 2026 (gusts 80-90 km/h, dead fuel moisture under 8%), where the head ran at about
+# 20% of the GUST speed: the grassfire rule of thumb (head ROS ~ 20% of 10 m wind; Cruz, Alexander & Kilinc 2022)
+# applied to gusts. Ensemble members flagged gust_rule use it on such days; the median runs don't.
+GUST_RULE_FRACTION = 0.2
+GUST_RULE_MIN_KMH = 60.0
+GUST_RULE_MAX_MC = 8.0
 NEIGHBORS = [
     (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1),
     (1, 2), (2, 1), (-1, 2), (-2, 1), (1, -2), (2, -1), (-1, -2), (-2, -1),
@@ -38,6 +45,7 @@ class WeatherStep:
     wind_from_deg: float
     temp_c: float
     rh_pct: float
+    gust_kmh: float | None = None
 
 
 @dataclass
@@ -82,9 +90,11 @@ def interp_weather(steps: list[WeatherStep], t: float) -> WeatherStep:
     a, b = steps[k - 1], steps[k]
     w = (t - a.t_min) / (b.t_min - a.t_min) if b.t_min > a.t_min else 0.0
     d = (b.wind_from_deg - a.wind_from_deg + 180) % 360 - 180
+    gust = (a.gust_kmh + w * (b.gust_kmh - a.gust_kmh) if a.gust_kmh is not None and b.gust_kmh is not None
+            else a.gust_kmh if a.gust_kmh is not None else b.gust_kmh)
     return WeatherStep(
         t, a.wind_kmh + w * (b.wind_kmh - a.wind_kmh), (a.wind_from_deg + w * d) % 360,
-        a.temp_c + w * (b.temp_c - a.temp_c), a.rh_pct + w * (b.rh_pct - a.rh_pct),
+        a.temp_c + w * (b.temp_c - a.temp_c), a.rh_pct + w * (b.rh_pct - a.rh_pct), gust,
     )
 
 
@@ -152,13 +162,18 @@ def _step_multipliers(dom: Domain) -> list[list[float]]:
 
 
 def block_rates(blocks: list[WeatherStep], curing_pct: float, wind_scale: float = 1.0,
-                dir_offset: float = 0.0, rh_offset: float = 0.0) -> tuple[list[list[float]], list[float]]:
-    """Per block: spread rate (m/min, before fuel and slope) along each neighbor step; and head ROS (km/h)."""
+                dir_offset: float = 0.0, rh_offset: float = 0.0, gust_rule: bool = False) -> tuple[list[list[float]], list[float]]:
+    """Per block: spread rate (m/min, before fuel and slope) along each neighbor step; and head ROS (km/h).
+
+    `gust_rule`: on dry, gusty days run the head at least GUST_RULE_FRACTION of the gust speed (see GUST_RULE_*)."""
     rates, heads = [], []
     for b in blocks:
         wind = b.wind_kmh * wind_scale
         rh = max(b.rh_pct + rh_offset, 3.0)
         ros = head_ros_kmh(wind, b.temp_c, rh, curing_pct)
+        if (gust_rule and b.gust_kmh is not None and b.gust_kmh * wind_scale >= GUST_RULE_MIN_KMH
+                and dead_fuel_moisture(b.temp_c, rh) < GUST_RULE_MAX_MC):
+            ros = max(ros, GUST_RULE_FRACTION * b.gust_kmh * wind_scale)
         lb = length_to_breadth(wind)
         ecc = math.sqrt(1 - 1 / lb**2)
         downwind = math.radians((b.wind_from_deg + dir_offset + 180) % 360)

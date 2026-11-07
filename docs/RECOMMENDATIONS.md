@@ -10,7 +10,7 @@ When an alert needs a decision ("Page now?", "Request mutual aid?"), Firewatch s
 
 **Recommend the option with the lowest expected loss**, where
 
-> expected loss = P(fire) × acres burned before enough help is on scene + (1 − P(fire)) × what a false alarm costs
+> expected loss = P(fire) × (acres burned + 500 per building site reached) before enough help is on scene + (1 − P(fire)) × what a false alarm costs
 
 Everything is measured in **acres** (false alarms in "acre-equivalents"), so every trade is in one unit the chief can judge: "a false page costs us about as much as 100 acres burned."
 
@@ -78,6 +78,7 @@ For each option, from the **median of the 24-run spread forecast**, which uses t
    - it's requested 5 min after the page (Michael's flow drafts it at the page, and the chief approves)
    - it arrives 35 min later (packet: 30–40), or **25 min if the downwind stations got a heads-up**, because they're staffed and ready
 5. **Acres** = the median-forecast burned area at that moment.
+6. **Building sites reached** by then count too: OpenStreetMap buildings grouped into sites (a farmstead or town block is one site, `scripts/fetch_district_structures.py`; 1,014 sites around Cottonwood Creek), plus the roster's ranches and lease sites. Each counts as **500 acre-equivalents** (`cost_site_acres`, a chief's dial). Pasture loses roughly $50–150 an acre; a farmstead is worth hundreds of thousands, so 500 is conservative. People aren't priced: they get warnings. In the scenario the first hours' path is open rangeland, so this changes losses but not the recommendation. At minute 0, waiting 30 min for the next satellite pass would let the fire reach a ranch, which raises that option's expected loss from ~138 to ~201.
 
 **Why the median and not the worst case?** Expected loss already accounts for uncertainty about *whether* there's a fire; using the worst case for *size* as well would double-count caution. The worst case is still shown on the map and drives the heads-up station list.
 
@@ -159,6 +160,8 @@ Michael's confirmation rules set the level from independent sources: none → Mo
 - If **"Page" has the lowest expected loss**, the alert becomes **Escalate**.
 - If an alert at Monitor has **asking or a heads-up** as its lowest-loss option, it becomes **Investigate**.
 - The reason line says so, e.g. "Investigate: high stakes. 'Heads-up downwind + recheck on the next pass' has the lowest expected loss (P(fire) 3%, ~25 ac-eq)".
+
+**Only when P(fire) is at least 2%** (`promote_min_p`). Raising a level sends texts automatically, and line faults are common on windy days; below 2% that would be alarm fatigue.
 
 **It can raise a level, never lower one.** Two independent sources always escalate. The model counts only acres, so on a calm day it could talk itself out of paging for a small confirmed fire, and that call shouldn't be automated. Registered burns that haven't escaped and known industrial heat sources are never promoted.
 
