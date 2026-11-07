@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { Layer, Popup, Source, useMap, type MapLayerMouseEvent } from 'react-map-gl/maplibre'
+import type { ExpressionSpecification } from 'maplibre-gl'
 import { api, type FeedResponse } from '../api'
 
-export type FeedKey = 'nws_alerts' | 'lsr' | 'wfigs_incidents' | 'wfigs_perimeters' | 'metar' | 'spc' | 'hms' | 'landsat_nrt' | 'goes_fire' | 'goes_lightning' | 'goes_smoke' | 'rtma_ru'
+export type FeedKey = 'nws_alerts' | 'lsr' | 'wfigs_incidents' | 'wfigs_perimeters' | 'metar' | 'spc' | 'hms' | 'landsat_nrt' | 'goes_fire' | 'ngfs' | 'goes_lightning' | 'goes_smoke' | 'rtma_ru'
 
 interface FeedDef {
   key: FeedKey
@@ -25,6 +26,7 @@ export const FEEDS: FeedDef[] = [
   { key: 'hms', label: 'HMS fire points', every: 1800, color: '#ff9f1a', kind: 'point', list: 'points' },
   { key: 'landsat_nrt', label: 'Landsat', every: 300, color: '#c58bff', kind: 'point', list: 'points' },
   { key: 'goes_fire', label: 'GOES fire (geostationary)', every: 60, color: '#ff3df2', kind: 'point', list: 'points' },
+  { key: 'ngfs', label: 'NGFS fire (NOAA beta)', every: 60, color: '#ff3df2', kind: 'point', list: 'points' },
   { key: 'goes_lightning', label: 'GOES lightning (5 min)', every: 60, color: '#ffe94d', kind: 'point', list: 'points' },
   { key: 'goes_smoke', label: 'GOES smoke (daytime)', every: 300, color: '#b0a8b9', kind: 'point', list: 'points' },
   { key: 'rtma_ru', label: 'RTMA-RU dry air (15 min)', every: 900, color: '#e8a33d', kind: 'point', list: 'points' },
@@ -35,6 +37,8 @@ export const FEED_SWATCH: Record<FeedKey, string> = Object.fromEntries(
 ) as Record<FeedKey, string>
 
 type Item = Record<string, unknown>
+
+const NGFS_NOTICE = 'NOAA beta, informational only. Data may be delayed or unavailable. Not for operational decisions.'
 
 function toGeo(def: FeedDef, items: Item[]): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = []
@@ -129,6 +133,11 @@ export function LiveToggles({ feeds, on, setOn, keyConfigured }: {
                 {status}
               </div>
             )}
+            {f.def.key === 'ngfs' && (
+              <div className="pl-6 text-[10px] text-dim" data-notice="ngfs">
+                {NGFS_NOTICE}
+              </div>
+            )}
             {f.on && f.undrawn.length > 0 && (
               <ul className="num mt-1 space-y-0.5 pl-6 text-[10px] text-muted" data-undrawn={f.def.key}>
                 <li className="text-dim">{f.undrawn.length} without map shape:</li>
@@ -157,7 +166,11 @@ const POPUP_FIELDS: Record<FeedKey, string[]> = {
   goes_smoke: ['pixels'],
   rtma_ru: ['temp_c', 'dew_c', 'rh', 'p_hpa'],
   goes_fire: ['satellite', 'class', 'power_mw', 'temp_k', 'scan_start'],
+  ngfs: ['type_description', 'county', 'frp', 'satellite', 'acq_date_time'],
 }
+
+// Possible Wildland Fire is drawn solid magenta. Industrial, Oil/Gas and every other type is smaller, grey and faded.
+const NGFS_WILD: ExpressionSpecification = ['==', ['get', 'type_description'], 'Possible Wildland Fire']
 
 export function LiveLayers({ feeds }: { feeds: FeedState[] }) {
   const { current: map } = useMap()
@@ -197,9 +210,9 @@ export function LiveLayers({ feeds }: { feeds: FeedState[] }) {
                 id={`live-${k}-pt`}
                 type="circle"
                 paint={{
-                  'circle-radius': k === 'lsr' ? ['case', ['==', ['get', '_flag'], 1], 9, 4] : 6,
-                  'circle-color': k === 'lsr' ? ['case', ['==', ['get', '_flag'], 1], '#ff3d3d', c] : c,
-                  'circle-opacity': 0.9,
+                  'circle-radius': k === 'lsr' ? ['case', ['==', ['get', '_flag'], 1], 9, 4] : k === 'ngfs' ? ['case', NGFS_WILD, 6, 4] : 6,
+                  'circle-color': k === 'lsr' ? ['case', ['==', ['get', '_flag'], 1], '#ff3d3d', c] : k === 'ngfs' ? ['case', NGFS_WILD, c, '#8a8f98'] : c,
+                  'circle-opacity': k === 'ngfs' ? ['case', NGFS_WILD, 0.9, 0.55] : 0.9,
                   'circle-stroke-color': k === 'lsr' ? ['case', ['==', ['get', '_flag'], 1], '#ffffff', '#0b0d10'] : '#0b0d10',
                   'circle-stroke-width': k === 'lsr' ? ['case', ['==', ['get', '_flag'], 1], 2, 1] : 1,
                 }}
@@ -219,6 +232,7 @@ export function LiveLayers({ feeds }: { feeds: FeedState[] }) {
                   {k}: {String(pop.props[k])}
                 </div>
               ))}
+            {pop.feed === 'ngfs' && <div className="pt-1 text-[9.5px] opacity-70">{NGFS_NOTICE}</div>}
           </div>
         </Popup>
       )}
