@@ -1,0 +1,575 @@
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { AlertTriangle, ChevronRight, Radio } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import Map, { Layer, Marker, NavigationControl, ScaleControl, Source, type MapRef } from 'react-map-gl/maplibre'
+import { api, type Climatology, type PlanParams, type PlanSite, type RegionPlan, type TierPower } from '../api'
+import { TopBar } from '../components/TopBar'
+import { KV, SectionHeader } from '../components/ui'
+import { BASEMAP_STYLE, KANSAS_VIEW } from '../lib/map'
+
+const DEFAULT_REGION = 'district:cottonwood-creek'
+const MONTHS = 'JFMAMJJASOND'
+const usd = (n: number) => `$${Math.round(n).toLocaleString('en-US')}`
+const pct = (x: number) => `${Math.round(x * 100)}%`
+const KM_PER_MI = 1.609344
+
+function useDebounced<T>(value: T, ms = 350): T {
+  const [v, setV] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms)
+    return () => clearTimeout(t)
+  }, [value, ms])
+  return v
+}
+
+function WindRose({ rose, size = 120 }: { rose: number[]; size?: number }) {
+  const r = size / 2 - 14
+  const max = Math.max(...rose, 0.01)
+  const c = size / 2
+  return (
+    <svg width={size} height={size} aria-label="Fire-weather wind rose">
+      {[0.5, 1].map((f) => (
+        <circle key={f} cx={c} cy={c} r={r * f} fill="none" stroke="#2a3038" strokeDasharray="1 2" />
+      ))}
+      {rose.map((share, i) => {
+        const len = (share / max) * r
+        const a0 = ((i * 22.5 - 9) * Math.PI) / 180
+        const a1 = ((i * 22.5 + 9) * Math.PI) / 180
+        const p = (a: number, l: number) => `${c + l * Math.sin(a)},${c - l * Math.cos(a)}`
+        return share > 0 ? <polygon key={i} points={`${c},${c} ${p(a0, len)} ${p(a1, len)}`} fill="#ffb21a" fillOpacity={0.75} /> : null
+      })}
+      {['N', 'E', 'S', 'W'].map((d, i) => {
+        const a = (i * 90 * Math.PI) / 180
+        return (
+          <text key={d} x={c + (r + 8) * Math.sin(a)} y={c - (r + 8) * Math.cos(a) + 3} textAnchor="middle" className="num" fontSize={9} fill="#565e68">
+            {d}
+          </text>
+        )
+      })}
+    </svg>
+  )
+}
+
+function MonthBars({ hours }: { hours: number[] }) {
+  const max = Math.max(...hours, 1)
+  const w = 150
+  const h = 44
+  const bw = w / 12
+  return (
+    <svg width={w} height={h + 12} aria-label="High fire-danger hours by month">
+      {hours.map((v, i) => (
+        <g key={i}>
+          <rect x={i * bw + 1} y={h - (v / max) * h} width={bw - 2} height={(v / max) * h} fill={v > 0 ? '#ff4b2b' : '#1d2127'} fillOpacity={0.8} />
+          <text x={i * bw + bw / 2} y={h + 10} textAnchor="middle" className="num" fontSize={8} fill="#565e68">
+            {MONTHS[i]}
+          </text>
+        </g>
+      ))}
+    </svg>
+  )
+}
+
+function CoverageCurve({ curve, chosen }: { curve: number[]; chosen: number }) {
+  const w = 300
+  const h = 56
+  const max = Math.max(...curve, 0.01)
+  const x = (i: number) => (i / Math.max(curve.length - 1, 1)) * (w - 8) + 4
+  const y = (v: number) => h - 4 - (v / max) * (h - 12)
+  const d = curve.map((v, i) => `${i ? 'L' : 'M'}${x(i)},${y(v)}`).join(' ')
+  const at = Math.min(chosen, curve.length - 1)
+  return (
+    <svg width={w} height={h} aria-label="Coverage by number of plots">
+      <path d={d} fill="none" stroke="#3ddc97" strokeWidth={1.25} />
+      <line x1={x(at)} x2={x(at)} y1={4} y2={h - 4} stroke="#e6e8eb" strokeOpacity={0.4} strokeDasharray="2 2" />
+      <rect x={x(at) - 2.5} y={y(curve[at]) - 2.5} width={5} height={5} fill="#e6e8eb" />
+      <text x={w - 4} y={10} textAnchor="end" className="num" fontSize={9} fill="#565e68">
+        {curve.length - 1} PLOTS · {pct(curve[curve.length - 1])}
+      </text>
+    </svg>
+  )
+}
+
+function ClimatePanel({ c }: { c: Climatology }) {
+  return (
+    <div className="space-y-3 px-4 py-3">
+      <div className="flex items-start gap-4">
+        <WindRose rose={c.fire_wind_rose} />
+        <div className="min-w-0 flex-1 space-y-1 pt-1">
+          <div className="label !text-[9.5px]">Wind in High+ fire danger</div>
+          {c.fire_wind_modes.map((m) => (
+            <div key={m.from} className="num text-[12px] text-text">
+              from {m.from} <span className="text-muted">{pct(m.share)}</span>
+            </div>
+          ))}
+          <div className="text-[11px] leading-snug text-muted">
+            Smoke drifts the other way, so sensors go on the {c.fire_wind_modes.map((m) => compassOpposite(m.from)).join(' and ')} side of what they
+            watch.
+          </div>
+        </div>
+      </div>
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <div className="label mb-1 !text-[9.5px]">High+ hours by month</div>
+          <MonthBars hours={c.fire_hours_by_month} />
+        </div>
+        <div className="w-[110px] shrink-0">
+          <KV k="Hours/yr" v={c.fire_hours_per_year} />
+          <KV k="Very high" v={c.very_high_hours_per_year} />
+          <KV k="Median wind" v={`${Math.round(c.fire_wind_kmh_median / KM_PER_MI)} mph`} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const OPPOSITE: Record<string, string> = {
+  N: 'S', NNE: 'SSW', NE: 'SW', ENE: 'WSW', E: 'W', ESE: 'WNW', SE: 'NW', SSE: 'NNW',
+  S: 'N', SSW: 'NNE', SW: 'NE', WSW: 'ENE', W: 'E', WNW: 'ESE', NW: 'SE', NNW: 'SSE',
+}
+const compassOpposite = (d: string) => OPPOSITE[d] ?? d
+
+function PowerRow({ tier, p }: { tier: string; p: TierPower }) {
+  const w = p.winter_worst_week
+  const f = p.fire_season_worst_week
+  const short = (row: typeof w) => (row.days_on_battery == null ? 'OK' : `${row.days_on_battery} d on pack`)
+  return (
+    <div className="grid grid-cols-[52px_1fr_1fr] items-baseline gap-2 py-[3px] text-[11.5px]">
+      <span className="label !text-[9.5px]">{tier}</span>
+      <span className="num text-text" title={`${f.made_wh_day} Wh/day made vs ${f.need_wh_day} needed, ${f.sun_hours} sun-hours`}>
+        <span className={f.days_on_battery == null ? 'text-ok' : 'text-investigate'}>{short(f)}</span>
+      </span>
+      <span className="num text-text" title={`${w.made_wh_day} Wh/day made vs ${w.need_wh_day} needed, ${w.sun_hours} sun-hours`}>
+        <span className={w.days_on_battery == null ? 'text-ok' : 'text-investigate'}>{short(w)}</span>
+      </span>
+    </div>
+  )
+}
+
+function SiteCard({ s, open, onToggle }: { s: PlanSite; open: boolean; onToggle: () => void }) {
+  return (
+    <div className={`border-b border-line ${open ? 'bg-panel-2' : ''}`}>
+      <button onClick={onToggle} className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-raised">
+        <span className="num w-6 text-[11px] text-investigate">S{s.id}</span>
+        <span className="min-w-0 flex-1 truncate text-[12px] text-text">{s.label}</span>
+        <span className="num text-[10px] text-dim">
+          {s.bare}B · {s.rich}R
+        </span>
+        <ChevronRight size={12} className={`text-dim transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className="space-y-2 px-4 pb-3 pl-13 text-[11.5px] leading-snug">
+          <ul className="space-y-1 text-muted">
+            {s.reasons.map((r) => (
+              <li key={r}>· {r}</li>
+            ))}
+          </ul>
+          {s.checks.length > 0 && (
+            <ul className="space-y-1 text-investigate/90">
+              {s.checks.map((r) => (
+                <li key={r}>! {r}</li>
+              ))}
+            </ul>
+          )}
+          <div className="num text-[10.5px] text-dim">
+            {s.gateway ? (
+              <>
+                LINK {s.gateway.name.toUpperCase()} · {(s.gateway.km / KM_PER_MI).toFixed(1)} MI · {s.gateway.quality.toUpperCase()} ·{' '}
+                {s.hops} RELAY{s.hops === 1 ? '' : 'S'} TO STATION
+              </>
+            ) : (
+              <span className="text-escalate">NO RADIO PATH: SURVEY A TALLER MOUNT</span>
+            )}
+          </div>
+          <div className="num text-[10.5px] text-dim">
+            ADDS {(s.adds_coverage * 100).toFixed(1)}% OF PRIORITY · {s.on === 'line' ? 'ON THE POWER LINE' : 'CELL CENTER'}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function NumField({ label, value, onChange, min, max, step = 1 }: { label: string; value: number; onChange: (v: number) => void; min: number; max: number; step?: number }) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="label !text-[9.5px]">{label}</span>
+      <input
+        type="number"
+        value={Number.isNaN(value) ? '' : value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={(e) => onChange(e.target.valueAsNumber)}
+        className="field num w-full"
+      />
+    </label>
+  )
+}
+
+function PlanMap({ plan, selected, onSelect }: { plan: RegionPlan | undefined; selected: number | null; onSelect: (id: number) => void }) {
+  const mapRef = useRef<MapRef>(null)
+  const [ready, setReady] = useState(false)
+  const lines = useQuery({ queryKey: ['layer', 'power_lines'], queryFn: () => api.layer('power_lines') })
+  const fires = useQuery({ queryKey: ['layer', 'wildfire_history'], queryFn: () => api.layer('wildfire_history') })
+  const key = plan?.region.key
+  const bbox = plan?.region.bbox
+  useEffect(() => {
+    if (ready && bbox) mapRef.current?.fitBounds([bbox[0], bbox[1], bbox[2], bbox[3]], { padding: 48, duration: 900 })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, key])
+  const site = plan?.sites.find((s) => s.id === selected)
+  useEffect(() => {
+    if (ready && site) mapRef.current?.flyTo({ center: [site.lon, site.lat], zoom: 15, duration: 1000 })
+  }, [ready, site])
+  const wildfires = useMemo(
+    () => (fires.data ? { ...fires.data, features: fires.data.features.filter((f) => f.properties?.type === 'WF') } : null),
+    [fires.data],
+  )
+
+  return (
+    <div className="relative flex-1 bg-void">
+      <Map
+        ref={mapRef}
+        initialViewState={KANSAS_VIEW}
+        mapStyle={BASEMAP_STYLE}
+        style={{ width: '100%', height: '100%' }}
+        attributionControl={{ compact: true }}
+        onLoad={() => setReady(true)}
+      >
+        <NavigationControl position="bottom-right" showCompass={false} />
+        <ScaleControl position="bottom-left" unit="imperial" maxWidth={90} />
+        {plan && (
+          <Source id="cells" type="geojson" data={plan.geojson.cells}>
+            <Layer
+              id="cells-fill"
+              type="fill"
+              paint={{
+                'fill-antialias': false,
+                'fill-color': ['interpolate', ['linear'], ['get', 'priority'], 0, '#121519', 0.25, '#ffb21a', 0.5, '#ff4b2b'],
+                'fill-opacity': ['interpolate', ['linear'], ['get', 'priority'], 0, 0, 0.1, 0.12, 0.5, 0.45],
+              }}
+            />
+            <Layer
+              id="cells-covered"
+              type="line"
+              filter={['>=', ['get', 'covered'], 0.3]}
+              paint={{ 'line-color': '#3ddc97', 'line-width': 1, 'line-opacity': ['interpolate', ['linear'], ['get', 'covered'], 0.3, 0.25, 0.9, 0.8] }}
+            />
+          </Source>
+        )}
+        {plan && (
+          <Source id="region" type="geojson" data={plan.region.boundary}>
+            <Layer id="region-line" type="line" paint={{ 'line-color': '#e6e8eb', 'line-opacity': 0.6, 'line-width': 1.25 }} />
+          </Source>
+        )}
+        {lines.data && (
+          <Source id="lines" type="geojson" data={lines.data}>
+            <Layer id="lines" type="line" paint={{ 'line-color': '#c9d4e0', 'line-width': 1, 'line-opacity': 0.45 }} />
+          </Source>
+        )}
+        {wildfires && (
+          <Source id="wildfires" type="geojson" data={wildfires}>
+            <Layer
+              id="wildfires"
+              type="circle"
+              paint={{ 'circle-radius': 3, 'circle-color': 'transparent', 'circle-stroke-color': '#ff4b2b', 'circle-stroke-width': 1, 'circle-stroke-opacity': 0.8 }}
+            />
+          </Source>
+        )}
+        {plan && (
+          <Source id="links" type="geojson" data={plan.geojson.links}>
+            <Layer
+              id="links"
+              type="line"
+              paint={{
+                'line-color': '#5cc8ff',
+                'line-width': ['match', ['get', 'kind'], 'backbone', 1.5, 1],
+                'line-opacity': ['match', ['get', 'quality'], 'clear', 0.85, 0.5],
+                'line-dasharray': ['match', ['get', 'kind'], 'backbone', ['literal', [1, 0]], ['literal', [2, 2]]],
+              }}
+            />
+          </Source>
+        )}
+        {plan && (
+          <Source id="nodes" type="geojson" data={plan.geojson.nodes}>
+            <Layer
+              id="nodes"
+              type="circle"
+              minzoom={12}
+              paint={{
+                'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, ['match', ['get', 'tier'], 'rich', 3, 2], 16, ['match', ['get', 'tier'], 'rich', 7, 5]],
+                'circle-color': ['match', ['get', 'tier'], 'rich', '#3ddc97', '#e6e8eb'],
+                'circle-stroke-color': '#050607',
+                'circle-stroke-width': 1,
+              }}
+            />
+          </Source>
+        )}
+        {plan?.relays.map((r) => (
+          <Marker key={`${r.lon},${r.lat}`} longitude={r.lon} latitude={r.lat} anchor="center">
+            <div className="group relative" title={`${r.name} · ${r.mount} · ${r.power} power · to ${r.uplink}`}>
+              <Radio size={14} className="text-sample" />
+              <span className="num pointer-events-none absolute top-1/2 left-full ml-1.5 hidden -translate-y-1/2 bg-void/85 px-1 text-[10px] whitespace-nowrap text-sample group-hover:block">
+                {r.name}
+              </span>
+            </div>
+          </Marker>
+        ))}
+        {plan && (
+          <Marker longitude={plan.station.lon} latitude={plan.station.lat} anchor="center">
+            <div className="relative" title={plan.station.name}>
+              <span className="block h-3 w-3 border border-text bg-void" />
+              <span className="num pointer-events-none absolute top-1/2 left-full ml-2 -translate-y-1/2 bg-void/80 px-1 text-[10px] whitespace-nowrap text-text">
+                STATION BRIDGE
+              </span>
+            </div>
+          </Marker>
+        )}
+        {plan?.sites.map((s) => (
+          <Marker
+            key={s.id}
+            longitude={s.lon}
+            latitude={s.lat}
+            anchor="center"
+            onClick={(e) => {
+              e.originalEvent.stopPropagation()
+              onSelect(s.id)
+            }}
+          >
+            <div className="relative cursor-pointer">
+              <span className={`block h-3.5 w-3.5 rotate-45 border ${selected === s.id ? 'border-text bg-investigate' : 'border-investigate bg-void/70'}`} />
+              <span
+                className={`num pointer-events-none absolute top-1/2 left-full ml-2 -translate-y-1/2 px-1 text-[10px] whitespace-nowrap ${
+                  selected === s.id ? 'bg-text text-void' : 'bg-void/80 text-investigate'
+                }`}
+              >
+                S{s.id}
+              </span>
+            </div>
+          </Marker>
+        ))}
+      </Map>
+
+      <div className="pointer-events-none absolute inset-3 brackets" style={{ ['--b' as string]: '#3a414b' }} />
+      <div className="hud absolute top-4 right-4 w-[210px] space-y-1.5 p-3 text-[11px] text-muted">
+        <div className="label mb-1">Legend</div>
+        <div className="flex items-center gap-2.5">
+          <span className="h-2.5 w-4 bg-gradient-to-r from-investigate/30 to-escalate/70" /> Fire-start priority
+        </div>
+        <div className="flex items-center gap-2.5">
+          <span className="h-2.5 w-4 border border-ok/80" /> Watched by a plot
+        </div>
+        <div className="flex items-center gap-2.5">
+          <span className="ml-0.5 h-2.5 w-2.5 rotate-45 border border-investigate" /> <span className="ml-1">Sensor plot</span>
+        </div>
+        <div className="flex items-center gap-2.5">
+          <span className="ml-1 h-2 w-2 rounded-full bg-text" /> <span className="ml-0.5">Bare node</span>
+          <span className="ml-2 h-2 w-2 rounded-full bg-ok" /> Rich
+        </div>
+        <div className="flex items-center gap-2.5">
+          <Radio size={13} className="text-sample" /> Relay · <span className="h-px w-4 bg-sample" /> link
+        </div>
+        <div className="flex items-center gap-2.5">
+          <span className="ml-0.5 h-2.5 w-2.5 rounded-full border border-escalate" /> <span className="ml-0.5">Reported wildfire</span>
+        </div>
+        <div className="pt-1 text-[10px] text-dim">Zoom into a plot to see its nodes.</div>
+      </div>
+    </div>
+  )
+}
+
+export function Planner() {
+  const regions = useQuery({ queryKey: ['planner-regions'], queryFn: api.plannerRegions })
+  const [region, setRegion] = useState(DEFAULT_REGION)
+  const [mode, setMode] = useState<'plots' | 'budget'>('plots')
+  const [form, setForm] = useState({ sites: 10, bare: 7, rich: 2, budget: 20000, richKm: 3, bareKm: 0.4 })
+  const [selected, setSelected] = useState<number | null>(null)
+  const params: PlanParams = useDebounced({
+    sites: mode === 'plots' ? form.sites : undefined,
+    budget_usd: mode === 'budget' ? form.budget : undefined,
+    bare_per_site: form.bare,
+    rich_per_site: form.rich,
+    rich_range_km: form.richKm,
+    bare_fetch_km: form.bareKm,
+  })
+  const plan = useQuery({
+    queryKey: ['plan', region, params],
+    queryFn: () => api.plan(region, params),
+    placeholderData: keepPreviousData,
+    staleTime: Infinity,
+  })
+  const p = plan.data
+  const set = (k: keyof typeof form) => (v: number) => setForm((f) => ({ ...f, [k]: v }))
+
+  return (
+    <div className="flex h-full flex-col bg-bg">
+      <TopBar />
+      <div className="flex min-h-0 flex-1">
+        <aside className="flex w-[380px] shrink-0 flex-col overflow-y-auto border-r border-line bg-panel">
+          <SectionHeader right={plan.isFetching ? <span className="num text-[10px] text-sample">PLANNING…</span> : null}>Region planner</SectionHeader>
+          <div className="space-y-3 border-b border-line px-4 py-3">
+            <label className="flex flex-col gap-1">
+              <span className="label !text-[9.5px]">Region</span>
+              <select
+                value={region}
+                onChange={(e) => {
+                  setRegion(e.target.value)
+                  setSelected(null)
+                }}
+                className="field w-full"
+              >
+                <optgroup label="Fire districts">
+                  {regions.data?.districts.map((d) => (
+                    <option key={d.key} value={d.key}>
+                      {d.name}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Kansas counties">
+                  {regions.data?.counties.map((c) => (
+                    <option key={c.key} value={c.key}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+            </label>
+            <div className="flex gap-1">
+              {(['plots', 'budget'] as const).map((m) => (
+                <button key={m} onClick={() => setMode(m)} className={`btn !h-6 flex-1 ${mode === m ? 'btn-primary' : ''}`}>
+                  {m === 'plots' ? 'Number of plots' : 'Budget'}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {mode === 'plots' ? (
+                <NumField label="Plots" value={form.sites} onChange={set('sites')} min={1} max={60} />
+              ) : (
+                <NumField label="Budget $" value={form.budget} onChange={set('budget')} min={500} max={500000} step={500} />
+              )}
+              <NumField label="Bare / plot" value={form.bare} onChange={set('bare')} min={0} max={16} />
+              <NumField label="Rich / plot" value={form.rich} onChange={set('rich')} min={0} max={16} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <NumField label="Rich smoke range km" value={form.richKm} onChange={set('richKm')} min={0.5} max={10} step={0.5} />
+              <NumField label="Bare gas fetch km" value={form.bareKm} onChange={set('bareKm')} min={0.1} max={2} step={0.1} />
+            </div>
+            <p className="text-[11px] leading-snug text-dim">
+              Default mix is the sensor design's 7 bare + 2 rich nodes per 15-acre plot. Detection ranges are planning guesses until the field burn trial
+              measures them.
+            </p>
+          </div>
+
+          {plan.isError && <div className="border-b border-line px-4 py-3 text-[12px] text-escalate">{(plan.error as Error).message}</div>}
+
+          {p && (
+            <>
+              <SectionHeader right={<span className="num text-[10px] text-dim">{p.region.area_sq_mi.toLocaleString()} SQ MI</span>}>
+                {p.region.name}
+              </SectionHeader>
+              <div className="grid grid-cols-2 gap-x-6 border-b border-line px-4 py-3">
+                <KV k="Plots" v={p.summary.sites} />
+                <KV k="Relays" v={p.summary.relays} />
+                <KV k="Bare nodes" v={p.summary.bare} />
+                <KV k="Rich nodes" v={p.summary.rich} />
+                <KV k="Hardware" v={usd(p.bom.hardware)} />
+                <KV k="+10% spares" v={usd(p.bom.total)} accent="#e6e8eb" />
+                <KV k="Priority watched" v={pct(p.summary.priority_covered)} accent="#3ddc97" />
+                <KV k="Max relays" v={p.summary.max_hops ?? '—'} />
+              </div>
+              <div className="border-b border-line px-4 py-3">
+                <div className="label mb-1 !text-[9.5px]">Share of likely fire starts watched, by plots placed</div>
+                <CoverageCurve curve={p.summary.coverage_curve} chosen={p.summary.sites} />
+                <p className="mt-1 text-[11px] leading-snug text-dim">
+                  Plots watch the highest-priority ground; satellites, line faults, and neighbor reports cover the rest. Each extra plot adds less.
+                </p>
+              </div>
+
+              {p.warnings.length > 0 && (
+                <div className="space-y-1.5 border-b border-line px-4 py-3">
+                  {p.warnings.map((w) => (
+                    <div key={w} className="flex gap-2 text-[11.5px] leading-snug text-investigate">
+                      <AlertTriangle size={12} className="mt-0.5 shrink-0" /> {w}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <SectionHeader right={<span className="num text-[10px] text-dim">ERA5 2016–2025</span>}>Fire-weather climate</SectionHeader>
+              <ClimatePanel c={p.climate} />
+              <div className="border-t border-b border-line px-4 py-3">
+                <div className="grid grid-cols-[52px_1fr_1fr] gap-2 pb-1">
+                  <span />
+                  <span className="label !text-[9px]">Fire season worst wk</span>
+                  <span className="label !text-[9px]">Winter worst wk</span>
+                </div>
+                <PowerRow tier="Bare" p={p.power.bare} />
+                <PowerRow tier="Rich" p={p.power.rich} />
+                <p className="mt-1.5 text-[11px] leading-snug text-dim">
+                  Solar at {p.climate.sun_hours.fire_season_worst_week} and {p.climate.sun_hours.winter_worst_week} sun-hours. Rich nodes can run the PM fan
+                  up to {pct(p.power.rich.max_pm_duty_fire_season ?? 0)} of the time in fire season. PM sensor is below its −10 °C limit about{' '}
+                  {p.climate.pm_too_cold_days_per_year} days a year.
+                </p>
+              </div>
+
+              <SectionHeader right={<span className="num text-[10px] text-dim">{p.summary.reported_wildfires} REPORTED · ~{p.summary.burns_per_year} BURNS/YR</span>}>
+                Plots
+              </SectionHeader>
+              {p.sites.map((s) => (
+                <SiteCard key={s.id} s={s} open={selected === s.id} onToggle={() => setSelected(selected === s.id ? null : s.id)} />
+              ))}
+
+              <SectionHeader>Relays and station</SectionHeader>
+              <div className="space-y-1.5 border-b border-line px-4 py-3 text-[11.5px]">
+                <div className="flex justify-between gap-3">
+                  <span className="text-text">{p.station.name}</span>
+                  <span className="num text-[10px] text-dim">BRIDGE</span>
+                </div>
+                {p.relays.map((r) => (
+                  <div key={`${r.lon},${r.lat}`} className="flex justify-between gap-3">
+                    <span className="min-w-0 text-muted">{r.name}</span>
+                    <span className="num shrink-0 text-[10px] text-dim">
+                      {r.power === 'mains' ? 'MAINS' : 'SOLAR'} · {(r.km / KM_PER_MI).toFixed(1)} MI
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <SectionHeader>Bill of materials</SectionHeader>
+              <div className="border-b border-line px-4 py-3 text-[11.5px]">
+                {p.bom.lines.map((l) => (
+                  <div key={l.item} className="flex justify-between gap-3 py-[2px]">
+                    <span className="text-muted">
+                      {l.qty} × {l.item}
+                    </span>
+                    <span className="num text-text">{usd(l.total)}</span>
+                  </div>
+                ))}
+                <div className="mt-1 flex justify-between border-t border-line pt-1">
+                  <span className="text-muted">Spares (10%)</span>
+                  <span className="num text-text">{usd(p.bom.spares)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-text">Total</span>
+                  <span className="num text-text">{usd(p.bom.total)}</span>
+                </div>
+                <p className="mt-1.5 text-[11px] leading-snug text-dim">
+                  With the custom carrier board at ~100 units: about {usd(p.bom.custom_pcb_hardware)} before spares. Excludes tax, shipping, labor, and the
+                  site survey.
+                </p>
+              </div>
+
+              <SectionHeader>Assumptions</SectionHeader>
+              <ul className="space-y-1.5 px-4 py-3 text-[11px] leading-snug text-dim">
+                {p.assumptions.map((a) => (
+                  <li key={a}>· {a}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </aside>
+        <PlanMap plan={p} selected={selected} onSelect={(id) => setSelected(id)} />
+      </div>
+    </div>
+  )
+}

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Flame, Play, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { NavLink } from 'react-router-dom'
 import { api, type SourceHealth } from '../api'
 import { setOperator, useOperator } from '../lib/operator'
 import { Mark } from './ui'
@@ -62,6 +63,26 @@ export function TopBar({ onRunScenario, scenarioRunning }: { onRunScenario?: () 
         <Mark size={16} />
         <span className="num text-[13px] font-semibold tracking-[0.28em]">FIREWATCH</span>
       </div>
+      <Divider />
+      <nav className="flex items-center gap-1">
+        {(
+          [
+            ['/', 'Console'],
+            ['/planner', 'Planner'],
+          ] as const
+        ).map(([to, label]) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={to === '/'}
+            className={({ isActive }) =>
+              `num px-2 py-[2px] text-[10px] tracking-[0.14em] uppercase ${isActive ? 'bg-raised text-text' : 'text-dim hover:text-muted'}`
+            }
+          >
+            {label}
+          </NavLink>
+        ))}
+      </nav>
       <Divider />
       <span className="label hidden 2xl:inline">Kansas AOI · Confirmation Layer</span>
       {mode === 'sample' && (

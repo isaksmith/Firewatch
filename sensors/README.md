@@ -132,3 +132,5 @@ The custom figures retain the battery, solar panel, enclosure, mounting, and ric
 5. **Service.** Make the air pod, battery, and backplate replaceable from ground level where practical. Flag stale and invalid data in the app. Use the first field season to set inspection and replacement intervals for the PM inlet, fan, seals, and battery.
 
 The free FireWatch website, apps, and model use the resulting data. The paid county work is the site assessment, placement design, deployment, and commissioning. Quote that work separately from node hardware and use the verified field results to decide where each tier is worth installing.
+
+The FireWatch region planner (`/planner` in the app, [DESIGN.md section 5.9](../docs/DESIGN.md#59-region-planner)) drafts the desk part of that placement design for any district or Kansas county. It places plots of this mixed layout, lays out each plot's nodes downwind of the local fire-weather winds, and routes relays to the station bridge. It also checks the solar budget against local sun and prices the result. The radio survey and detection trial above then confirm or move each site.
