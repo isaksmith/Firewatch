@@ -121,7 +121,7 @@ CREATE TABLE source_health (
 CREATE TABLE signals (
   id           INTEGER PRIMARY KEY,
   event_id     INTEGER REFERENCES events(id),
-  kind         TEXT NOT NULL,              -- line_fault | report | neighbor_reply | camera_smoke
+  kind         TEXT NOT NULL,              -- line_fault | report | neighbor_reply | camera_smoke | ngfs
   lat          REAL NOT NULL,
   lon          REAL NOT NULL,
   observed_at  TEXT NOT NULL,              -- when it happened (fault time, text received)
@@ -306,6 +306,7 @@ Satellite detections go through 4.1–4.4 and get an ML score (section 5). Every
 | `report` | Inbound SMS `FIRE <where>` (place text geocoded against roads and towns; the sender's roster location as fallback) | Always for Investigate; for Escalate only from a registered number |
 | `neighbor_reply` | Inbound SMS reply to an ask-the-neighbor text | Reply `1` (smoke). Reply `3` from the contact who registered a burn here today makes the event a registered burn. Reply `2` is recorded but doesn't lower the level, because the neighbor may not have a view. |
 | `camera_smoke` | Phase 3 camera node | Detector confidence above its threshold on two consecutive frames |
+| `ngfs` | `app/ngfs_signal.py`, after each NGFS poll (never `process_detections`) | Type is `Possible Wildland Fire` (null fails closed), at least two separate `acq_date_time` scans of the same `feature_tracking_id`, and no registered burn covers it. One signal per feature. Same source class as a satellite, never strong, so it cannot escalate alone |
 | `sensor_smoke` | Mesh sensor node telemetry (5.8) | Always: the smoke rule already ran before the signal was raised. All sensors together count as one kind. A sensor joins events within 8 km, not 3, because smoke drifts downwind; it doesn't move the event's location when a line fault or report has placed it, and it can't show a burn has escaped. |
 | Satellite | Section 4.1 | ML score ≥ 40 |
 
@@ -314,6 +315,7 @@ Satellite detections go through 4.1–4.4 and get an ML score (section 5). Every
 ```
 independent = distinct kinds among qualifying evidence (satellite counts once however many passes)
 if registered_burn(event) and not escaped(event):      level = monitor     reason "Registered burn by <name> today"
+    (extreme day, no escape evidence: level = investigate, one quiet duty officer FYI, never escalate)
 elif sat_score >= 70 or independent >= 2:              level = escalate
 elif independent >= 1:                                 level = investigate
 else:                                                  level = monitor
@@ -321,7 +323,9 @@ then apply guardrails (5.4): near a town or line → at least investigate; known
 ```
 
 - `registered_burn`: the event lies within a burn notice's radius on the notice's local date.
-- `escaped`: a detection or report more than 1 km outside the notice radius, GFDI ≥ 25 (Very High), or a `report` / `neighbor_reply 1` from someone other than the burner saying it's spreading.
+- `escaped`: evidence only. Any of: a `report` from anyone (the burner's own FIRE text counts), a `neighbor_reply 1` from someone other than the burner, or fire outside the notice area. A strong satellite detection is not escape evidence. There is no weather-based escape.
+- **Extreme days.** On a Red Flag day, or at GFDI >= `burn_escape_gfdi`, a registered burn with no escape evidence goes to Investigate, never Escalate. That sends one quiet duty officer FYI and, as for any Investigate event, asks up to 3 nearby contacts. It never asks anyone to page. On other days it stays at Monitor and texts nobody.
+- **Late notices.** Only a notice that predates the event (`created_at <= first_seen`) can suppress it. A notice registered after the event began is treated as a claim and caps the event at Investigate.
 - The event's `score` column stays the satellite ML score (null when there is no satellite evidence). `recommendation` is the level above.
 
 **Ask the neighbor.** When an event first reaches Investigate, text up to 3 opted-in contacts with a location within 3 miles of the event, nearest first. Duty officers are skipped because they're already being told. Each contact gets at most one ask per event and at most 3 per day. Replies are matched to the open ask from that number in the last 2 hours.
@@ -444,6 +448,80 @@ The tower relays carry sensors: a PMSA003I particulate sensor and an SHTC3 or BM
 - **Map.** `GET /api/mesh/nodes` includes each node's latest `sensors` readings; the map label shows PM2.5, °C, and RH, amber at PM2.5 ≥ 35.
 - **Power.** The PMSA003I fan draws 60–120 mA, more than a small panel supplies running nonstop. Set the air-quality telemetry interval to 5 minutes. Whether the firmware sleeps the fan between readings (through the sensor's SET pin) is unverified; check it on the first node before buying six.
 
+### 5.9 Region planner
+
+[sensors/README.md](../sensors/README.md) defines two ground-node tiers: **bare** (gas, temperature, humidity, pressure; $175) and **rich** (bare plus a PMSA003I particulate sensor; $240). Its illustrative layout is seven bare and two rich nodes per 15-acre planning plot, or 70 bare and 20 rich for a county, "depending on site assessment", with separately powered relays and one station bridge. The region planner does the desk half of that site assessment for any fire district or Kansas county. It decides where the plots go, how the nodes sit in each plot, and which relays connect them to the station, using only public geography and climate data. Code: `backend/app/planner.py`, `backend/app/climate.py`; page `/planner`.
+
+1. **Grid.** The region is cut into 1 km cells, or coarser so that there are at most 2,500 cells.
+2. **Where fires start.** For each cell, a likelihood is built from four inputs, each normalized to the region's 95th percentile:
+   - Reported wildfires: NIFC WFIGS, 2014–2026, Gaussian kernel σ 4 km, weight 0.30.
+   - Satellite-detected burning: ten years of FIRMS events with industrial heat removed, σ 3 km, weight 0.25. Escaped pasture and debris burns are a leading Kansas cause.
+   - Transmission lines (e-fold 1 km) and substations (1.5 km), weight 0.25.
+   - Towns, weighted by population (e-fold 3 km), weight 0.20.
+
+   The sum is multiplied by fuel: 1.0 in the Flint Hills tallgrass, 0.7 elsewhere. **Consequence** is the share of fire-weather hours whose wind carries a fire from the cell toward a town within 12 km. Priority = likelihood × (0.6 + 0.4 × consequence).
+3. **Climate.** `climate.py` pulls ten years of hourly ERA5 data (Open-Meteo archive) for the region's 0.25° cell and keeps the hours with grass fire danger of High or worse (GFDI ≥ 12, the same bar a line fault must clear). From those hours it derives:
+   - a 16-sector wind rose and its main wind directions, where a second direction counts if it is at least 67.5° from the first and holds at least 10% of the hours;
+   - High+ hours by month;
+   - worst-week sun-hours in fire season and in winter;
+   - days below the PM sensor's −10 °C limit;
+   - the share of foggy fire-season mornings.
+
+   For Cottonwood Creek: 116 High+ hours a year, 75% from the SSW and 24% from the NW behind cold fronts, almost all in March and April. The cached summaries in `data/climate/` are committed so planning works offline.
+4. **Detection model.** A sensor only smells a fire it is downwind of, so a plot's catchment is a wedge upwind of it, weighted by the wind rose:
+   - **Rich nodes:** 3 km, ±20° plume half-width, 0.8 chance a node in the plume catches it.
+   - **Bare nodes:** the plot itself plus 0.4 km of fetch upwind. Dryad's 100 m spacing is the only reference.
+
+   These are planning guesses, because the README is explicit that no node has a proven detection radius. They are request parameters so the detection trial's numbers can replace them.
+5. **Siting.** The top 400 cells by priority are candidates. A cell crossed by a power line puts its plot on the line, at the co-op's right of way; otherwise the plot goes at the cell center. Plots are chosen greedily by marginal priority covered, at least 3 km apart. The page plots the coverage curve up to twice the requested count, so a county can see what each extra plot buys. A budget can replace the plot count; the planner then fits plots, relays, the station and 10% spares under it.
+6. **Plot layout.** Nodes go on a 4 × 4 lattice across the 15-acre square (~82 m spacing).
+   - Rich nodes take the corner farthest downwind of each fire-wind direction, one per direction. In Cottonwood Creek that puts one on the NE corner for SSW winds and one on the SE corner for post-frontal NW winds.
+   - Bare nodes fill the next most-downwind positions.
+7. **Mesh.** Relay candidates are:
+   - town elevators and water towers (30 m, mains power);
+   - substations (30 m, mains);
+   - terrain high points at least 5 m above their surroundings (10 m mast, solar);
+   - a 10 m mast at the plot itself;
+   - as a last resort, a new 10 m mast on an 8 km grid across the region, so sparse western counties with few towns can still be routed.
+
+   A plot whose own mast can't see any of these, usually one in a creek draw, is listed as unreached with a survey warning.
+
+   Planning ranges come from `docs/research/hardware-pricing.txt`: tower to tower 25 km, tower to ground 7 km, mast to ground 5 km, ground to ground 3 km. Each link also needs line of sight over AWS terrain (about 150 m resolution), with 4/3-earth curvature and a Fresnel-zone margin that marks the link clear (60% or more) or marginal. A greedy Steiner tree connects the cheapest unconnected plot each round and pays only for new relays, within Meshtastic's default 3-hop limit. Plots aren't used as relays: the README says field nodes should prioritize sampling and power.
+8. **Power check.** Daily energy made (panel W × worst-week sun-hours × 0.6, the README's yield) is compared with need:
+   - **Need:** 1.5 Wh/day base load (an assumption until the bench trial measures it), plus 3 Wh/day for a rich node's PM sensor at 25% duty.
+   - **Output:** days on the pack when there's a deficit, and the highest PM duty the fire-season worst week supports.
+   - **Cottonwood Creek:** both tiers break even in fire season. In the worst winter week, a rich node runs a 1 Wh/day deficit that its 24.4 Wh pack covers for about 20 days.
+9. **Site checks.** Each plot gets the README's nuisance list applied to its location:
+   - a substation within 0.5 km means mains power, so the PM fan can run continuously;
+   - a town within 1 km moves the gas baseline (exhaust, heating);
+   - an industrial heat source within 5 km;
+   - Flint Hills burn-season haze;
+   - foggy mornings.
+10. **Explanations.** Following principle 2, every placement says why:
+    - **The ground:** the cell's risk rank within the region, and how much of its score each factor supplies (reported wildfires, satellite-seen burning, power lines, towns), plus tallgrass fuel and whether fire winds carry it toward a town.
+    - **The pick:** the share of the region's risk the plot adds, and the next-best spot's share. It also says how many riskier cells were passed over, and why: too close to an earlier plot, or with less risk upwind of them.
+    - **The layout:** whether the plot sits on a line right-of-way or at the cell center, and which corners the rich nodes take for which fire winds.
+    - **Each relay:** why that kind of mount was used, and which plots it carries.
+
+    The map shades risk in three classes by rank within the region (the top 5%, the next 15%, the next 30%), because scores are normalized per region. Hovering a cell shows its breakdown.
+
+**Output.** `GET /api/planner/plan?region=district:cottonwood-creek` returns:
+- the region, climate and power check;
+- plots with reasons, a risk breakdown, why each was picked and laid out, checks, node positions, gateway link and hop count;
+- relays with uplinks, why each was used, and the plots each carries;
+- a bill of materials at the README's prices, plus the custom-PCB estimate;
+- GeoJSON for the priority grid (with each cell's rank and factor shares), nodes and links;
+- the assumptions, and any warnings.
+
+For Cottonwood Creek's 446 sq mi, the default 10 plots (70 bare, 20 rich) need 8 relays and come to about $19,700 with spares. They watch about 10% of the priority-weighted ground. That's the honest number: plots add evidence where fires are most likely, and satellites, line faults and neighbor reports cover the rest.
+
+**Limits.**
+- OpenStreetMap has transmission lines only. The co-op's distribution feeders, where most line fires start, should replace them in a real assessment.
+- WFIGS misses most small fires.
+- Trees, grain bins and buildings aren't in the terrain model.
+
+The planner drafts a placement design. The radio survey and the supervised-burn detection trial in sensors/README.md confirm or move each site.
+
 ## 6. Spread simulation
 
 ### 6.1 Inputs and outputs
@@ -542,7 +620,8 @@ Query: `minutes` (default 60, max 120), optional `wind_kmh`, `wind_from_deg`. Re
 
 ### Others
 
-- `GET /api/layers/{power_lines|substations|towns|static_sources|counties}` → GeoJSON (cached files).
+- `GET /api/layers/{power_lines|substations|towns|static_sources|flint_hills|wildfire_history|counties}` → GeoJSON (cached files).
+- `GET /api/planner/regions` → districts and the 105 Kansas counties. `GET /api/planner/plan?region=district:<slug>|county:<name>` plans a sensor network (section 5.9); optional `sites`, `budget_usd`, `bare_per_site`, `rich_per_site`, `rich_range_km`, `bare_fetch_km`, `site_min_sep_km`. `POST /api/planner/plan` takes the same fields plus a GeoJSON `geometry` for a custom area.
 - `GET /api/health` → `{"mode": "live", "sources": {"firms_viirs": {"last_ok": "...", "age_min": 4, "status": "ok"}, "open_meteo": {...}}}`. Status is `ok` (< 15 min), `stale` (< 60 min), or `down`.
 - `POST /api/ingest/run` → runs one poll immediately.
 - `POST /api/sample/replay` → clears sample events and streams fixtures in over `duration_s` (default 60).
@@ -712,11 +791,16 @@ App
 │   ├── MapView (BaseMap, EventMarkers, AssetLayers, CountyLayer)
 │   ├── SuppressedStrip
 │   └── AlertDrawer (ScoreHeader, ReasonBars, Conditions, NearbyAssets, DetectionTimeline, ActionBar, History)
-└── Spread3DPage
-    ├── TerrainMap (IsochroneLayers, WindParticles, AssetLayers)
-    ├── WindPanel (Override toggle, SpeedSlider, DirectionDial)
-    ├── ImpactsPanel
-    └── TimeBar (Play, Scrubber, SpeedToggle, Reset)
+├── Spread3DPage
+│   ├── TerrainMap (IsochroneLayers, WindParticles, AssetLayers)
+│   ├── WindPanel (Override toggle, SpeedSlider, DirectionDial)
+│   ├── ImpactsPanel
+│   └── TimeBar (Play, Scrubber, SpeedToggle, Reset)
+└── PlannerPage (/planner)
+    ├── Controls (Region, Plots or Budget, Bare/Rich per plot, detection ranges)
+    ├── Summary (counts, cost, CoverageCurve), ClimatePanel (WindRose, MonthBars), PowerRow[]
+    ├── SiteCard[] (why this ground, why this plot, layout, checks, gateway link), Relays (why, plots carried), Bill of materials, Assumptions
+    └── PlanMap (risk classes with hover breakdown, watched cells, plots, nodes at zoom ≥ 12, relays, links, station, reported wildfires; collapsible legend)
 ```
 
 ## 9. Configuration

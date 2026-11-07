@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Flame, Play, RefreshCw } from 'lucide-react'
+import { Box, Flame, Play, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { Link, NavLink } from 'react-router-dom'
 import { api, type SourceHealth } from '../api'
 import { setOperator, useOperator } from '../lib/operator'
 import { Mark } from './ui'
@@ -46,7 +47,17 @@ function Clock() {
 
 const Divider = () => <span className="h-4 w-px bg-line-2" />
 
-export function TopBar({ onRunScenario, scenarioRunning }: { onRunScenario?: () => void; scenarioRunning?: boolean }) {
+export function TopBar({
+  onRunScenario,
+  scenarioRunning,
+  threeDId,
+  threeDSelected,
+}: {
+  onRunScenario?: () => void
+  scenarioRunning?: boolean
+  threeDId?: number | null
+  threeDSelected?: boolean
+}) {
   const qc = useQueryClient()
   const operator = useOperator()
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 15_000 })
@@ -63,6 +74,36 @@ export function TopBar({ onRunScenario, scenarioRunning }: { onRunScenario?: () 
         <Mark size={16} />
         <span className="num text-[13px] font-semibold tracking-[0.28em]">FIREWATCH</span>
       </div>
+      {threeDId != null && (
+        <Link
+          to={`/alerts/${threeDId}/3d`}
+          className="btn !h-6 shrink-0 !border-investigate/60 !text-investigate"
+          title={threeDSelected ? 'Open the 3D spread view for the selected alert' : 'Open the 3D spread view for the top alert. Select another alert first to see its own.'}
+        >
+          <Box size={12} /> 3D view
+          <span className="hidden text-[10px] font-normal tracking-normal text-muted lg:inline">{threeDSelected ? 'selected alert' : 'top alert'}</span>
+        </Link>
+      )}
+      <Divider />
+      <nav className="flex items-center gap-1">
+        {(
+          [
+            ['/', 'Console'],
+            ['/planner', 'Planner'],
+          ] as const
+        ).map(([to, label]) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={to === '/'}
+            className={({ isActive }) =>
+              `num px-2 py-[2px] text-[10px] tracking-[0.14em] uppercase ${isActive ? 'bg-raised text-text' : 'text-dim hover:text-muted'}`
+            }
+          >
+            {label}
+          </NavLink>
+        ))}
+      </nav>
       <Divider />
       <span className="label hidden 2xl:inline">Kansas AOI · Confirmation Layer</span>
       {mode === 'sample' && (

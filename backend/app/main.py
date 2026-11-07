@@ -5,7 +5,7 @@ import logging
 import math
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import parse_qsl
 
 import numpy as np
@@ -22,7 +22,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import mesh, notify, posts, sample, scenario
+from . import climate, mesh, notify, planner, posts, sample, scenario
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
@@ -672,6 +672,62 @@ def get_district():
     except FileNotFoundError:
         raise HTTPException(404, "no district configured") from None
     return {"slug": d.slug, "settings": d.settings, "boundary": boundary_geojson(d.slug)}
+
+
+class PlanParams(BaseModel):
+    sites: int | None = Field(None, ge=1, le=60)
+    bare_per_site: int | None = Field(None, ge=0, le=16)
+    rich_per_site: int | None = Field(None, ge=0, le=16)
+    budget_usd: float | None = Field(None, ge=500, le=500_000)
+    rich_range_km: float | None = Field(None, gt=0, le=10)
+    bare_fetch_km: float | None = Field(None, gt=0, le=2)
+    site_min_sep_km: float | None = Field(None, ge=0.5, le=30)
+
+
+class CustomPlanIn(PlanParams):
+    geometry: dict
+
+
+_plan_cache: dict[str, dict] = {}
+
+
+def _plan(key: str, params: PlanParams, geometry: dict | None = None) -> dict:
+    cache_key = f"{key}|{params.model_dump_json()}|{hash(str(geometry)) if geometry else ''}"
+    if cache_key in _plan_cache:
+        return _plan_cache[cache_key]
+    try:
+        region = planner.resolve_region(key, geometry)
+        result = planner.plan_region(region, params.model_dump())
+    except KeyError:
+        raise HTTPException(404, f"unknown region {key}") from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    except climate.ClimateUnavailable as e:
+        raise HTTPException(503, f"climate data unavailable: {e}") from None
+    if len(_plan_cache) > 32:
+        _plan_cache.clear()
+    _plan_cache[cache_key] = result
+    return result
+
+
+@api.get("/planner/regions")
+def planner_regions():
+    """Districts and Kansas counties the region planner can lay out a sensor network for."""
+    return planner.list_regions()
+
+
+@api.get("/planner/plan")
+def planner_plan(
+    params: Annotated[PlanParams, Depends()],
+    region: str = Query(..., description="district:<slug> or county:<name>"),
+):
+    """Mixed bare/rich sensor plots, relays, and station bridge for a region, sited from geography and climate."""
+    return _plan(region, params)
+
+
+@api.post("/planner/plan")
+def planner_plan_custom(body: CustomPlanIn):
+    return _plan("custom", PlanParams(**body.model_dump(exclude={"geometry"})), body.geometry)
 
 
 class DecisionIn(BaseModel):

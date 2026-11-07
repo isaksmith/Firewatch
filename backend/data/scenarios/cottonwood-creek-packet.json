@@ -4,6 +4,7 @@
   "story": "Packet weather and date: Tuesday Mar 17 2026, ignition 1:50 pm, south wind 35 mph gusting past 55, RH 11%, 78 F, fully dormant grass. Nobody within four miles. The co-op feeder locks out at minute 0; a propane driver sees smoke at 27.",
   "district": "cottonwood-creek",
   "synthetic": true,
+  "red_flag": true,
   "t0": "2026-03-17T18:50:00Z",
   "t0_local": "1:50 pm CDT, Tue Mar 17 2026",
   "duration_min": 62,

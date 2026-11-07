@@ -63,7 +63,12 @@ export function Dashboard() {
 
   return (
     <div className="flex h-full flex-col bg-bg">
-      <TopBar onRunScenario={() => runScenario.mutate()} scenarioRunning={running || runScenario.isPending} />
+      <TopBar
+        onRunScenario={() => runScenario.mutate()}
+        scenarioRunning={running || runScenario.isPending}
+        threeDId={selectedId ?? onMap[0]?.id ?? null}
+        threeDSelected={selectedId != null}
+      />
       {showStrip && (
         <ScenarioStrip
           s={scenario.data!}
@@ -72,7 +77,7 @@ export function Dashboard() {
           replaying={running || runScenario.isPending}
         />
       )}
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1 flex-col md:flex-row">
         <AlertList
           alerts={all}
           tab={tab}

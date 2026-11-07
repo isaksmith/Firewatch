@@ -90,7 +90,11 @@ function MeshMarker({ n }: { n: MeshNode }) {
 
 export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Props) {
   const mapRef = useRef<MapRef>(null)
-  const [panelOpen, setPanelOpen] = useState(() => window.innerWidth >= 1280)
+  const [panelOpen, setPanelOpen] = useState(false)
+  // One side panel at a time: opening an alert closes the layers panel.
+  useEffect(() => {
+    if (selectedId != null) setPanelOpen(false)
+  }, [selectedId])
   const [layers, setLayers] = useState<Record<LayerKey, boolean>>({
     power_lines: true,
     static_sources: true,
@@ -134,7 +138,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
   const ordered = [...alerts].sort((a, b) => (a.id === selectedId ? 1 : b.id === selectedId ? -1 : rank(a) - rank(b)))
 
   return (
-    <div className="relative flex-1 bg-void">
+    <div className="relative min-h-0 flex-1 bg-void">
       <Map
         ref={mapRef}
         initialViewState={{ bounds: [AOI_BBOX[0], AOI_BBOX[1], AOI_BBOX[2], AOI_BBOX[3]], fitBoundsOptions: { padding: 40 } }}
@@ -258,9 +262,12 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover }: Pr
 
       <div className="pointer-events-none absolute inset-3 brackets" style={{ ['--b' as string]: '#3a414b' }} />
 
-      <div className="hud absolute top-4 right-4 w-[200px]">
+      <div className="hud absolute top-4 right-4 flex max-h-[calc(100%-5rem)] w-[200px] flex-col overflow-y-auto">
         <button onClick={() => setPanelOpen((o) => !o)} className="flex h-7 w-full items-center justify-between px-3 hover:bg-raised">
-          <span className="label">Layers</span>
+          <span className="label whitespace-nowrap">
+            Layers
+            <span className="num ml-1.5 text-text">{Object.values(layers).filter(Boolean).length + Object.values(liveOn).filter(Boolean).length} on</span>
+          </span>
           <ChevronDown size={12} className={`text-dim transition-transform ${panelOpen ? 'rotate-180' : ''}`} />
         </button>
         {panelOpen && (

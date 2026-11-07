@@ -62,6 +62,7 @@ flowchart LR
   PAGE -- "too big for 2 trucks,<br/>or under 2 responding" --> MA
 ```
 
+For the whole system, open the [system map](docs/system-map.html) or read the [system flows](docs/SYSTEM-FLOWS.md).
 In the Cottonwood Creek replay this chain pages at T+9 instead of today's 911 call at T+31. The first truck arrives at T+40 to about 220 acres instead of 520 at T+62 (spread model estimate, not field data).
 
 **Status:** the satellite path (ingest, clustering, enrichment, ML scoring, map, 3D spread, logged actions) is built and evaluated on real Kansas data. The whole chain also runs end to end in the **Cottonwood Creek replay**: line fault, neighbor texts, two-source confirmation, PAGE by text, downwind warnings with arrival estimates, mutual aid, and a registered burn that texts nobody. Texts go to a simulated outbox. Twilio sending is written but not yet tried on a real phone. The plan, honest cost numbers, and failure modes are in [docs/PLAN.md](docs/PLAN.md).
@@ -152,6 +153,25 @@ A county: 6 nodes ($942) + a station radio (~$45) + an optional duty-officer T10
 
 The map shows each node's latest PM2.5, °C, and RH. Thresholds are in `backend/data/districts/<district>/settings.json` (`smoke_pm25_rise`, `smoke_fine_ratio`, `smoke_regional_share`, `smoke_repeat_min`).
 
+### Region planner (where to put a sensor network)
+
+Open **Planner** in the top bar (`/planner`) and pick a fire district or any Kansas county. It lays out the mixed bare/rich design from [sensors/README.md](sensors/README.md):
+- where each 15-acre plot of 7 bare and 2 rich nodes goes;
+- where the nodes sit inside the plot;
+- which elevators, substations, or high ground relay them to the station bridge;
+- what it costs.
+
+It's built from the region's geography and climate:
+- reported wildfires and ten years of satellite-detected burning;
+- power lines, substations, towns, and Flint Hills tallgrass;
+- terrain line of sight for every radio link;
+- ten years of hourly fire-weather winds, so sensors sit downwind of what they watch;
+- winter and fire-season sun, to check the solar budget.
+
+Change the plot count or switch to a budget, the nodes per plot, and the assumed detection ranges, and the plan updates. Each plot lists why it was chosen and what to check on site. The method and its limits are in [DESIGN.md section 5.9](docs/DESIGN.md#59-region-planner).
+
+Climate summaries are cached per 0.25° cell in `backend/data/climate/`. A county that isn't cached yet is fetched once from the Open-Meteo archive, which takes a few seconds. Terrain tiles are fetched once and cached. The planner's history layers (`wildfire_history.geojson`, `burn_activity.json`, `counties.geojson`) are rebuilt from the ML downloads with `.venv/bin/python -m ml.planner_layers`.
+
 ### Map layers and the scorer
 
 `backend/data/layers/` holds real Kansas data: transmission lines ≥ 115 kV, transmission substations, and towns from OpenStreetMap (counties from Census boundaries), plus persistent industrial heat sources derived from ten years of FIRMS detections. `backend/data/model/` holds the trained scorer. Both are committed, so the app runs without rebuilding them. To rebuild:
@@ -179,10 +199,12 @@ Results are in [backend/ml/report.md](backend/ml/report.md); the full analysis o
 | `backend/app/notify.py` | SMS gateway (outbox / Twilio), templates, neighbor asks, no-answer ladder, PAGE / NO / SEND, downwind warnings, mutual aid, inbound keywords |
 | `backend/app/mesh.py` | Meshtastic bridge: texts out as acknowledged direct messages, replies in, radio positions and crew distances |
 | `backend/app/sensors.py` | Tower sensor telemetry: readings, the smoke rule (baseline, dust check, regional check), local temperature and humidity |
+| `backend/app/planner.py`, `climate.py` | Region planner: priority grid, wind-weighted plot siting, plot layout, relay routing with terrain line of sight, power check, bill of materials; fire-weather climatology |
 | `backend/app/scenario.py` | Scenario replay on its own clock |
 | `backend/app/main.py` | FastAPI routes: alerts, actions, decisions, signals, SMS, simulate, layers, district, scenario, health, sample replay |
 | `frontend/src/pages/Dashboard.tsx` | Alert list, map, detail drawer, actions, scenario strip |
 | `frontend/src/pages/Spread3D.tsx` | 3D terrain spread preview with wind override |
+| `frontend/src/pages/Planner.tsx` | Region planner page: controls, climate, power, plots, relays, bill of materials, map |
 
 ## Data sources and APIs
 
@@ -218,7 +240,7 @@ Status values:
 | NOAA SPC fire weather outlooks | Official dry thunderstorm and wind/RH risk areas | Official risk areas | A few issues a day | No | Free, NOAA does not endorse this app | on map |
 | NOAA HMS fire points | Analyst-checked fire detections | Most sensitive free fire source found: most of its points come from NOAA's NGFS system, which we also pull directly (see the NGFS row). Slower than raw GOES | Last update 80 min old when sampled | No | Free, NOAA open data | on map |
 | GOES-19 and GOES-18 fire detection (`ABI-L2-FDCC`, `noaa-goes19`, `noaa-goes18` on S3) | Geostationary fire pixels | Fast signal for large, hot fires. Less sensitive than NGFS: on 2026-11-06 it showed 0 Kansas pixels in about 24 sampled afternoon scans while HMS logged 7 Kansas sites, mostly from NGFS. Locations matched HMS within 0.1 km (median) | Every 5 min, 3.5 min after scan start when sampled (fetch about 1 s) | No | Free, NOAA open data | on map |
-| NOAA NGFS detections (`fire.data.nesdis.noaa.gov/api/ogc/detections`, six `ngfs_schema.ngfs_detections_scene_*` collections) | GOES East and West fire detections with type (`Possible Wildland Fire`, `Industrial`, Oil/Gas and others), county and FRP | Context only, off by default: shown on the map, never fed to the model, the 27 features, gfdi or scoring (the model trained on VIIRS and MODIS only). It catches fires GOES FDC misses. NOAA beta, informational only. Data may be delayed or unavailable. Not for operational decisions. | NOAA states every 5 minutes. Newest GOES East row nationwide was 5.2 and 8.9 minutes behind the clock (2 samples, 2026-11-07). Kansas rows appear only when Kansas has a detection | No | Free NOAA service, no key. The portal states the data is provided as is, for information only; no license is asserted here | on map (off by default) |
+| NOAA NGFS detections (`fire.data.nesdis.noaa.gov/api/ogc/detections`, six `ngfs_schema.ngfs_detections_scene_*` collections) | GOES East and West fire detections with type (`Possible Wildland Fire`, `Industrial`, Oil/Gas and others), county and FRP | Off by default on the map. Never fed to the model, the 27 features, gfdi or scoring (the model trained on VIIRS and MODIS only). It can add one signal to the confirmation rule: a tracked feature labeled `Possible Wildland Fire`, seen in two separate scans and not covered by a registered burn. That signal counts as a satellite, so NGFS alone reaches Investigate (an FYI text to the duty officer) and never escalates alone; a person decides every page. It catches fires GOES FDC misses. NOAA beta, informational only. Data may be delayed or unavailable. Not for operational decisions. | NOAA states every 5 minutes. Newest GOES East row nationwide was 5.2 and 8.9 minutes behind the clock (2 samples, 2026-11-07). Kansas rows appear only when Kansas has a detection | No | Free NOAA service, no key. The portal states the data is provided as is, for information only; no license is asserted here | on map (off by default) |
 | GOES lightning (`GLM-L2-LCFA`, `noaa-goes19`) | Lightning flashes | Near-instant ignition clue | 20-second files, 15 newest (5 min window) polled every 60 s; cold fetch about 5 s, cached 0.4 s | No | Free, NOAA open data | on map |
 | GOES smoke (`ABI-L2-ADPC`, `noaa-goes19`) | Smoke mask | Smoke detection, daytime only | Every 5 min, polled every 300 s; scan start about 4.4 min old at fetch, fetch about 1 s; night returns 0 points with a notice | No | Free, NOAA open data | on map |
 | RTMA-RU 2.5 km (`noaa-rtma-pds`) | Gridded near-surface analysis | Freshest dry-air map, blends real observations | `2dvaranl` file read by `.idx` byte range (3 messages, about 19 MB); polled every 900 s; file valid 01:45 UTC was listed by about 02:03 (about 18 min lag), fetch about 3 s; feeds `/api/risk/grid` when under 2 h old, else Open-Meteo | No | Free, NOAA open data | on map |
@@ -241,4 +263,4 @@ Not used, on purpose: Kansas Mesonet, Synoptic, restricted MADIS and PurpleAir (
 
 ## Data attribution
 
-NASA FIRMS (LANCE) · Open-Meteo (CC BY 4.0) · NOAA / National Weather Service · NIFC WFIGS / IRWIN · © OpenStreetMap contributors (ODbL) · AWS Terrain Tiles · US Census TIGER · EPA ecoregions.
+NASA FIRMS (LANCE) · Open-Meteo (CC BY 4.0), including ERA5 reanalysis (Copernicus Climate Change Service) · NOAA / National Weather Service · NIFC WFIGS / IRWIN · © OpenStreetMap contributors (ODbL) · AWS Terrain Tiles · US Census TIGER · EPA ecoregions.

@@ -839,3 +839,30 @@ def test_d9_page_after_text_about_a_closed_event_finds_no_alert():
         r = notify.handle_inbound(conn, DUTY, "PAGE", at(3), is_sample=True)
         assert "no open alert" in r["reply"]
         assert not out(conn, "page")
+
+
+# --- after the merge with michael ---------------------------------------------------------------------------
+
+def test_ngfs_signal_breaks_a_hold():
+    with connect() as conn:
+        eid = escalated(conn)
+        notify.acknowledge(conn, event_id=eid, by="Duty", role="duty_officer", now=at(9))
+        add_signal(conn, "ngfs", *FIRE, iso(at(10)), "ngfs:feature-1", "2", is_sample=True, event_id=eid)
+        notify.hold_tick(conn, at(11), is_sample=True)
+        assert len(out(conn, "hold_broken", eid)) == 1
+        assert ev(conn, eid)["ack_until"] is None
+
+
+def test_page_after_a_post_text_never_pages_a_closed_event():
+    with connect() as conn:
+        sync_roster(conn)
+        pid = posts.create(conn, None, "+13165559003", "smoke by road", "smoke", False, at(0), True, at=FIRE)["post_id"]
+        assert posts.tick(conn, at(6), True) == [pid]
+        notify.acknowledge(conn, post_id=pid, by="Duty", role="duty_officer", now=at(6))
+        eid = posts.open_event(conn, conn.execute("SELECT * FROM posts WHERE id = ?", (pid,)).fetchone(), at(7), True)
+        evaluate_event(conn, eid, WEATHER, at(7))  # the hold swallows the level, so the post text stays newest
+        assert not out(conn, "duty_fyi", eid)
+        conn.execute("UPDATE events SET status = 'closed' WHERE id = ?", (eid,))
+        r = notify.handle_inbound(conn, DUTY, "PAGE", at(8), is_sample=True)
+        assert r["action"] == "help" and "no open alert" in r["reply"]
+        assert not out(conn, "page")

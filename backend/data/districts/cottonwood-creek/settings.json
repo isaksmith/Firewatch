@@ -1,6 +1,7 @@
 {
   "name": "Cottonwood Creek Fire District",
   "short_name": "Cottonwood Creek FD",
+  "station": {"name": "Rosalia fire station", "lat": 37.8153, "lon": -96.6197},
   "neighbor_district": "neighboring district",
   "capacity_ha_60min": 150,
   "ask_neighbor_radius_mi": 8,

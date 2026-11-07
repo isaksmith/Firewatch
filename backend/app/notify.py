@@ -537,7 +537,7 @@ def acknowledge(conn: sqlite3.Connection, *, event_id: int | None = None, post_i
     return {"ok": True, "level": level, "until": until, "by": by, "repeat": False, "event_id": event_id}
 
 
-BREAKERS = ("line_fault", "camera_smoke", "sensor_smoke")
+BREAKERS = ("line_fault", "camera_smoke", "sensor_smoke", "ngfs")
 
 
 def _broken(conn, ev) -> str | None:
@@ -887,9 +887,9 @@ def handle_inbound(
             eid = post["event_id"]
         else:
             eid = latest_event(purposes) or _latest_open_response(conn, is_sample)
-            if eid is not None and _event(conn, eid)["status"] == "closed":
-                eid = _latest_open_response(conn, is_sample)
-        if post is None and eid is None:
+        if eid is not None and _event(conn, eid)["status"] == "closed":
+            eid = _latest_open_response(conn, is_sample)
+        if eid is None and not out["reply"]:
             out.update(action="help", reply="Firewatch: no open alert for you to answer.")
         elif eid is not None:
             decide(conn, eid, word.lower(), contact["name"], now)

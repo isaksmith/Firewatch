@@ -10,9 +10,11 @@ from functools import lru_cache
 
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
+from .redflag import replay_red_flag
 from .db import connect, iso, loads, parse_iso
 from .district import load_district, overrides, sync_roster
 from .fire_weather import default_curing, gfdi, gfdi_band
+from .ngfs_signal import add_ngfs_signals
 from .notify import handle_inbound, hold_tick, tick
 from .pipeline import process_detections
 from .signals import add_signal
@@ -74,6 +76,16 @@ def _apply(conn, sc: dict, step: dict, now: datetime) -> None:
         _post_step(conn, step, now)
     elif kind == "confirm":
         _confirm_step(conn, step, now)
+    elif kind == "ngfs":
+        # Each ngfs step is one scan of one tracked feature; the snapshot is every scan so far.
+        pts = [
+            {"lat": s["lat"], "lon": s["lon"], "feature_tracking_id": s["feature_tracking_id"],
+             "type_description": s.get("type_description"),
+             "acq_date_time": iso(parse_iso(sc["t0"]) + timedelta(minutes=s["t"] - s.get("lag_min", 0)))}
+            for s in sc["timeline"] if s["type"] == "ngfs" and s["t"] <= step["t"]
+        ]
+        for eid in add_ngfs_signals(conn, pts, now, is_sample=True):
+            evaluate_event(conn, eid, sc["weather"], now)
     else:
         raise ValueError(f"unknown step type {kind!r}")
     conn.execute("UPDATE events SET sample_slug = ? WHERE is_sample = 1 AND sample_slug IS NULL", (sc["slug"],))
@@ -102,14 +114,18 @@ def _confirm_step(conn, step: dict, now: datetime) -> None:
 def _minute(conn, sc: dict, t: int) -> None:
     t0 = parse_iso(sc["t0"])
     now = t0 + timedelta(minutes=t)
-    for step in sc["timeline"]:
-        if step["t"] == t:
-            _apply(conn, sc, step, now)
-    hold_tick(conn, now, is_sample=True)
-    tick(conn, now, is_sample=True)
     from . import posts
 
-    posts.tick(conn, now, is_sample=True)
+    token = replay_red_flag.set(bool(sc.get("red_flag", False)))
+    try:
+        for step in sc["timeline"]:
+            if step["t"] == t:
+                _apply(conn, sc, step, now)
+        hold_tick(conn, now, is_sample=True)
+        tick(conn, now, is_sample=True)
+        posts.tick(conn, now, is_sample=True)
+    finally:
+        replay_red_flag.reset(token)
 
 
 def _pre_steps(sc: dict) -> list[int]:
@@ -211,7 +227,7 @@ def status(slug: str) -> dict:
 
     cfg = {**load_district(sc["district"]).settings, **sc.get("settings", {})}
     turnout, drive = cfg.get("turnout_min", 13), cfg.get("drive_min", 18)
-    events, firewatch, fw_at = [], [], None
+    events, firewatch, fw_at, escalated_seen = [], [], None, False
     with connect() as conn:
         rows = conn.execute("SELECT * FROM events WHERE sample_slug = ? ORDER BY first_seen", (slug,)).fetchall()
         n_out = conn.execute(
@@ -228,10 +244,12 @@ def status(slug: str) -> dict:
                     "SELECT COUNT(*) n FROM messages WHERE event_id = ? AND direction = 'out'", (ev["id"],)
                 ).fetchone()["n"],
             })
-            # The earliest event across the scenario wins; a registered burn is suppressed and never counts.
-            earlier = fw_at is None or state.get("investigate_at", "") < fw_at
-            if state.get("investigate_at") and ev["suppression"] != "registered_burn" and earlier:
-                fw_at = state["investigate_at"]
+            # One timeline: the earliest event that got a text, unless a later one escalated. A registered burn
+            # is suppressed and never counts.
+            went, esc = state.get("investigate_at"), bool(state.get("escalate_at"))
+            better = fw_at is None or (esc and not escalated_seen) or (esc == escalated_seen and went is not None and went < fw_at)
+            if went and ev["suppression"] != "registered_burn" and better:
+                fw_at, escalated_seen = went, esc
                 page_t = minutes(state.get("page_at"))
                 firewatch = [
                     {"key": "signal", "t": minutes(ev["first_seen"]), "label": "First signal"},

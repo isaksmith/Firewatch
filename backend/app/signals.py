@@ -18,7 +18,7 @@ from .features.cluster import (
 )
 from .geo import KM_PER_DEG_LAT, haversine_km, km_per_deg_lon
 
-KINDS = ("line_fault", "report", "neighbor_reply", "camera_smoke", "sensor_smoke")
+KINDS = ("line_fault", "report", "neighbor_reply", "camera_smoke", "ngfs", "sensor_smoke")
 
 
 def add_signal(

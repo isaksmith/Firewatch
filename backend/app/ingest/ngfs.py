@@ -1,9 +1,14 @@
 """NOAA NGFS (Next Generation Fire System) detections, a context feed.
 
 Public OGC API, no key. GOES-East and GOES-West rows are kept apart and labeled by
-satellite. Context only: rows never go through process_detections, so they cannot
-reach the model, the 27 features, gfdi or scoring. The model trained on VIIRS and
-MODIS only. NOAA labels this service beta, informational only.
+satellite. Rows never go through process_detections, so they cannot reach the model,
+the 27 features, gfdi or scoring. The model trained on VIIRS and MODIS only. NOAA labels
+this service beta, informational only.
+
+One narrow exception: after each poll, a tracked feature that is labeled "Possible Wildland
+Fire", seen in at least two separate scans, and not covered by a registered burn becomes one
+`ngfs` signal through add_signal (app/ngfs_signal.py). It counts as the satellite source class,
+never as a strong detection, so NGFS alone reaches Investigate and a person decides every page.
 
 Three traps handled here:
 1. The API sits behind CloudFront with max-age=3600, so an identical URL returns a
@@ -118,4 +123,17 @@ def fetch(now: datetime | None = None) -> dict:
 
 
 def poll() -> dict:
-    return run_feed("ngfs", fetch())
+    result = run_feed("ngfs", fetch())
+    try:
+        from ..confirm import evaluate_event
+        from ..db import connect, load_snapshot, utcnow
+        from ..ngfs_signal import add_ngfs_signals
+
+        with connect() as conn:
+            snap = load_snapshot(conn, "ngfs")
+            if snap:
+                for eid in add_ngfs_signals(conn, snap["data"].get("points") or [], utcnow()):
+                    evaluate_event(conn, eid)
+    except Exception as e:  # a beta feed must never break the poll
+        log.warning("ngfs signal step failed: %s", e)
+    return result

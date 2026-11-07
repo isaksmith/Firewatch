@@ -1,0 +1,390 @@
+{
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "Firewatch System Map",
+  "locale": "en",
+  "output": "system-map.html",
+  "viewBox": [
+   1240,
+   540
+  ]
+ },
+ "components": [
+  {
+   "id": "sat",
+   "type": "external",
+   "label": "Satellite",
+   "sublabel": "NASA FIRMS",
+   "pos": [
+    34,
+    70
+   ],
+   "size": [
+    140,
+    62
+   ]
+  },
+  {
+   "id": "line",
+   "type": "external",
+   "label": "Line fault",
+   "sublabel": "co-op lockout",
+   "pos": [
+    34,
+    160
+   ],
+   "size": [
+    140,
+    62
+   ]
+  },
+  {
+   "id": "text",
+   "type": "external",
+   "label": "Text report",
+   "sublabel": "FIRE",
+   "pos": [
+    34,
+    250
+   ],
+   "size": [
+    140,
+    62
+   ]
+  },
+  {
+   "id": "sensor",
+   "type": "external",
+   "label": "Smoke sensor",
+   "sublabel": "tower node",
+   "pos": [
+    34,
+    340
+   ],
+   "size": [
+    140,
+    62
+   ]
+  },
+  {
+   "id": "board",
+   "type": "external",
+   "label": "Community board",
+   "sublabel": "I see it too",
+   "pos": [
+    34,
+    430
+   ],
+   "size": [
+    140,
+    62
+   ]
+  },
+  {
+   "id": "event",
+   "type": "messagebus",
+   "label": "One event",
+   "sublabel": "per fire",
+   "pos": [
+    229,
+    250
+   ],
+   "size": [
+    140,
+    62
+   ]
+  },
+  {
+   "id": "burn",
+   "type": "security",
+   "label": "Registered burn?",
+   "sublabel": "not escaped",
+   "pos": [
+    409,
+    250
+   ],
+   "size": [
+    160,
+    62
+   ]
+  },
+  {
+   "id": "quiet",
+   "type": "backend",
+   "label": "Hold",
+   "sublabel": "no page request",
+   "pos": [
+    419,
+    90
+   ],
+   "size": [
+    140,
+    62
+   ]
+  },
+  {
+   "id": "rule",
+   "type": "security",
+   "label": "Two sources?",
+   "sublabel": "or Red Flag line fault",
+   "pos": [
+    614,
+    250
+   ],
+   "size": [
+    170,
+    62
+   ]
+  },
+  {
+   "id": "ring",
+   "type": "backend",
+   "label": "Ask neighbors",
+   "sublabel": "see smoke?",
+   "pos": [
+    534,
+    420
+   ],
+   "size": [
+    140,
+    62
+   ]
+  },
+  {
+   "id": "plan",
+   "type": "database",
+   "label": "Forecast",
+   "sublabel": "and playbook",
+   "pos": [
+    844,
+    90
+   ],
+   "size": [
+    145,
+    62
+   ]
+  },
+  {
+   "id": "duty",
+   "type": "frontend",
+   "label": "Duty officer",
+   "sublabel": "a person decides",
+   "pos": [
+    844,
+    250
+   ],
+   "size": [
+    145,
+    62
+   ]
+  },
+  {
+   "id": "ladder",
+   "type": "backend",
+   "label": "No answer",
+   "sublabel": "chief, then dispatch",
+   "pos": [
+    834,
+    420
+   ],
+   "size": [
+    165,
+    62
+   ]
+  },
+  {
+   "id": "page",
+   "type": "backend",
+   "label": "Page",
+   "sublabel": "dispatch, volunteers",
+   "pos": [
+    1044,
+    250
+   ],
+   "size": [
+    165,
+    62
+   ]
+  },
+  {
+   "id": "wind",
+   "type": "backend",
+   "label": "Downwind, helpers",
+   "sublabel": "arrival estimates",
+   "pos": [
+    1044,
+    90
+   ],
+   "size": [
+    165,
+    62
+   ]
+  },
+  {
+   "id": "aid",
+   "type": "backend",
+   "label": "Mutual aid",
+   "sublabel": "chief approves",
+   "pos": [
+    1054,
+    420
+   ],
+   "size": [
+    145,
+    62
+   ]
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "Detect",
+   "wraps": [
+    "sat",
+    "line",
+    "text",
+    "sensor",
+    "board"
+   ],
+   "pad": 12
+  },
+  {
+   "kind": "region",
+   "label": "Confirm",
+   "wraps": [
+    "event",
+    "burn",
+    "quiet",
+    "rule",
+    "ring"
+   ],
+   "pad": 12
+  },
+  {
+   "kind": "region",
+   "label": "Respond",
+   "wraps": [
+    "plan",
+    "duty",
+    "ladder",
+    "page",
+    "wind",
+    "aid"
+   ],
+   "pad": 12
+  }
+ ],
+ "connections": [
+  {
+   "id": "c1",
+   "from": "sat",
+   "to": "event",
+   "fromSide": "right",
+   "toSide": "top"
+  },
+  {
+   "id": "c2",
+   "from": "line",
+   "to": "event",
+   "fromSide": "right",
+   "toSide": "top"
+  },
+  {
+   "id": "c3",
+   "from": "text",
+   "to": "event",
+   "variant": "emphasis"
+  },
+  {
+   "id": "c4",
+   "from": "sensor",
+   "to": "event",
+   "fromSide": "right",
+   "toSide": "bottom"
+  },
+  {
+   "id": "c5",
+   "from": "board",
+   "to": "event",
+   "fromSide": "right",
+   "toSide": "bottom"
+  },
+  {
+   "id": "c6",
+   "from": "event",
+   "to": "burn",
+   "variant": "emphasis"
+  },
+  {
+   "id": "c7",
+   "from": "burn",
+   "to": "quiet",
+   "label": "yes"
+  },
+  {
+   "id": "c8",
+   "from": "burn",
+   "to": "rule",
+   "label": "no",
+   "variant": "emphasis"
+  },
+  {
+   "id": "c9",
+   "from": "rule",
+   "to": "ring",
+   "label": "one",
+   "fromSide": "bottom",
+   "toSide": "right",
+   "labelDy": 40
+  },
+  {
+   "id": "c10",
+   "from": "ring",
+   "to": "rule",
+   "label": "reply 1",
+   "fromSide": "top",
+   "toSide": "bottom",
+   "labelDy": 26
+  },
+  {
+   "id": "c11",
+   "from": "rule",
+   "to": "duty",
+   "label": "yes",
+   "variant": "emphasis"
+  },
+  {
+   "id": "c12",
+   "from": "plan",
+   "to": "duty",
+   "variant": "dashed"
+  },
+  {
+   "id": "c13",
+   "from": "duty",
+   "to": "ladder",
+   "label": "silent",
+   "labelDy": 34
+  },
+  {
+   "id": "c14",
+   "from": "duty",
+   "to": "page",
+   "label": "PAGE",
+   "variant": "emphasis"
+  },
+  {
+   "id": "c15",
+   "from": "page",
+   "to": "wind"
+  },
+  {
+   "id": "c16",
+   "from": "page",
+   "to": "aid",
+   "label": "too big",
+   "labelDy": 34
+  }
+ ]
+}

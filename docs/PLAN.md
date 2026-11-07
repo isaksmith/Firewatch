@@ -120,9 +120,11 @@ An event's level comes from explicit, tunable rules over its signals. The ML mod
 
 | Level | Rule (initial, tuned per district) | Who hears about it |
 |---|---|---|
-| **Escalate** | Two independent signals agree (any two of: satellite score ≥ 40, line fault on a fire-weather day, texted report, neighbor reply "1", camera smoke, smoke sensor), **or** satellite score ≥ 70 | Duty officer gets a PAGE / NO text |
-| **Investigate** | Any one signal: satellite score ≥ 40, line fault with fire danger High or above, a texted report, a smoke sensor | Duty officer gets an FYI text; Firewatch asks the neighbors |
-| **Monitor** | Anything else, including a detection inside a registered burn on its day (unless it escapes: detection > 1 km outside the area, fire danger Very High or above, or a neighbor reports it spreading) | Nobody; shown on the console and in an optional evening digest |
+| **Escalate** | Two independent signals agree (any two of: satellite score ≥ 40 or an NGFS detection, line fault on a fire-weather day, texted report, neighbor reply "1", camera smoke, smoke sensor), **or** satellite score ≥ 70, **or** a line fault inside the district on a day with an active NWS Red Flag Warning (alone; fails closed if the warning data is stale or missing) | Duty officer gets a PAGE / NO text |
+| **Investigate** | Any one signal: satellite score ≥ 40, an NGFS detection, line fault with fire danger High or above, a texted report, a smoke sensor | Duty officer gets an FYI text; Firewatch asks the neighbors |
+| **Monitor** | Anything else, including a detection inside a registered burn on its day (unless it escapes: a report from anyone, a neighbor "1" from someone other than the burner, or fire outside the notice area; extreme fire danger alone sends one quiet FYI at Investigate, never a page) | Nobody; shown on the console and in an optional evening digest |
+
+**NGFS rule.** NOAA NGFS (beta, unconfirmed) adds one signal per tracked feature, only when its type is `Possible Wildland Fire` (missing fails closed), it appears in at least two separate scans, and no registered burn covers it. It is the same source class as a satellite detection: NGFS plus VIIRS is one source, NGFS plus a line fault or a text report is two. It is never a strong detection, so NGFS alone stops at Investigate, and its FYI text says it is an unconfirmed NOAA beta satellite detection. It never reaches the model.
 
 **Ask the neighbor** is the cheapest confirmation there is. At Investigate, Firewatch texts up to three signed-up contacts within 3 miles: "Firewatch: possible fire near Rd 40 & Hwy 177. See smoke? Reply 1 yes, 2 no, 3 it's my burn." People who are already there answer in minutes, and nobody drives out. "3" from the registered burner's own number drops the event to Monitor.
 

@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS contacts (
 CREATE TABLE IF NOT EXISTS signals (
   id           INTEGER PRIMARY KEY,
   event_id     INTEGER REFERENCES events(id),
-  kind         TEXT NOT NULL,              -- line_fault | report | neighbor_reply | camera_smoke | sensor_smoke
+  kind         TEXT NOT NULL,              -- line_fault | report | neighbor_reply | camera_smoke | ngfs | sensor_smoke
   lat          REAL NOT NULL,
   lon          REAL NOT NULL,
   observed_at  TEXT NOT NULL,
