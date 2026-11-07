@@ -284,7 +284,7 @@ The district (a 450 sq mi stand-in boundary centered on Coldwater in Comanche Co
 
 ## Hardware and field setup
 
-<a href="https://youtu.be/OYTUxd2nSDk"><img src="https://img.youtube.com/vi/OYTUxd2nSDk/hqdefault.jpg" width="560" alt="FireWatch field sensor intro video (2 min): click to watch on YouTube" /></a>
+https://github.com/user-attachments/assets/29b12d9d-3457-48c8-ab03-ed4eaf60d330
 
 **Sensor node intro video (2 min):** [watch on YouTube](https://youtu.be/OYTUxd2nSDk). Every part in the exploded view, the node in a Kansas field, and what it costs. Design, parts and costs are in [sensors/README.md](sensors/README.md).
 

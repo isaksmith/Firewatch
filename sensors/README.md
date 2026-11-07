@@ -16,7 +16,7 @@ The same radio, enclosure, and sensing architecture supports both builds. The ri
 
 ## FireWatch sensor network pitch
 
-[![FireWatch field sensor intro video](https://img.youtube.com/vi/OYTUxd2nSDk/hqdefault.jpg)](https://youtu.be/OYTUxd2nSDk)
+https://github.com/user-attachments/assets/29b12d9d-3457-48c8-ab03-ed4eaf60d330
 
 **[Watch the 2-minute sensor intro on YouTube](https://youtu.be/OYTUxd2nSDk)**: every part in the exploded view, the node installed in a Kansas field, how it fits FireWatch, and what it costs. The video file is also in [`video/`](video/firewatch-sensor-intro.mp4).
 
