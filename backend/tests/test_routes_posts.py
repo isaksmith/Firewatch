@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from app import main, routes_posts
+from app import main, notify, routes_posts
 from app.db import connect, iso, utcnow
 from app.main import app
 from app.routes_posts import BADGE, _hash
@@ -247,3 +247,256 @@ def test_dashboard_dismiss_dismisses_the_post():
         assert r.status_code == 200, r.text
         assert _status(pid) == "dismissed"
         assert pid not in ids(pub(c))
+
+
+@pytest.fixture(autouse=True)
+def _offline_weather(monkeypatch):
+    from app import confirm
+    monkeypatch.setattr(confirm, "fetch_weather", lambda conn, eid: {"wind_kmh": 26, "gust_kmh": 45, "wind_dir_deg": 200, "rh_pct": 18, "temp_c": 24, "precip_72h_mm": 0, "thunder_24h": 0})
+
+
+def sh(c, tok, pid, action):
+    return c.post(f"/api/board/posts/{pid}/station", json={"action": action}, headers=hd(tok))
+
+
+def _row(pid):
+    with connect() as conn:
+        return conn.execute("SELECT * FROM posts WHERE id = ?", (pid,)).fetchone()
+
+
+def _n_events():
+    with connect() as conn:
+        return conn.execute("SELECT COUNT(*) n FROM events").fetchone()["n"]
+
+
+def _n_out():
+    with connect() as conn:
+        return conn.execute("SELECT COUNT(*) n FROM messages WHERE direction = 'out'").fetchone()["n"]
+
+
+def _pair(c, category="fire"):
+    """An unlocated-event fire post by a community member who is not a station, plus a volunteer and a duty token."""
+    pid = post(c, device(c), category, "Smoke over the field east of town")
+    return pid, member("Vol", "volunteer"), member("Duty", "duty_officer")
+
+
+def test_station_route_refusals():
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        assert c.post(f"/api/board/posts/{pid}/station", json={"action": "ack"}).status_code == 401
+        assert sh(c, member("Mem", "spotter"), pid, "ack").status_code == 403
+        assert sh(c, device(c), pid, "ack").status_code == 403  # pending device
+        assert sh(c, device(c), 99999, "ack").status_code == 403  # role check before lookup
+        assert sh(c, vol, 99999, "ack").status_code == 404
+        assert sh(c, vol, pid, "bogus").status_code == 422
+
+
+def test_volunteer_limits():
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        assert sh(c, vol, pid, "page").status_code == 403
+        assert sh(c, vol, pid, "send").status_code == 200
+        assert sh(c, vol, pid, "dismiss").status_code == 403  # now has an event
+        pid2 = post(c, device(c), "fire", "Another column of smoke", lat=PT[0] + 0.3)
+        r = sh(c, vol, pid2, "dismiss")
+        assert r.status_code == 200 and _row(pid2)["status"] == "dismissed"
+        assert sh(c, vol, pid2, "dismiss").json()["repeat"] is True
+
+
+def test_send_opens_event_once():
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        r = sh(c, vol, pid, "send").json()
+        eid = r["event_id"]
+        assert eid and r["repeat"] is False and _row(pid)["event_id"] == eid
+        with connect() as conn:
+            n = conn.execute("SELECT COUNT(*) n FROM actions WHERE event_id = ? AND action = 'escalate' AND note = 'Sent to alerts from the board'", (eid,)).fetchone()["n"]
+        assert n == 1
+        before = (_n_events(), _n_out())
+        r2 = sh(c, vol, pid, "send").json()
+        assert r2["repeat"] is True and r2["event_id"] == eid and (_n_events(), _n_out()) == before
+        assert set(r2) == {"ok", "event_id", "repeat"}
+
+
+def test_send_on_ladder_hold_texts_nothing():
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        assert sh(c, duty, pid, "ack").json()["level"] == "ladder"
+        before = _n_out()
+        r = sh(c, vol, pid, "send").json()
+        assert r["event_id"] and _n_out() == before
+        with connect() as conn:
+            ev = conn.execute("SELECT * FROM events WHERE id = ?", (r["event_id"],)).fetchone()
+            assert notify.held(ev, utcnow()) == "ladder"
+
+
+def test_hazard_and_unlocated_refuse_send_page():
+    with TestClient(app) as c:
+        vol, duty = member("Vol", "volunteer"), member("Duty", "duty_officer")
+        haz = post(c, device(c), "hazard")
+        n = _n_events()
+        assert sh(c, vol, haz, "send").status_code == 409 and sh(c, duty, haz, "page").status_code == 409
+        assert _n_events() == n
+        nowhere = c.post("/api/board/posts", json={"category": "fire", "body": "Smoke somewhere"}, headers=hd(device(c))).json()["post_id"]
+        assert sh(c, vol, nowhere, "send").status_code == 409
+
+
+def test_page_opens_and_is_idempotent():
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        r = sh(c, duty, pid, "page")
+        assert r.status_code == 200
+        eid = r.json()["event_id"]
+        with connect() as conn:
+            assert json.loads(conn.execute("SELECT response_json FROM events WHERE id = ?", (eid,)).fetchone()[0])["decision"] == "page"
+        n = _n_out()
+        assert sh(c, duty, pid, "page").status_code == 200 and _n_out() == n
+        with connect() as conn:
+            conn.execute("UPDATE events SET status = 'closed' WHERE id = ?", (eid,))
+        assert sh(c, duty, pid, "page").status_code == 409
+
+
+def test_dismiss_parent_takes_children():
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        kids = []
+        with connect() as conn:
+            for i in range(3):
+                kids.append(conn.execute("INSERT INTO posts(category, body, status, parent_id, channel, is_sample, created_at, updated_at) VALUES ('fire','kid','open',?,'web',1,?,?)",
+                                         (pid, iso(utcnow()), iso(utcnow()))).lastrowid)
+        assert sh(c, vol, pid, "dismiss").status_code == 200
+        assert [_row(i)["status"] for i in [pid, *kids]] == ["dismissed"] * 4
+
+
+def test_resolve():
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        haz = post(c, device(c), "hazard")
+        assert sh(c, vol, pid, "resolve").status_code == 409
+        assert sh(c, vol, haz, "resolve").status_code == 200 and _row(haz)["status"] == "resolved"
+        assert sh(c, vol, haz, "resolve").json()["repeat"] is True
+        assert sh(c, vol, haz, "dismiss").status_code == 409
+
+
+def test_child_ack_holds_parent():
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        with connect() as conn:
+            kid = conn.execute("INSERT INTO posts(category, body, status, parent_id, lat, lon, channel, is_sample, created_at, updated_at) VALUES ('fire','kid','open',?,?,?,'web',1,?,?)",
+                               (pid, *PT, iso(utcnow()), iso(utcnow()))).lastrowid
+        r = sh(c, vol, kid, "ack")
+        assert r.status_code == 200 and r.json()["level"] == "crowd"
+        with connect() as conn:
+            assert notify.held(_row(pid), utcnow()) == "crowd"
+
+
+def test_admin_station():
+    real = main.get_settings()
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        r = c.post(f"/api/board/admin/posts/{pid}/station", json={"action": "ack", "operator": "Ops"})
+        assert r.status_code == 200 and r.json()["level"] == "ladder"
+        assert c.post(f"/api/board/admin/posts/{pid}/station", json={"action": "ack"}).status_code == 422
+        assert c.post("/api/board/admin/posts/99999/station", json={"action": "ack", "operator": "Ops"}).status_code == 404
+
+
+def test_admin_station_needs_token(monkeypatch):
+    real = main.get_settings()
+    monkeypatch.setattr(main, "get_settings", lambda: SimpleNamespace(**{**vars(real), "api_token": "s3cret"}))
+    with TestClient(app) as c:
+        assert c.post("/api/board/admin/posts/1/station", json={"action": "ack", "operator": "Ops"}).status_code == 401
+        assert c.get("/api/members/pending").status_code == 401
+
+
+def _join(c, phone="+13165559999", name="Pat Hill"):
+    r = c.post("/api/sms/simulate", json={"from": phone, "body": f"JOIN {name}"})
+    assert r.status_code == 200, r.text
+    with connect() as conn:
+        return conn.execute("SELECT id FROM contacts WHERE phone = ?", (phone,)).fetchone()["id"]
+
+
+def test_member_flow_end_to_end():
+    with TestClient(app) as c:
+        cid = _join(c)
+        rows = c.get("/api/members/pending").json()
+        assert [r["id"] for r in rows] == [cid] and rows[0]["phone"] == "…9999"
+        r = c.post(f"/api/members/{cid}/approve", json={"lat": 37.77, "lon": -96.66})
+        assert r.status_code == 200 and r.json()["token"] and c.get("/api/members/pending").json() == []
+        tok = r.json()["token"]
+        pid = post(c, tok, "fire", "Flames in the ditch along the county road")
+        with connect() as conn:
+            sig = conn.execute("SELECT * FROM signals WHERE kind = 'report' AND contact_id = ?", (cid,)).fetchone()
+            assert sig is not None
+            assert not _row(pid)["flagged"]
+
+
+def test_approve_and_reject_refusals():
+    with TestClient(app) as c:
+        cid = _join(c)
+        assert c.post("/api/members/999/approve", json={"lat": 1, "lon": 1}).status_code == 404
+        assert c.post(f"/api/members/{cid}/approve", json={}).status_code == 422
+        assert c.post(f"/api/members/{cid}/approve", json={"lat": 91, "lon": 1}).status_code == 422
+        assert c.post(f"/api/members/{cid}/approve", json={"lat": 37.7, "lon": -96.6}).status_code == 200
+        assert c.post(f"/api/members/{cid}/approve", json={"lat": 37.7, "lon": -96.6}).status_code == 409
+        assert c.post(f"/api/members/{cid}/reject").status_code == 409
+        assert c.post("/api/members/999/reject").status_code == 404
+        t = device(c)
+        with connect() as conn:
+            web = conn.execute("SELECT contact_id FROM post_devices WHERE token_hash = ?", (_hash(t),)).fetchone()[0]
+        assert c.post(f"/api/members/{web}/approve", json={"lat": 1, "lon": 1}).status_code == 409
+        assert c.post(f"/api/members/{web}/link").status_code == 409
+        assert c.post("/api/members/999/link").status_code == 404
+
+
+def test_reject_kills_old_token_and_link_rotates():
+    with TestClient(app) as c:
+        cid = _join(c)
+        t0 = c.post(f"/api/members/{cid}/approve", json={"lat": 37.7, "lon": -96.6}).json()["token"]
+        t1 = c.post(f"/api/members/{cid}/link").json()["token"]
+        assert c.get("/api/board/me", headers=hd(t0)).status_code == 401
+        assert c.get("/api/board/me", headers=hd(t1)).status_code == 200
+        c2 = _join(c, "+13165558888", "Sam")
+        assert c.post(f"/api/members/{c2}/reject").status_code == 200
+        with connect() as conn:
+            assert conn.execute("SELECT role FROM contacts WHERE id = ?", (c2,)).fetchone()["role"] == "rejected"
+
+
+def _with_base(monkeypatch, base):
+    real = main.get_settings()
+    s = SimpleNamespace(**{**vars(real), "public_base_url": base})
+    monkeypatch.setattr(routes_posts, "get_settings", lambda: s)
+
+
+def test_token_never_stored_and_link_texted(monkeypatch):
+    _with_base(monkeypatch, "https://fw.example.org")
+    with TestClient(app) as c:
+        cid = _join(c)
+        r = c.post(f"/api/members/{cid}/approve", json={"lat": 37.7, "lon": -96.6}).json()
+        assert r["texted"] is True and r["link"] == f"https://fw.example.org/board#d={r['token']}"
+        with connect() as conn:
+            assert _hash(r["token"]) in "\n".join(conn.iterdump())
+            body = conn.execute("SELECT body FROM messages WHERE purpose = 'member_link'").fetchone()["body"]
+        assert r["token"] in body and len(body) <= notify.SMS_MAX
+
+
+def test_approve_dump_has_no_raw_token():
+    with TestClient(app) as c:
+        cid = _join(c)
+        tok = c.post(f"/api/members/{cid}/approve", json={"lat": 37.7, "lon": -96.6}).json()["token"]
+        with connect() as conn:
+            assert tok not in "\n".join(conn.iterdump())
+
+
+def test_long_base_url_not_texted(monkeypatch):
+    _with_base(monkeypatch, "https://" + "a" * 90 + ".example.org")
+    with TestClient(app) as c:
+        cid = _join(c)
+        r = c.post(f"/api/members/{cid}/approve", json={"lat": 37.7, "lon": -96.6}).json()
+        assert r["texted"] is False and r["link"]
+        with connect() as conn:
+            assert conn.execute("SELECT 1 FROM messages WHERE purpose = 'member_link'").fetchone() is None
+
+
+def test_public_router_has_no_admin_paths():
+    paths = [r.path for r in routes_posts.public_router.routes]
+    assert not any(p.startswith("/members") or p.startswith("/board/admin") for p in paths)
