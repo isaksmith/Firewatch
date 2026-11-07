@@ -136,6 +136,14 @@ async def lifespan(app: FastAPI):
     mesh.stop()
 
 
+def require_admin(x_firewatch_token: str = Header(default="")) -> None:
+    """Admin routes mint credentials, so a blank token fails closed outside sample mode."""
+    s = get_settings()
+    if not s.api_token and s.mode != "sample":
+        raise HTTPException(503, "set API_TOKEN to use admin routes")
+    require_token(x_firewatch_token)
+
+
 def require_token(x_firewatch_token: str = Header(default="")) -> None:
     token = get_settings().api_token
     if token and not hmac.compare_digest(token, x_firewatch_token):
@@ -643,7 +651,7 @@ def sms_simulate(msg: SimulatedSms):
         return notify.handle_inbound(conn, msg.from_, msg.body, scenario.running_now() or utcnow(), is_sample=True)
 
 
-@api.get("/messages")
+@api.get("/messages", dependencies=[Depends(require_token)])
 def list_messages(event_id: int | None = None, limit: int = Query(300, ge=1, le=2000)):
     with connect() as conn:
         return _messages(conn, event_id=event_id, limit=limit)
@@ -781,7 +789,7 @@ async def load_scenario_now(slug: str):
 
 
 api.include_router(routes_posts.public_router)
-api.include_router(routes_posts.admin_router, dependencies=[Depends(require_token)])
+api.include_router(routes_posts.admin_router, dependencies=[Depends(require_admin)])
 app.include_router(api)
 
 

@@ -533,15 +533,16 @@ def test_token_never_stored_and_link_texted(monkeypatch):
         with connect() as conn:
             conn.execute("UPDATE contacts SET mesh_id = '!abc12345' WHERE id = ?", (cid,))
         r = c.post(f"/api/members/{cid}/approve", json={"lat": 37.7, "lon": -96.6}).json()
-        assert r["texted"] is True and r["link"] == f"https://fw.example.org/board#d={r['token']}"
-        link = [b for _, b in sent if r["token"] in b]
+        assert r["texted"] is True and r["token"] is None and r["link"] is None
+        tok = [b for _, b in sent if "#d=" in b][0].split("#d=")[1]  # the token is read from the gateway stub, not the response
+        link = [b for _, b in sent if tok in b]
         assert len(link) == 1 and len(link[0]) <= notify.SMS_MAX
         with connect() as conn:
             dump = "\n".join(conn.iterdump())
-            assert _hash(r["token"]) in dump and r["token"] not in dump
+            assert _hash(tok) in dump and tok not in dump
             rows = conn.execute("SELECT channel, body FROM messages WHERE purpose = 'member_link'").fetchall()
         assert [x["channel"] for x in rows] == ["sms"] and "approval link sent" in rows[0]["body"]
-        assert r["token"] not in c.get("/api/messages").text
+        assert tok not in c.get("/api/messages").text
 
 
 def test_approve_dump_has_no_raw_token():
@@ -589,3 +590,137 @@ def test_repeat_ladder_dismiss_writes_one_action():
         with connect() as conn:
             n = conn.execute("SELECT COUNT(*) n FROM actions WHERE action = 'dismiss'").fetchone()["n"]
         assert n == 1
+
+
+def _cfg(monkeypatch, **kw):
+    real = main.get_settings()
+    monkeypatch.setattr(main, "get_settings", lambda: SimpleNamespace(**{**vars(real), **kw}))
+
+
+def _n_devices():
+    with connect() as conn:
+        return conn.execute("SELECT COUNT(*) n FROM post_devices").fetchone()["n"]
+
+
+def test_admin_fails_closed_with_blank_token_outside_sample(monkeypatch):
+    with TestClient(app) as c:
+        cid = _join(c)
+        _cfg(monkeypatch, api_token="", mode="live")
+        before = _n_devices()
+        r = c.get("/api/members/pending")
+        assert r.status_code == 503 and "API_TOKEN" in r.text
+        assert c.post(f"/api/members/{cid}/link").status_code == 503
+        assert c.post(f"/api/members/{cid}/approve", json={"lat": 1, "lon": 1}).status_code == 503
+        assert _n_devices() == before
+
+
+def test_admin_blank_token_still_works_in_sample_mode(monkeypatch):
+    with TestClient(app) as c:
+        cid = _join(c)
+        _cfg(monkeypatch, api_token="", mode="sample")
+        assert c.get("/api/members/pending").status_code == 200
+        c.post(f"/api/members/{cid}/approve", json={"lat": 37.7, "lon": -96.6})
+        assert c.post(f"/api/members/{cid}/link").status_code == 200
+
+
+def test_admin_set_token_needs_header(monkeypatch):
+    with TestClient(app) as c:
+        cid = _join(c)
+        _cfg(monkeypatch, api_token="s3cret", mode="live")
+        assert c.get("/api/members/pending").status_code == 401
+        assert c.post(f"/api/members/{cid}/link").status_code == 401
+        assert c.get("/api/members/pending", headers={"X-Firewatch-Token": "s3cret"}).status_code == 200
+
+
+def test_link_refuses_pending_and_rejected():
+    with TestClient(app) as c:
+        cid = _join(c)
+        before = _n_devices()
+        assert c.post(f"/api/members/{cid}/link").status_code == 409  # pending
+        assert c.post(f"/api/members/{cid}/reject").status_code == 200
+        assert c.post(f"/api/members/{cid}/link").status_code == 409  # rejected
+        assert _n_devices() == before
+
+
+def test_messages_needs_token_when_set(monkeypatch):
+    with TestClient(app) as c:
+        _cfg(monkeypatch, api_token="s3cret")
+        assert c.get("/api/messages").status_code == 401
+        assert c.get("/api/messages", headers={"X-Firewatch-Token": "s3cret"}).status_code == 200
+
+
+def test_token_returned_only_when_not_texted(monkeypatch):
+    _with_base(monkeypatch, "https://fw.example.org")
+    import httpx
+
+    def boom(to, body):
+        raise httpx.HTTPError("down")
+
+    monkeypatch.setattr(notify, "gateway_for", lambda is_sample: SimpleNamespace(send=boom))
+    with TestClient(app) as c:
+        cid = _join(c)
+        r = c.post(f"/api/members/{cid}/approve", json={"lat": 37.7, "lon": -96.6}).json()
+        assert r["texted"] is False and r["token"] and r["link"]  # failed send counts as not texted
+        with connect() as conn:
+            conn.execute("UPDATE contacts SET opted_in = 0 WHERE id = ?", (cid,))
+        r = c.post(f"/api/members/{cid}/link").json()
+        assert r["texted"] is False and r["token"] and r["link"]  # skipped send too
+
+
+def test_approval_does_not_override_stop(monkeypatch):
+    _with_base(monkeypatch, "https://fw.example.org")
+    sent = []
+    monkeypatch.setattr(notify, "gateway_for", lambda is_sample: SimpleNamespace(send=lambda to, body: sent.append((to, body)) or "g1"))
+    with TestClient(app) as c:
+        cid = _join(c)
+        with connect() as conn:
+            conn.execute("UPDATE contacts SET opted_in = 0 WHERE id = ?", (cid,))
+        sent.clear()  # drop the join acknowledgement; only the approval matters
+        r = c.post(f"/api/members/{cid}/approve", json={"lat": 37.7, "lon": -96.6}).json()
+        assert r["texted"] is False and r["token"] and r["link"]
+        assert sent == []
+        with connect() as conn:
+            assert conn.execute("SELECT opted_in FROM contacts WHERE id = ?", (cid,)).fetchone()["opted_in"] == 0
+
+
+def _kid(pid, event_id=None):
+    with connect() as conn:
+        return conn.execute("INSERT INTO posts(category, body, status, parent_id, event_id, channel, is_sample, created_at, updated_at) VALUES ('fire','kid','open',?,?,'web',1,?,?)",
+                            (pid, event_id, iso(utcnow()), iso(utcnow()))).lastrowid
+
+
+def test_volunteer_cannot_dismiss_through_a_ladder_hold():
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        assert sh(c, duty, pid, "ack").status_code == 200
+        before = _row(pid)
+        assert before["ack_level"] == "ladder"
+        assert sh(c, vol, pid, "dismiss").status_code == 403
+        after = _row(pid)
+        assert after["status"] == "open" and after["ack_level"] == "ladder" and after["ack_until"] == before["ack_until"]
+        assert sh(c, duty, pid, "dismiss").status_code == 200 and _row(pid)["status"] == "dismissed"
+
+
+def test_volunteer_cannot_dismiss_a_root_whose_child_has_an_event():
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        other = post(c, device(c), "fire", "Another column of smoke", lat=PT[0] + 0.3)
+        eid = sh(c, vol, other, "send").json()["event_id"]
+        kid = _kid(pid, eid)
+        assert sh(c, vol, pid, "dismiss").status_code == 403
+        assert [_row(i)["status"] for i in (pid, kid)] == ["open", "open"]
+        assert sh(c, duty, pid, "dismiss").status_code == 200
+        assert [_row(i)["status"] for i in (pid, kid)] == ["dismissed", "dismissed"]
+
+
+def test_volunteer_dismisses_plain_and_crowd_held_families():
+    with TestClient(app) as c:
+        pid, vol, duty = _pair(c)
+        kid = _kid(pid)
+        assert sh(c, vol, pid, "dismiss").status_code == 200
+        assert [_row(i)["status"] for i in (pid, kid)] == ["dismissed", "dismissed"]
+        pid2 = post(c, device(c), "fire", "Another column of smoke", lat=PT[0] + 0.3)
+        assert sh(c, vol, pid2, "ack").status_code == 200
+        assert _row(pid2)["ack_level"] == "crowd"
+        assert sh(c, vol, pid2, "dismiss").status_code == 200
+        assert _row(pid2)["status"] == "dismissed" and _row(pid2)["ack_level"] is None

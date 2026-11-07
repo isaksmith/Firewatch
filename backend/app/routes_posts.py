@@ -224,6 +224,9 @@ def station_action(conn, post, action: str, by: str, role: str, now, is_sample: 
                 return {**ok, "repeat": True}
             notify.decide(conn, eid, "no", by, now)
             return ok
+        family = conn.execute("SELECT * FROM posts WHERE id = ? OR parent_id = ?", (root["id"], root["id"])).fetchall()
+        if not ladder and any(r["event_id"] or notify.held(r, now) == "ladder" for r in family):
+            raise HTTPException(403, "Not allowed")
         conn.execute(f"UPDATE posts SET status = 'dismissed', updated_at = ?, {notify.POST_HOLD_COLS} WHERE id = ? OR parent_id = ?",
                      (iso(now), root["id"], root["id"]))
         return ok
@@ -271,9 +274,10 @@ def _issue_link(conn, contact, now, is_sample) -> dict:
     if link:
         body = f"{load_district().short_name} Firewatch: you are approved. Keep this link private: {link}"
         if len(body) <= notify.SMS_MAX:
-            texted = notify.send(conn, contact, body, "member_link", None, now, is_sample, channels=("sms",),
-                                        log_body=f"{load_district().short_name} Firewatch: approval link sent.") is not None
-    return {"token": token, "link": link, "texted": texted}
+            sent = notify.send(conn, contact, body, "member_link", None, now, is_sample, channels=("sms",),
+                               log_body=f"{load_district().short_name} Firewatch: approval link sent.")
+            texted = (sent or {}).get("status") == "sent"
+    return {"token": None if texted else token, "link": None if texted else link, "texted": texted}
 
 
 class Position(BaseModel):
@@ -302,7 +306,7 @@ def approve_member(contact_id: int, body: Position):
         c = _contact(conn, contact_id)
         if c["role"] != "pending" or c["phone"].startswith("web:"):
             raise HTTPException(409, "Not a pending member")
-        conn.execute("UPDATE contacts SET role = 'spotter', registered = 1, opted_in = 1, lat = ?, lon = ? WHERE id = ?",
+        conn.execute("UPDATE contacts SET role = 'spotter', registered = 1, lat = ?, lon = ? WHERE id = ?",
                      (body.lat, body.lon, contact_id))
         return _issue_link(conn, _contact(conn, contact_id), now, is_sample)
 
@@ -322,6 +326,6 @@ def member_link(contact_id: int):
     now, is_sample = _clock()
     with connect() as conn:
         c = _contact(conn, contact_id)
-        if c["phone"].startswith("web:"):
-            raise HTTPException(409, "No phone on file")
+        if c["phone"].startswith("web:") or c["role"] in ("pending", "rejected"):
+            raise HTTPException(409, "No phone on file or not approved")
         return _issue_link(conn, c, now, is_sample)
