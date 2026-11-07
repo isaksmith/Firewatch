@@ -8,7 +8,7 @@
  "notice": "NOAA beta, informational only. Data may be delayed or unavailable. Not for operational decisions.",
  "collections": [
   {
-   "collection": "scene_east_conus",
+   "collection": "east_conus",
    "count": 10
   },
   {

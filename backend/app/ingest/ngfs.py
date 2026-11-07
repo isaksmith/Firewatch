@@ -9,22 +9,25 @@ Three traps handled here:
 1. The API sits behind CloudFront with max-age=3600, so an identical URL returns a
    stale body. The datetime window is rebuilt every poll, END truncated to the minute.
 2. Without a datetime the API returns only about the last hour, so one is always sent.
-3. Results are paged: when numberMatched exceeds numberReturned, follow rel=next (max 5 pages).
+3. Results are paged locally on the fixed BASE with the offset parameter (max 5 pages).
+   The response's own next link is never followed (SSRF) and redirects are not followed.
 """
 
 import logging
 from datetime import datetime, timedelta, timezone
 
+import httpx
+
 from ..config import get_settings
-from .feedlib import get_json, in_bbox, run_feed
+from .feedlib import TIMEOUT, client_headers, in_bbox, run_feed
 
 log = logging.getLogger(__name__)
 
 BASE = "https://fire.data.nesdis.noaa.gov/api/ogc/detections"
 COLLECTIONS = tuple(
     f"ngfs_schema.ngfs_detections_{s}"
-    for s in ("scene_east_conus", "east_mesoscale1", "east_mesoscale2",
-              "west_conus", "west_mesoscale1", "west_mesoscale2")
+    for s in ("scene_east_conus", "scene_east_mesoscale1", "scene_east_mesoscale2",
+              "scene_west_conus", "scene_west_mesoscale1", "scene_west_mesoscale2")
 )
 WINDOW_HOURS = 6
 MAX_PAGES = 5
@@ -55,25 +58,27 @@ def parse(payload: dict) -> list[dict]:
     return out
 
 
-def _next_href(payload: dict) -> str | None:
-    for link in payload.get("links") or []:
-        if link.get("rel") == "next" and link.get("href"):
-            return link["href"]
-    return None
+def get_json(url: str, params: dict | None = None):
+    """Like feedlib.get_json but never follows redirects: this feed only talks to BASE."""
+    r = httpx.get(url, params=params, headers=client_headers(), timeout=TIMEOUT, follow_redirects=False)
+    r.raise_for_status()
+    return r.json()
 
 
 def fetch_collection(cid: str, dt: str) -> list[dict]:
+    """Page on the fixed BASE URL with offset. The response's own next link is never followed."""
     w, s, e, n = get_settings().bbox_tuple
     url = f"{BASE}/collections/{cid}/items"
     params = {"f": "json", "limit": LIMIT, "bbox": f"{w},{s},{e},{n}", "datetime": dt, "sortby": "-acq_date_time"}
     rows: list[dict] = []
+    offset = 0
     for _ in range(MAX_PAGES):
-        payload = get_json(url, params)
+        payload = get_json(url, {**params, "offset": offset} if offset else params)
         rows += parse(payload)
-        nxt = _next_href(payload)
-        if not nxt or not payload.get("numberMatched", 0) > payload.get("numberReturned", 0):
+        returned = payload.get("numberReturned") or len(payload.get("features") or [])
+        offset += returned
+        if returned < LIMIT or offset >= (payload.get("numberMatched") or 0):
             break
-        url, params = nxt, None  # the next link carries its own query
     else:
         log.warning("ngfs %s hit the %d page cap", cid, MAX_PAGES)
     return rows
@@ -99,7 +104,7 @@ def fetch(now: datetime | None = None) -> dict:
     points: list[dict] = []
     cols = []
     for cid in COLLECTIONS:
-        short = cid.removeprefix("ngfs_schema.ngfs_detections_")
+        short = cid.removeprefix("ngfs_schema.ngfs_detections_scene_")
         try:
             rows = fetch_collection(cid, dt)
             points += rows

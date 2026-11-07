@@ -37,23 +37,73 @@ def test_every_request_sends_a_fresh_datetime(monkeypatch):
     assert len({p["datetime"] for p in seen}) == 2
 
 
-def test_paging_follows_next_and_caps_at_five(monkeypatch):
+def test_paging_uses_offset_on_fixed_base_and_caps_at_five(monkeypatch):
+    monkeypatch.setattr(ngfs, "LIMIT", 2)
     calls = []
 
     def fake(url, params=None):
-        calls.append(url)
-        return page(1, 99, nxt=f"https://n/{len(calls)}")
+        calls.append((url, dict(params)))
+        return page(2, 99, feats=[feat(), feat()])
 
     monkeypatch.setattr(ngfs, "get_json", fake)
     rows = ngfs.fetch_collection(ngfs.COLLECTIONS[0], "a/b")
-    assert len(calls) == 5 and len(rows) == 5 and calls[1] == "https://n/1"
+    assert len(calls) == 5 and len(rows) == 10
+    assert [c[1].get("offset", 0) for c in calls] == [0, 2, 4, 6, 8]
+    assert all(c[0].startswith(ngfs.BASE + "/") and c[1]["datetime"] == "a/b" for c in calls)
 
 
 def test_no_paging_when_everything_returned(monkeypatch):
     calls = []
-    monkeypatch.setattr(ngfs, "get_json", lambda u, p=None: calls.append(u) or page(1, 1, nxt="https://n/1"))
+    monkeypatch.setattr(ngfs, "LIMIT", 2)
+    monkeypatch.setattr(ngfs, "get_json", lambda u, p=None: calls.append(u) or page(1, 1))
     ngfs.fetch_collection(ngfs.COLLECTIONS[0], "a/b")
     assert len(calls) == 1
+
+
+def test_stops_when_offset_reaches_number_matched(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ngfs, "LIMIT", 2)
+
+    def fake(url, params=None):
+        calls.append(dict(params))
+        return page(2, 4, feats=[feat(), feat()])
+
+    monkeypatch.setattr(ngfs, "get_json", fake)
+    assert len(ngfs.fetch_collection(ngfs.COLLECTIONS[0], "a/b")) == 4
+    assert len(calls) == 2
+
+
+def test_hostile_next_link_is_never_requested_and_page_two_uses_offset(monkeypatch):
+    monkeypatch.setattr(ngfs, "LIMIT", 2)
+    urls, offsets = [], []
+
+    def fake(url, params=None):
+        urls.append(url)
+        offsets.append((params or {}).get("offset", 0))
+        if len(urls) == 1:
+            return page(2, 3, feats=[feat(), feat()], nxt="http://169.254.169.254/latest/meta-data/")
+        return page(1, 3)
+
+    monkeypatch.setattr(ngfs, "get_json", fake)
+    rows = ngfs.fetch_collection(ngfs.COLLECTIONS[0], "a/b")
+    assert len(rows) == 3 and offsets == [0, 2]
+    assert not any("169.254" in u for u in urls) and all(u.startswith(ngfs.BASE) for u in urls)
+
+
+def test_redirects_are_not_followed(monkeypatch):
+    seen = {}
+
+    class R:
+        def raise_for_status(self): pass
+        def json(self): return {}
+
+    def fake_get(url, **kw):
+        seen.update(kw)
+        return R()
+
+    monkeypatch.setattr(ngfs.httpx, "get", fake_get)
+    ngfs.get_json(ngfs.BASE, {"a": 1})
+    assert seen["follow_redirects"] is False
 
 
 def test_partial_failure_keeps_other_rows_and_names_the_failed_one(monkeypatch):
