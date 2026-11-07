@@ -41,10 +41,18 @@ def list_scenarios() -> list[dict]:
     return out
 
 
+def _clear_posts(conn, where: str, args: tuple = ()) -> None:
+    sub = f"SELECT id FROM posts WHERE {where}"
+    conn.execute(f"DELETE FROM post_confirms WHERE post_id IN ({sub})", args)
+    conn.execute(f"DELETE FROM post_asks WHERE post_id IN ({sub})", args)
+    conn.execute(f"DELETE FROM posts WHERE {where}", args)
+
+
 def clear(slug: str) -> None:
     """Remove this scenario's events and all sample signals, messages, and burn notices."""
     with connect() as conn:
         ids = [r["id"] for r in conn.execute("SELECT id FROM events WHERE is_sample = 1 AND (sample_slug = ? OR sample_slug IS NULL)", (slug,))]
+        _clear_posts(conn, "is_sample = 1")
         for table in ("scores", "actions", "detections", "signals", "messages"):
             conn.executemany(f"DELETE FROM {table} WHERE event_id = ?", [(i,) for i in ids])
         conn.executemany("DELETE FROM events WHERE id = ?", [(i,) for i in ids])
@@ -62,9 +70,33 @@ def _apply(conn, sc: dict, step: dict, now: datetime) -> None:
     elif kind == "detections":
         dets = [{**d, "acq_time": iso(now)} for d in step["detections"]]
         process_detections(conn, dets, is_sample=True, weather=sc["weather"], now=now)
+    elif kind == "post":
+        _post_step(conn, step, now)
+    elif kind == "confirm":
+        _confirm_step(conn, step, now)
     else:
         raise ValueError(f"unknown step type {kind!r}")
     conn.execute("UPDATE events SET sample_slug = ? WHERE is_sample = 1 AND sample_slug IS NULL", (sc["slug"],))
+
+
+def _post_step(conn, step: dict, now: datetime) -> None:
+    """A free-text board post from a roster phone: {"type": "post", "from": phone, "body": text}."""
+    from . import posts
+    from .keywords import classify
+
+    contact = conn.execute("SELECT * FROM contacts WHERE phone = ?", (step["from"],)).fetchone()
+    c = classify(step["body"])
+    posts.create(conn, contact, step["from"], step["body"], c.category, c.hearsay, now, is_sample=True)
+
+
+def _confirm_step(conn, step: dict, now: datetime) -> None:
+    """A tap on the nth sample post: {"type": "confirm", "from": phone, "post": 1, "kind": "see"}."""
+    from . import posts
+
+    contact = conn.execute("SELECT * FROM contacts WHERE phone = ?", (step["from"],)).fetchone()
+    row = conn.execute("SELECT id FROM posts WHERE is_sample = 1 ORDER BY id LIMIT 1 OFFSET ?", (step.get("post", 1) - 1,)).fetchone()
+    if row and contact:
+        posts.confirm(conn, row["id"], contact, step.get("kind", "see"), now, is_sample=True)
 
 
 def _minute(conn, sc: dict, t: int) -> None:
@@ -74,6 +106,9 @@ def _minute(conn, sc: dict, t: int) -> None:
         if step["t"] == t:
             _apply(conn, sc, step, now)
     tick(conn, now, is_sample=True)
+    from . import posts
+
+    posts.tick(conn, now, is_sample=True)
 
 
 def _pre_steps(sc: dict) -> list[int]:

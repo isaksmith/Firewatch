@@ -157,6 +157,26 @@ def t_mutual_aid(ev, short_name: str, plan: dict, n_resp: int) -> str:
 # --- sending ---------------------------------------------------------------------------------------------
 
 
+def _excerpt(text: str | None, n: int) -> str:
+    t = " ".join((text or "").split())
+    return t if len(t) <= n else t[: n - 1] + "…"
+
+
+def t_ask_post(post, contact, short_name: str) -> str:
+    what = "smoke" if post["category"] == "smoke" else "fire"
+    return (f"{short_name}: a neighbor posted a possible {what} {_rel(post, contact)} of you. Do you see it? "
+            "Reply 1 yes, 2 no, 3 my burn. STOP to opt out")
+
+
+def t_post_duty(post, why: str) -> str:
+    head = f"FIREWATCH board: {why}, {post['lat']:.4f},{post['lon']:.4f}. "
+    return head + _excerpt(post["body"], SMS_MAX - len(head) - 1 - 20) + " Check the board."
+
+
+def t_place_hint() -> str:
+    return "To place it: FIRE N 5 (5 mi north)."
+
+
 ESTIMATE_JOIN_KM = 8.0  # a report placed by bearing and distance may be off by miles, so it joins wider
 
 CHANNELS = ("sms", "mesh")
@@ -164,7 +184,7 @@ CHANNELS = ("sms", "mesh")
 
 def send(
     conn: sqlite3.Connection, contact, body: str, purpose: str, event_id: int | None, now: datetime, is_sample: bool,
-    channels: tuple[str, ...] = CHANNELS,
+    channels: tuple[str, ...] = CHANNELS, post_id: int | None = None,
 ) -> dict | None:
     """Text a contact by SMS and, when they carry a radio and the server's radio is up, over the mesh too.
 
@@ -176,7 +196,7 @@ def send(
         log.warning("%s text is %d chars; truncating", purpose, len(body))
         body = body[: SMS_MAX - 1] + "…"
     routes = []
-    if "sms" in channels and not contact["phone"].startswith("!"):
+    if "sms" in channels and not contact["phone"].startswith(("!", "web:")):
         routes.append(("sms", contact["phone"], gateway_for(is_sample)))
     node = contact["mesh_id"] if "mesh_id" in contact.keys() else None
     if "mesh" in channels and node and (bridge := mesh.get_bridge()):
@@ -190,9 +210,9 @@ def send(
             log.warning("%s to %s failed: %s", channel, to, e)
             status = "failed"
         cur = conn.execute(
-            "INSERT INTO messages(event_id, contact_id, phone, direction, purpose, body, status, gateway_id, is_sample, created_at, channel) "
-            "VALUES (?, ?, ?, 'out', ?, ?, ?, ?, ?, ?, ?)",
-            (event_id, contact["id"], to, purpose, body, status, gid, int(is_sample), iso(now), channel),
+            "INSERT INTO messages(event_id, contact_id, phone, direction, purpose, body, status, gateway_id, is_sample, created_at, channel, post_id) "
+            "VALUES (?, ?, ?, 'out', ?, ?, ?, ?, ?, ?, ?, ?)",
+            (event_id, contact["id"], to, purpose, body, status, gid, int(is_sample), iso(now), channel, post_id),
         )
         first = first or {"id": cur.lastrowid, "to": contact["name"], "purpose": purpose, "body": body, "status": status, "channel": channel}
     return first
@@ -453,6 +473,32 @@ def _latest_open_response(conn, is_sample: bool) -> int | None:
 HELP = "{name} Firewatch: text FIRE to report a fire, BURN to register a burn today, STOP to opt out."
 
 
+RESERVED = ("1", "2", "3", "PAGE", "NO", "SEND", "R", "ACK", "STOP", "START", "JOIN", "FIRE", "BURN")
+
+
+def _newest_ask(conn, contact_id: int):
+    """The newest open ask for a contact: ("post", post_id, ask_id) or ("event", event_id), else None."""
+    pa = conn.execute(
+        "SELECT id, post_id, asked_at FROM post_asks WHERE contact_id = ? AND answered_at IS NULL ORDER BY id DESC LIMIT 1",
+        (contact_id,)).fetchone()
+    ev = conn.execute(
+        "SELECT id, event_id, created_at FROM messages WHERE contact_id = ? AND direction = 'out' AND event_id IS NOT NULL "
+        "AND purpose = 'ask_neighbor' ORDER BY id DESC LIMIT 1", (contact_id,)).fetchone()
+    if pa and (not ev or pa["asked_at"] >= ev["created_at"]):
+        return ("post", pa["post_id"], pa["id"])
+    if ev:
+        return ("event", ev["event_id"])
+    return None
+
+
+def _confirm_reply(r: dict) -> str:
+    if r.get("reason") in ("own_post", "duplicate"):
+        return "Firewatch: thanks, you already have this one."
+    if not r.get("ok"):
+        return "Firewatch: that post is no longer open."
+    return "Firewatch: thanks. The fire district has your answer."
+
+
 def handle_inbound(
     conn: sqlite3.Connection, phone: str, body: str, now: datetime, is_sample: bool = False,
     channel: str = "sms", at: tuple[float, float] | None = None,
@@ -462,7 +508,9 @@ def handle_inbound(
     `phone` is the sender's number, or their radio's node ID on the mesh channel. `at` is where the sender is
     right now (a radio's GPS fix) and locates their reports in place of their roster address.
     """
+    from . import posts as posts_mod
     from .confirm import evaluate_event
+    from .keywords import classify
     from .signals import add_signal
 
     d = load_district()
@@ -504,11 +552,27 @@ def handle_inbound(
                 (rest[:60] or "Unregistered", phone, phone if channel == "mesh" else None),
             )
         out.update(action="join", reply=f"Firewatch: thanks. {d.short_name} will confirm your number and place.")
-    elif word in ("1", "2", "3") and (eid := latest_event(("ask_neighbor",))):
-        add_signal(conn, "neighbor_reply", contact["lat"], contact["lon"], iso(now), f"{channel}:{phone}", word,
-                   contact["id"], is_sample, event_id=eid)
-        evaluate_event(conn, eid, None, now)
-        out.update(action="neighbor_reply", event_id=eid, reply="Thanks. The fire district has your answer.")
+    elif word in ("1", "2", "3") and contact and (ask := _newest_ask(conn, contact["id"])):
+        kind = {"1": "see", "2": "not_seeing", "3": "burn"}[word]
+        if ask[0] == "post":
+            conn.execute("UPDATE post_asks SET answered_at = ? WHERE id = ?", (iso(now), ask[2]))
+            r = posts_mod.confirm(conn, ask[1], contact, kind, now, is_sample, channel)
+            out.update(action="post_confirm", event_id=r.get("event_id"), reply=_confirm_reply(r))
+        else:
+            eid = ask[1]
+            first = conn.execute("SELECT id FROM posts WHERE event_id = ? ORDER BY id LIMIT 1", (eid,)).fetchone()
+            if first and word == "1":
+                r = posts_mod.confirm(conn, first["id"], contact, "see", now, is_sample, channel)
+                out.update(action="post_confirm", event_id=eid, reply=_confirm_reply(r))
+            else:
+                if first:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO post_confirms(post_id, contact_id, kind, channel, counted, reason, created_at) "
+                        "VALUES (?, ?, ?, ?, 0, 'note', ?)", (first["id"], contact["id"], kind, channel, iso(now)))
+                add_signal(conn, "neighbor_reply", contact["lat"], contact["lon"], iso(now), f"{channel}:{phone}", word,
+                           contact["id"], is_sample, event_id=eid)
+                evaluate_event(conn, eid, None, now)
+                out.update(action="neighbor_reply", event_id=eid, reply="Thanks. The fire district has your answer.")
     elif word in ("PAGE", "NO", "SEND") and contact and contact["role"] in LADDER_ROLES:
         purposes = ("mutual_aid_draft",) + DECIDERS if word == "SEND" else DECIDERS
         eid = latest_event(purposes) or _latest_open_response(conn, is_sample)
@@ -537,6 +601,7 @@ def handle_inbound(
             eid = add_signal(conn, "report", *at_pt, iso(now), f"{channel}:{phone}", rest or None,
                              contact["id"] if contact else None, is_sample, join_radius_km=join_km)
             evaluate_event(conn, eid, None, now)
+            posts_mod.record(conn, contact, phone, body, at_pt, bool(w), eid, now, is_sample, channel)
             ev = _event(conn, eid)
             if not d.contains(ev["lat"], ev["lon"]):
                 # The ladder only alerts for in-district events, so tell the duty officer directly.
@@ -566,6 +631,7 @@ def handle_inbound(
             duty = _ladder(conn)[:1]
             if duty:
                 send(conn, duty[0], f"FIREWATCH unlocated report from {phone}: {body.strip()}"[:SMS_MAX], "duty_fyi", None, now, is_sample)
+            posts_mod.record(conn, contact, phone, body, None, False, None, now, is_sample, channel)
             out.update(action="report_unlocated", reply="Firewatch: report sent to the duty officer. Call 911 if anyone is in danger.")
     elif word == "BURN" and contact and here:
         burn_date = now.astimezone(CENTRAL).date().isoformat()
@@ -577,6 +643,21 @@ def handle_inbound(
         out.update(action="burn", reply="Firewatch: burn noted for today near your place. Text FIRE if it gets away.")
     else:
         out["reply"] = HELP.format(name=d.short_name)
+        text = body.strip()
+        if text and word not in RESERVED:
+            cat = classify(text)
+            r = posts_mod.create(conn, contact, phone, text, cat.category, cat.hearsay, now, is_sample, channel, at=here)
+            if cat.category != "other":
+                out["event_id"] = r["event_id"]
+                if r["event_id"]:
+                    out.update(action="post_report", reply="Firewatch: report received. The duty officer is being told.")
+                elif r["flagged"]:
+                    out.update(action="post_flagged", reply="Firewatch: posted. Neighbors nearby are being asked. If you see it, text FIRE with where.")
+                else:
+                    reply = "Firewatch: posted to the board."
+                    if not here and cat.category in ("fire", "smoke"):
+                        reply += " " + t_place_hint()
+                    out.update(action="post", reply=reply)
 
     if out["event_id"]:
         conn.execute("UPDATE messages SET event_id = ? WHERE id = ?", (out["event_id"], msg_id))

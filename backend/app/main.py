@@ -22,7 +22,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from . import mesh, notify, sample, scenario
+from . import mesh, notify, posts, sample, scenario
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
 from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
@@ -84,7 +84,9 @@ def poll_jobs() -> dict:
 
 def _tick_live() -> None:
     with connect() as conn:
-        notify.tick(conn, utcnow(), is_sample=False)
+        now = utcnow()
+        notify.tick(conn, now, is_sample=False)
+        posts.tick(conn, now, is_sample=get_settings().mode == "sample")
 
 
 async def _tick_loop() -> None:

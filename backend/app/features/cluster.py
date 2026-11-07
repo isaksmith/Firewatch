@@ -90,7 +90,7 @@ def join_or_create(conn: sqlite3.Connection, matched: list[int], lat: float, lon
 
 
 def _merge(conn: sqlite3.Connection, keep: int, drop: int) -> None:
-    for table in ("detections", "signals", "messages", "scores", "actions"):
+    for table in ("detections", "signals", "messages", "scores", "actions", "posts"):
         conn.execute(f"UPDATE {table} SET event_id = ? WHERE event_id = ?", (keep, drop))
     conn.execute("DELETE FROM events WHERE id = ?", (drop,))
 
