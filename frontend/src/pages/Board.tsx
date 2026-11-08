@@ -15,12 +15,23 @@ import {
   type ConfirmKind,
   type StationAction,
 } from '../api'
+import {
+  ActivityStrip,
+  AreaScope,
+  CategoryFilter,
+  CatIcon,
+  DirectionChip,
+  PhoneIcon,
+  SeenMeter,
+  StatTiles,
+  type Filter,
+} from '../components/BoardVisuals'
 import { CompassPicker, type Pointing } from '../components/CompassPicker'
 import { BrandNav } from '../components/TopBar'
 import { WaitingBox } from '../components/WaitingBox'
 import { compassPostIds, DISTRICT_TEXT_NUMBER, newClientKey, rememberCompassPost, saveRecord, type Saved } from '../lib/outbox'
 import { useOutbox } from '../lib/useOutbox'
-import { burnCoords, burnDistanceText, kmAndBearing, plainAge, sentLateText, threadLine } from '../lib/board'
+import { ageMinutes, burnCoords, burnDistanceText, catMeta, kmAndBearing, plainAge, sentLateText, threadLine } from '../lib/board'
 
 const CATEGORIES: { key: BoardCategory; label: string }[] = [
   { key: 'fire', label: 'Fire' },
@@ -150,22 +161,27 @@ function BurnsToday({
             const has = b.reports_nearby && nearbyPostIds(b, posts).length > 0
             const body = (
               <>
-                <span className="block text-[15px] font-medium text-text">Controlled burn</span>
-                <span className="block text-[13px] break-words text-muted">
-                  {position ? burnDistanceText(position, b) : burnCoords(b)}
+                <span className={`flex h-9 w-9 shrink-0 items-center justify-center border border-line-2 ${b.reports_nearby ? 'bg-investigate/10 text-investigate' : 'bg-ok/10 text-ok'}`}>
+                  <CatIcon cat="burn" />
                 </span>
-                <span className="block text-[12px] text-muted">Registered {b.registered_at}</span>
-                {b.reports_nearby && <span className="mt-1 block text-[13px] font-medium text-investigate">Reports nearby. Check the posts below.</span>}
+                <span className="min-w-0">
+                  <span className="block text-[15px] font-medium text-text">Controlled burn</span>
+                  <span className="block text-[13px] break-words text-muted">
+                    {position ? burnDistanceText(position, b) : burnCoords(b)}
+                  </span>
+                  <span className="block text-[12px] text-muted">Registered {b.registered_at}</span>
+                  {b.reports_nearby && <span className="mt-1 block text-[13px] font-medium text-investigate">Reports nearby. Check the posts.</span>}
+                </span>
               </>
             )
             return (
               <li key={`${b.lat},${b.lon},${i}`} className="border border-line-2 bg-void">
                 {has ? (
-                  <button type="button" onClick={() => jump(b)} className="block min-h-11 w-full p-3 text-left">
+                  <button type="button" onClick={() => jump(b)} className="flex min-h-11 w-full gap-3 p-3 text-left">
                     {body}
                   </button>
                 ) : (
-                  <div className="p-3">{body}</div>
+                  <div className="flex gap-3 p-3">{body}</div>
                 )}
               </li>
             )
@@ -359,22 +375,28 @@ function NewPost({ onPosted, onVideoSaved, onQueued }: { onPosted: () => void; o
   }
 
   return (
-    <section className="border border-line bg-panel p-4">
+    <section id="new-post" className="scroll-mt-28 border border-line bg-panel p-4">
       <h2 className="label mb-3">New post</h2>
       <div className="grid grid-cols-5 gap-1.5" role="group" aria-label="Category">
-        {CATEGORIES.map((c) => (
-          <button
-            key={c.key}
-            type="button"
-            aria-pressed={category === c.key}
-            onClick={() => setCategory(c.key)}
-            className={`btn !h-11 !px-1 ${category === c.key ? 'btn-primary' : ''}`}
-          >
-            {c.label}
-          </button>
-        ))}
+        {CATEGORIES.map((c) => {
+          const m = catMeta(c.key)
+          const on = category === c.key
+          return (
+            <button
+              key={c.key}
+              type="button"
+              aria-pressed={on}
+              onClick={() => setCategory(c.key)}
+              className={`btn !h-16 !flex-col !gap-1.5 !px-1 ${on ? `${m.border} ${m.tint} ${m.text}` : ''}`}
+            >
+              <CatIcon cat={c.key} className={`h-5 w-5 ${on ? '' : m.text}`} />
+              <span className="text-[10px]">{c.label}</span>
+            </button>
+          )
+        })}
       </div>
       <textarea
+        id="post-text"
         value={body}
         maxLength={MAX_BODY}
         onChange={(e) => setBody(e.target.value)}
@@ -475,12 +497,16 @@ function PostCard({
   station,
   canPage,
   videoUrl,
+  position,
+  highlight,
   onChanged,
 }: {
   post: BoardPost
   station: boolean
   canPage: boolean
   videoUrl?: string
+  position: Position
+  highlight: boolean
   onChanged: () => void
 }) {
   const [busy, setBusy] = useState<string | null>(null)
@@ -541,121 +567,154 @@ function PostCard({
     }
   }
 
-  const cat = CATEGORIES.find((c) => c.key === post.category)?.label ?? post.category
-  const hot = post.category === 'fire' || post.category === 'smoke'
+  const m = catMeta(post.category)
+  const fresh = open && ageMinutes(post) < 30
 
   return (
-    <article id={`post-${post.id}`} className={`scroll-mt-20 border bg-panel p-4 ${post.flagged ? 'border-escalate/70' : 'border-line'}`}>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className={`num border px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] uppercase ${hot ? 'border-escalate/60 text-escalate' : 'border-line-2 text-muted'}`}>
-          {cat}
-        </span>
-        {post.flagged && <span className="num bg-escalate px-1.5 py-[1px] text-[10px] font-semibold tracking-[0.14em] text-white uppercase">Flagged</span>}
-        {post.unconfirmed && <span className="num border border-line-2 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-muted uppercase">Unconfirmed</span>}
-        {post.estimated && (
-          <span className="num text-[10px] tracking-[0.14em] text-investigate uppercase">
-            {compassPostIds().includes(post.id) ? 'Location estimated from direction' : 'Estimated location'}
-          </span>
-        )}
-        {post.hearsay && <span className="num text-[10px] tracking-[0.14em] text-investigate uppercase">Secondhand</span>}
-        {station && post.held && <span className="num text-[10px] tracking-[0.14em] text-degraded uppercase">Held</span>}
-        {station && post.event_status && <span className="num text-[10px] tracking-[0.14em] text-sample uppercase">Event: {post.event_status}</span>}
-      </div>
-
-      {post.badge && (
-        <p className="mt-2 border border-investigate/60 bg-investigate/10 px-2 py-1.5 text-[13px] leading-snug font-medium text-investigate">{post.badge}</p>
-      )}
-
-      <p className="mt-2 text-[15px] leading-snug break-words whitespace-pre-wrap text-text">{post.body}</p>
-
-      {post.has_photo && (
-        <button type="button" aria-label="Enlarge photo" onClick={() => setZoom(true)} className="mt-2 block min-h-11 w-full">
-          <img src={boardPhotoUrl(post.id)} alt="Photo from the reporter" loading="lazy" className="block h-auto w-full border border-line" />
-        </button>
-      )}
-      {zoom && (
-        <button
-          type="button"
-          aria-label="Close photo"
-          onClick={() => setZoom(false)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-void/90 p-2"
+    <article
+      id={`post-${post.id}`}
+      className={`relative scroll-mt-28 border bg-panel outline-2 outline-offset-2 transition-[outline-color] duration-700 ${post.flagged ? 'border-escalate/70' : 'border-line'} ${highlight ? 'outline-text' : 'outline-transparent'}`}
+    >
+      <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] ${m.bg} ${open ? '' : 'opacity-40'}`} />
+      <div className="flex gap-3 p-4 pl-5">
+        <span
+          aria-hidden="true"
+          className={`hidden h-10 w-10 shrink-0 items-center justify-center border border-line-2 sm:flex ${m.tint} ${m.text} ${open ? '' : 'opacity-50'}`}
         >
-          <img src={boardPhotoUrl(post.id)} alt="Photo from the reporter" className="max-h-full max-w-full object-contain" />
-        </button>
-      )}
-      {videoUrl && (
-        <div className="mt-2">
-          <p className="label mb-1">Video waiting to send</p>
-          <video src={videoUrl} muted playsInline controls className="block max-h-48 max-w-full border border-line" />
-        </div>
-      )}
-
-      <p className="mt-2 text-[12px] text-muted">
-        {post.author ?? 'A neighbor'} <span className="text-dim">·</span> {plainAge(post)} <span className="text-dim">·</span>{' '}
-        <span className="text-text">{seeText(post.confirms)}</span>
-      </p>
-      {sentLateText(post.sent_late_min) && <p className="mt-1 text-[12px] text-muted">{sentLateText(post.sent_late_min)}</p>}
-
-      {threadLine(post) && <p className="mt-2 text-[12px] text-muted">{threadLine(post)}</p>}
-
-      {typeof post.notes === 'number' && post.notes > 0 && (
-        <p className="mt-2 text-[12px] text-muted">
-          {post.notes} other {post.notes === 1 ? 'answer' : 'answers'}
-        </p>
-      )}
-
-      {open && (
-        <div className="mt-3 grid grid-cols-1 gap-1.5 sm:grid-cols-3">
-          <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => confirm('see')}>
-            I see it too
-          </button>
-          <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => confirm('not_seeing')}>
-            Not seeing it
-          </button>
-          <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => confirm('burn')}>
-            It's a controlled burn
-          </button>
-        </div>
-      )}
-
-      {station && (
-        <div className="mt-3 border-t border-line pt-3">
-          <p className="label mb-2">Fire district</p>
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-            <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => act('ack')}>
-              Acknowledge
-            </button>
-            <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => act('send')}>
-              Send to alerts
-            </button>
-            <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => act('dismiss')}>
-              Dismiss
-            </button>
-            {post.category === 'hazard' && (
-              <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => act('resolve')}>
-                Resolve hazard
-              </button>
+          <CatIcon cat={post.category} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className={`num inline-flex items-center gap-1.5 text-[11px] font-medium tracking-[0.14em] uppercase ${m.text}`}>
+              <CatIcon cat={post.category} className="h-4 w-4 sm:hidden" />
+              {m.label}
+            </span>
+            <span className="num text-[11px] text-muted">{plainAge(post)}</span>
+            {fresh && (
+              <span className="num inline-flex items-center gap-1 text-[10px] tracking-[0.14em] text-text uppercase">
+                <span aria-hidden="true" className={`live-dot h-1.5 w-1.5 ${m.bg}`} />
+                New
+              </span>
             )}
-            {canPage && (
-              <button
-                type="button"
-                className={`btn !h-11 ${pageArmed ? 'btn-danger' : ''}`}
-                disabled={busy !== null}
-                onClick={() => act('page')}
-              >
-                {pageArmed ? 'Tap again to page' : 'Page'}
-              </button>
+            {!open && <span className="num text-[10px] tracking-[0.14em] text-dim uppercase">Closed</span>}
+            {position && post.lat != null && post.lon != null && (
+              <span className="ml-auto">
+                <DirectionChip from={position} to={{ lat: post.lat, lon: post.lon }} />
+              </span>
             )}
           </div>
-          {pageArmed && <p className="mt-2 text-[12px] text-escalate">This sends a page to the whole department.</p>}
-        </div>
-      )}
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 empty:hidden">
+            {post.flagged && <span className="num bg-escalate px-1.5 py-[1px] text-[10px] font-semibold tracking-[0.14em] text-white uppercase">Flagged</span>}
+            {post.unconfirmed && <span className="num border border-line-2 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-muted uppercase">Unconfirmed</span>}
+            {post.estimated && (
+              <span className="num text-[10px] tracking-[0.14em] text-investigate uppercase">
+                {compassPostIds().includes(post.id) ? 'Location estimated from direction' : 'Estimated location'}
+              </span>
+            )}
+            {post.hearsay && <span className="num text-[10px] tracking-[0.14em] text-investigate uppercase">Secondhand</span>}
+            {station && post.held && <span className="num text-[10px] tracking-[0.14em] text-degraded uppercase">Held</span>}
+            {station && post.event_status && <span className="num text-[10px] tracking-[0.14em] text-sample uppercase">Event: {post.event_status}</span>}
+          </div>
 
-      {note && (
-        <p role="status" className={`mt-3 text-[13px] leading-snug ${note.bad ? 'text-escalate' : 'text-text'}`}>
-          {note.text}
-        </p>
-      )}
+          {post.badge && (
+            <p className="mt-2 border border-investigate/60 bg-investigate/10 px-2 py-1.5 text-[13px] leading-snug font-medium text-investigate">{post.badge}</p>
+          )}
+
+          <p className="mt-2 text-[15px] leading-snug break-words whitespace-pre-wrap text-text">{post.body}</p>
+
+          {post.has_photo && (
+            <button type="button" aria-label="Enlarge photo" onClick={() => setZoom(true)} className="mt-2 block min-h-11 w-full">
+              <img src={boardPhotoUrl(post.id)} alt="Photo from the reporter" loading="lazy" className="block h-auto w-full border border-line" />
+            </button>
+          )}
+          {zoom && (
+            <button
+              type="button"
+              aria-label="Close photo"
+              onClick={() => setZoom(false)}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-void/90 p-2"
+            >
+              <img src={boardPhotoUrl(post.id)} alt="Photo from the reporter" className="max-h-full max-w-full object-contain" />
+            </button>
+          )}
+          {videoUrl && (
+            <div className="mt-2">
+              <p className="label mb-1">Video waiting to send</p>
+              <video src={videoUrl} muted playsInline controls className="block max-h-48 max-w-full border border-line" />
+            </div>
+          )}
+
+          <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted">
+            <span className="inline-flex items-center gap-2">
+              <SeenMeter n={post.confirms} />
+              <span className="text-text">{seeText(post.confirms)}</span>
+            </span>
+            <span>{post.author ?? 'A neighbor'}</span>
+          </p>
+          {sentLateText(post.sent_late_min) && <p className="mt-1 text-[12px] text-muted">{sentLateText(post.sent_late_min)}</p>}
+
+          {threadLine(post) && <p className="mt-2 text-[12px] text-muted">{threadLine(post)}</p>}
+
+          {typeof post.notes === 'number' && post.notes > 0 && (
+            <p className="mt-2 text-[12px] text-muted">
+              {post.notes} other {post.notes === 1 ? 'answer' : 'answers'}
+            </p>
+          )}
+
+          {open && (
+            <div className="mt-3 grid grid-cols-1 gap-1.5 sm:grid-cols-3">
+              <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => confirm('see')}>
+                I see it too
+              </button>
+              <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => confirm('not_seeing')}>
+                Not seeing it
+              </button>
+              <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => confirm('burn')}>
+                It's a controlled burn
+              </button>
+            </div>
+          )}
+
+          {station && (
+            <div className="mt-3 border-t border-line pt-3">
+              <p className="label mb-2">Fire district</p>
+              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+                <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => act('ack')}>
+                  Acknowledge
+                </button>
+                <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => act('send')}>
+                  Send to alerts
+                </button>
+                <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => act('dismiss')}>
+                  Dismiss
+                </button>
+                {post.category === 'hazard' && (
+                  <button type="button" className="btn !h-11" disabled={busy !== null} onClick={() => act('resolve')}>
+                    Resolve hazard
+                  </button>
+                )}
+                {canPage && (
+                  <button
+                    type="button"
+                    className={`btn !h-11 ${pageArmed ? 'btn-danger' : ''}`}
+                    disabled={busy !== null}
+                    onClick={() => act('page')}
+                  >
+                    {pageArmed ? 'Tap again to page' : 'Page'}
+                  </button>
+                )}
+              </div>
+              {pageArmed && <p className="mt-2 text-[12px] text-escalate">This sends a page to the whole department.</p>}
+            </div>
+          )}
+
+          {note && (
+            <p role="status" className={`mt-3 text-[13px] leading-snug ${note.bad ? 'text-escalate' : 'text-text'}`}>
+              {note.text}
+            </p>
+          )}
+        </div>
+      </div>
     </article>
   )
 }
@@ -763,6 +822,24 @@ export function Board() {
     qc.invalidateQueries({ queryKey: ['board-me'] })
   }
 
+  const [filter, setFilter] = useState<Filter>('all')
+  const [picked, setPicked] = useState<number | null>(null)
+  useEffect(() => {
+    if (picked == null) return
+    const t = setTimeout(() => setPicked(null), 1800)
+    return () => clearTimeout(t)
+  }, [picked])
+  function pick(id: number) {
+    setPicked(id)
+    document.getElementById(`post-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  function toForm() {
+    document.getElementById('post-text')?.focus({ preventScroll: true })
+    document.getElementById('new-post')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  const shown = (list ?? []).filter((p) => filter === 'all' || p.category === filter)
+  const updated = posts.dataUpdatedAt ? new Date(posts.dataUpdatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null
+
   return (
     <div className="h-full overflow-y-auto bg-bg">
       <header className="sticky top-0 z-10 border-b border-line bg-void">
@@ -771,59 +848,119 @@ export function Board() {
           <BrandNav />
           <span className="label ml-auto pl-4">Community board</span>
         </div>
-        <p className="border-t border-escalate/60 bg-escalate px-4 py-2 text-center text-[14px] font-semibold text-white">
+        <p className="flex items-center justify-center gap-2 border-t border-escalate/60 bg-escalate px-4 py-2 text-center text-[14px] font-semibold text-white">
+          <PhoneIcon className="h-4 w-4 shrink-0" />
           Call 911 first if anyone is in danger.
         </p>
       </header>
 
-      <main className="mx-auto flex max-w-[640px] flex-col gap-4 px-4 py-4">
-        {pending && (
-          <div role="status" className="flex flex-wrap items-center gap-2 border border-investigate/60 bg-investigate/10 px-3 py-2 text-[13px] text-text">
-            <span className="flex-1">This link signs you in as {pending.name}. Switch to it?</span>
-            <button type="button" className="btn btn-primary !h-11" onClick={switchTo}>
-              Switch
+      {/* Phones get one column in reading order; wide screens put the overview beside the posts. */}
+      <main className="mx-auto flex max-w-[640px] flex-col gap-4 px-4 py-4 lg:grid lg:max-w-[1180px] lg:grid-cols-[minmax(0,1fr)_minmax(0,580px)] lg:items-start lg:gap-6">
+        <div className="contents lg:flex lg:flex-col lg:gap-4">
+          <section className="order-2 flex flex-col gap-4 border border-line bg-panel p-4 lg:order-none" aria-label="Overview">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <h2 className="text-[16px] font-medium text-text">What neighbors are seeing</h2>
+              <span className="num inline-flex items-center gap-1.5 text-[11px] text-muted" role="status">
+                <span aria-hidden="true" className={`live-dot h-1.5 w-1.5 ${posts.isError ? 'bg-investigate' : 'bg-ok'}`} />
+                {posts.isError ? 'Could not refresh' : updated ? `Updated ${updated}` : 'Loading'}
+              </span>
+            </div>
+            <StatTiles posts={list ?? []} burns={burnList ?? []} />
+            <button type="button" className="btn btn-primary !h-11 w-full lg:!hidden" onClick={toForm}>
+              Report what you see
             </button>
-            <button type="button" className="btn !h-11" onClick={() => setPending(null)}>
-              Keep current
-            </button>
+            <AreaScope posts={list ?? []} burns={burnList ?? []} position={position} filter={filter} onPick={pick} />
+            {!position &&
+              (locState === 'off' ? (
+                <p className="-mt-2 text-center text-[12px] text-muted">Location is off, so the map can&apos;t center on you.</p>
+              ) : (
+                <button type="button" className="btn !h-11 w-full" disabled={locState === 'asking'} onClick={() => void askLocation()}>
+                  {locState === 'asking' ? 'Finding you' : 'Center on me'}
+                </button>
+              ))}
+            <CategoryFilter posts={list ?? []} filter={filter} onChange={setFilter} />
+            <ActivityStrip posts={list ?? []} filter={filter} />
+          </section>
+
+          {burnList && (
+            <div className="order-5 lg:order-none">
+              <BurnsToday burns={burnList} posts={list} position={position} locState={locState} onAskLocation={() => void askLocation()} />
+            </div>
+          )}
+        </div>
+
+        <div className="contents lg:flex lg:flex-col lg:gap-4">
+          <div className="order-1 flex flex-col gap-4 empty:hidden lg:order-none">
+            {pending && (
+              <div role="status" className="flex flex-wrap items-center gap-2 border border-investigate/60 bg-investigate/10 px-3 py-2 text-[13px] text-text">
+                <span className="flex-1">This link signs you in as {pending.name}. Switch to it?</span>
+                <button type="button" className="btn btn-primary !h-11" onClick={switchTo}>
+                  Switch
+                </button>
+                <button type="button" className="btn !h-11" onClick={() => setPending(null)}>
+                  Keep current
+                </button>
+              </div>
+            )}
+            {linkMsg && (
+              <p role="status" className="border border-escalate/60 px-3 py-2 text-[13px] text-escalate">
+                {linkMsg}
+              </p>
+            )}
+            {me.data && (me.data.member || me.data.station) && (
+              <p className="text-[12px] text-muted">
+                Signed in as <span className="text-text">{me.data.name}</span>
+                {station ? ' (fire district)' : ''}
+              </p>
+            )}
           </div>
-        )}
-        {linkMsg && (
-          <p role="status" className="border border-escalate/60 px-3 py-2 text-[13px] text-escalate">
-            {linkMsg}
-          </p>
-        )}
-        {me.data && (me.data.member || me.data.station) && (
-          <p className="text-[12px] text-muted">
-            Signed in as <span className="text-text">{me.data.name}</span>
-            {station ? ' (fire district)' : ''}
-          </p>
-        )}
 
-        <NewPost onPosted={refresh} onVideoSaved={(id, url) => setVideos((v) => ({ ...v, [id]: url }))} onQueued={() => void outbox.reload()} />
+          <div className="order-3 lg:order-none">
+            <NewPost onPosted={refresh} onVideoSaved={(id, url) => setVideos((v) => ({ ...v, [id]: url }))} onQueued={() => void outbox.reload()} />
+          </div>
 
-        {burnList && <BurnsToday burns={burnList} posts={list} position={position} locState={locState} onAskLocation={() => void askLocation()} />}
+          <div className="order-4 empty:hidden lg:order-none">
+            <WaitingBox rows={outbox.rows} flashes={outbox.flashes} stateOf={outbox.stateOf} onSend={(k) => void outbox.send(k)} onDelete={(k) => void outbox.remove(k)} />
+          </div>
 
-        <WaitingBox rows={outbox.rows} flashes={outbox.flashes} stateOf={outbox.stateOf} onSend={(k) => void outbox.send(k)} onDelete={(k) => void outbox.remove(k)} />
-
-        <section className="flex flex-col gap-3" aria-label="Posts">
-          <h2 className="label">Last 24 hours</h2>
-          {posts.isError && list && (
-            <p role="status" className="border border-investigate/60 px-3 py-2 text-[13px] text-investigate">
-              Could not refresh. Showing the last list we got.
-            </p>
-          )}
-          {posts.isLoading && <p className="text-[13px] text-muted">Loading posts.</p>}
-          {posts.isError && !list && (
-            <p role="status" className="border border-escalate/60 px-3 py-2 text-[13px] text-escalate">
-              Could not load posts. We will keep trying.
-            </p>
-          )}
-          {list && list.length === 0 && <p className="text-[13px] text-muted">Nothing posted in the last 24 hours.</p>}
-          {list?.map((p) => (
-            <PostCard key={p.id} post={p} station={station} canPage={canPage} videoUrl={videos[p.id]} onChanged={refresh} />
-          ))}
-        </section>
+          <section className="order-6 flex flex-col gap-3 lg:order-none" aria-label="Posts">
+            <div className="flex flex-wrap items-center justify-between gap-x-3">
+              <h2 className="label">Last 24 hours</h2>
+              {filter !== 'all' && (
+                <button type="button" className="min-h-11 text-[12px] text-text underline underline-offset-2" onClick={() => setFilter('all')}>
+                  Showing {catMeta(filter).label.toLowerCase()} only. Show all
+                </button>
+              )}
+            </div>
+            {posts.isError && list && (
+              <p role="status" className="border border-investigate/60 px-3 py-2 text-[13px] text-investigate">
+                Could not refresh. Showing the last list we got.
+              </p>
+            )}
+            {posts.isLoading && <p className="text-[13px] text-muted">Loading posts.</p>}
+            {posts.isError && !list && (
+              <p role="status" className="border border-escalate/60 px-3 py-2 text-[13px] text-escalate">
+                Could not load posts. We will keep trying.
+              </p>
+            )}
+            {list && list.length === 0 && <p className="text-[13px] text-muted">Nothing posted in the last 24 hours.</p>}
+            {list && list.length > 0 && shown.length === 0 && (
+              <p className="text-[13px] text-muted">No {catMeta(filter).label.toLowerCase()} posts in the last 24 hours.</p>
+            )}
+            {shown.map((p) => (
+              <PostCard
+                key={p.id}
+                post={p}
+                station={station}
+                canPage={canPage}
+                videoUrl={videos[p.id]}
+                position={position}
+                highlight={picked === p.id}
+                onChanged={refresh}
+              />
+            ))}
+          </section>
+        </div>
       </main>
     </div>
   )
