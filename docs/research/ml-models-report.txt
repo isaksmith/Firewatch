@@ -1,0 +1,494 @@
+FIREWATCH MACHINE-LEARNING MODELS REPORT
+November 7, 2026
+====================================================================================================
+
+SUMMARY
+=======
+
+Firewatch has four models and three supporting analyses behind the alerts it sends. This report
+covers what each one is trained on, how well it does, how the app uses it and where it can mislead.
+Every number comes from the research reports in docs/research and backend/ml, regenerated from real
+data.
+
+  - Satellite scorer (xgb-v1) separates wildfires from prescribed burns for satellite-detected
+    fires. ROC-AUC on the held-out years 2023–2025 is 0.837 against all burns and 0.720 against
+    reported prescribed burns, the stricter test. Its biggest weakness is a labelling shortcut that
+    teaches it "Flint Hills in spring means a burn". A v2 recipe that drops that shortcut scores
+    0.825 on the strict test.
+  - Fire-day model (v1) measures how fire danger changes how many wildfires start. Extreme days see
+    17.7× the Kansas wildfire starts per day of a High day, and Low-Moderate days 0.27×. The app
+    uses it to set the starting chance that a power-line lockout is a fire.
+  - Sensor smoke model (v1) measures how much a mesh sensor's smoke reading should count. The PM2.5
+    rule the app already used is worth ×9.8 (95% CI 5.6–19.8), against the ×15 it had assumed. A
+    bigger rise now counts for more, up to ×20. A gas-sensor drop adds a small, capped weight.
+  - Spread forecast (v2) is a physics-based 24-run ensemble, not a trained model. In a back-test on
+    three real Plains fires, its range reached 77% of the places satellites later found fire,
+    against 34% for the original single-run estimate.
+  - Supporting analyses:
+    - Alert load: about 30 texts per spring across four stand-in districts.
+    - NOAA's experimental NGFS satellite product: it arrives about when a fire is reported, not
+      clearly ahead of it, and misses 87% of fires under 10 acres.
+    - Satellite detection lead time: satellites see about a third of reported wildfires more than an
+      hour before discovery.
+
+How they fit together. No single dataset links satellite detections, ground sensors, weather and
+fire outcomes. So each model answers one question, and the decision model combines them as
+likelihood ratios on the odds that an event is a fire. The rules engine decides alert levels from
+independent sources, and the models set the stated chance of fire and the expected-loss
+recommendation.
+
+1. MODEL INVENTORY
+==================
+
++-----------------+-----------------+------------------------+------------------+------------------+
+| Model           | Type            | Trained or tested on   | File             | What it drives   |
++=================+=================+========================+==================+==================+
+| Satellite       | XGBoost, 27     | 1,913 snapshots of     | backend/data/    | Score 0–100 per  |
+| scorer xgb-v1   | features,       | 1,114 Kansas fire      | model/           | satellite event, |
+|                 | Platt-          | events, 2016–2025      | xgb_v1.json,     | alert level,     |
+|                 | calibrated      | (FIRMS + WFIGS)        | meta.json        | likelihood ratio |
+|                 |                 |                        |                  | s/(100−s)        |
++-----------------+-----------------+------------------------+------------------+------------------+
+| Fire-day model  | Rate ratios     | 538 WFIGS Kansas       | backend/data/    | Danger           |
+| v1              | with Poisson    | wildfires, 2016–2025,  | model/           | multiplier on a  |
+|                 | intervals       | Open-Meteo daily       | fire_day.json    | line fault's     |
+|                 |                 | weather                |                  | base rate;       |
+|                 |                 |                        |                  | large-fire share |
+|                 |                 |                        |                  | on the alert     |
++-----------------+-----------------+------------------------+------------------+------------------+
+| Sensor smoke    | Two one-feature | 2,795 Flint Hills      | backend/data/    | Weight of a mesh |
+| model v1        | logistic curves | PurpleAir sensor-days  | model/           | sensor's smoke   |
+|                 |                 | (2022); 98,571         | smoke_sensor.jso | signal in        |
+|                 |                 | BME688/690 readings    | n                | P(fire)          |
+|                 |                 | from controlled burns  |                  |                  |
++-----------------+-----------------+------------------------+------------------+------------------+
+| Spread forecast | Physics         | Back-tested on         | backend/app/sim/ | Acres burned     |
+| v2              | ensemble (24    | Anderson Creek 2016,   |                  | before help      |
+|                 | runs), not      | Starbuck 2017, Ranger  |                  | arrives, in the  |
+|                 | trained         | Road 2026              |                  | expected loss;   |
+|                 |                 |                        |                  | map outline      |
++-----------------+-----------------+------------------------+------------------+------------------+
+
+Not covered: the language model that answers texted questions (OpenRouter, app/llm.py). It is a
+hosted general-purpose model, it isn't trained here, and it plays no part in scoring or alert
+levels.
+
+2. HOW THE MODELS COMBINE
+=========================
+
+For each event, the decision model (app/decision.py) works out P(fire). It starts from a base rate
+set by the earliest signal and multiplies the odds by a likelihood ratio for each independent piece
+of evidence:
+
++-----------------------------------+-----------------------------+--------------------------------+
+| Step                              | Value                       | Source                         |
++===================================+=============================+================================+
+| Base rate: power-line lockout     | 3% × danger multiplier      | PG&E outage-to-ignition rate × |
+|                                   | (0.52 to 4.21)              | fire-day model                 |
++-----------------------------------+-----------------------------+--------------------------------+
+| Base rate: satellite detection    | 15%                         | Assumption: most Kansas        |
+|                                   |                             | hotspots are planned burns     |
++-----------------------------------+-----------------------------+--------------------------------+
+| Base rate: anything else first    | 5%                          | Assumption                     |
++-----------------------------------+-----------------------------+--------------------------------+
+| Satellite score s                 | × s/(100−s)                 | Satellite scorer (calibrated   |
+|                                   |                             | to an even wildfire/burn       |
+|                                   |                             | prior)                         |
++-----------------------------------+-----------------------------+--------------------------------+
+| Smoke sensor, PM2.5               | × 8.8 at the trigger, up to | Sensor smoke model             |
+|                                   | × 20                        |                                |
++-----------------------------------+-----------------------------+--------------------------------+
+| Gas sensor                        | up to × 3 (× 1.7 on top of  | Sensor smoke model, capped by  |
+|                                   | PM2.5)                      | assumption                     |
++-----------------------------------+-----------------------------+--------------------------------+
+| Neighbor sees smoke / no smoke /  | × 20 / × 0.4 / × 0.1        | Assumptions                    |
+| my burn                           |                             |                                |
++-----------------------------------+-----------------------------+--------------------------------+
+| Text report, registered / unknown | × 10 / × 2                  | Assumptions                    |
++-----------------------------------+-----------------------------+--------------------------------+
+| Camera smoke; line fault next to  | × 8; × 10; × 0.05           | Assumptions                    |
+| a fire; inside a registered burn  |                             |                                |
++-----------------------------------+-----------------------------+--------------------------------+
+
+The spread forecast then gives the acres a fire would burn before enough help arrives under each
+response option. The option with the lowest expected loss, P(fire) × acres plus (1 − P(fire)) × the
+false-alarm cost, is recommended. Alert levels come from the confirmation rules (app/confirm.py):
+one independent source reaches Investigate, two reach Escalate. The model can raise a level when the
+stakes call for it, but never lowers one.
+
+What is fitted and what is assumed. Three inputs are now fitted: the satellite likelihood ratio, the
+danger multiplier and the sensor weights. The people-signal ratios and the false-alarm costs are
+still planning assumptions. They can only be fitted once Firewatch logs outcomes.
+
+3. SATELLITE SCORER (XGB-V1)
+============================
+
+What it does
+------------
+For each fire event built from NASA FIRMS satellite detections (VIIRS and MODIS), it scores 0–100
+how much the event looks like a wildfire rather than a burn. Score 40 or more reaches Investigate,
+and 70 or more counts as a strong detection that reaches Escalate on its own. Guardrails cap events
+at known industrial heat sources at Monitor and raise events near towns. Each alert shows the
+features that pushed the score up or down.
+
+Training data
+-------------
++-------------------------------------------+--------+------+------------------------------+
+| Kind                                      | Events | Rows | Role                         |
++===========================================+========+======+==============================+
+| Reported wildfires (WFIGS)                | 224    | 455  | Positive                     |
++-------------------------------------------+--------+------+------------------------------+
+| Reported prescribed burns (WFIGS)         | 90     | 181  | Negative                     |
++-------------------------------------------+--------+------+------------------------------+
+| Unreported Flint Hills fires, March–April | 400    | 702  | Weak negative, down-weighted |
++-------------------------------------------+--------+------+------------------------------+
+| Industrial heat sources                   | 400    | 575  | Evaluation only              |
++-------------------------------------------+--------+------+------------------------------+
+
+Each event contributes up to 3 snapshots: first pass, second pass and last pass within 24 h. The 27
+features cover:
+
+  - satellite: fire power, detections, passes, growth;
+  - weather: wind, gusts, humidity, rain, the McArthur fire danger index;
+  - terrain;
+  - distance to towns and power lines;
+  - time of year;
+  - an in_flint_hills flag.
+
+Training covers 2016–2022 and testing 2023–2025. The deployed model was refit on all years.
+
+Results
+-------
++---------------------+---------------------+-----------+--------------------------+-----------+
+| Scorer              | vs all burns (test) | 95% CI    | vs reported burns (test) | 95% CI    |
++=====================+=====================+===========+==========================+===========+
+| xgboost (shipped)   | 0.837               | 0.77–0.90 | 0.720                    | 0.62–0.82 |
++---------------------+---------------------+-----------+--------------------------+-----------+
+| logistic regression | 0.872               | 0.81–0.92 | 0.784                    | 0.69–0.86 |
++---------------------+---------------------+-----------+--------------------------+-----------+
+| rules-v0 (fallback) | 0.787               | 0.72–0.85 | 0.603                    | 0.50–0.70 |
++---------------------+---------------------+-----------+--------------------------+-----------+
+
+  - XGBoost and logistic regression are within noise: logistic leads on the test years, while
+    XGBoost leads in leave-one-year-out cross-validation over 2016–2022 (0.846 vs 0.793). XGBoost
+    beats the rules scorer against reported burns by +0.12 (95% CI +0.01 to +0.23).
+  - At the deployed thresholds: 87% of test wildfires reach Investigate or higher within 24 h and
+    61% reach Escalate. On the other side, 59% of reported prescribed burns also reach Investigate
+    or higher, and 20% reach Escalate.
+  - The heat-source guardrail is essential: without it, 44% of industrial heat-source snapshots
+    would reach Investigate or higher.
+  - Calibration on test snapshots: Brier score 0.180 and expected calibration error 0.05, at the
+    even prior the score is calibrated to. The score is not a real-world probability, which is why
+    the decision model starts satellite events at 15%.
+  - Robustness: hyperparameters move leave-one-year-out AUC by at most 0.04. Ten random seeds move
+    test AUC by under 0.01.
+  - What carries the signal: satellite features alone barely separate wildfires from burns (0.53
+    against reported burns). Wind, gusts and humidity carry most of the legitimate signal.
+
+[Figure: Satellite scorer: ROC-AUC on the held-out years with 95% bootstrap intervals. See
+docs/research/figures/scorer-v1/bootstrap_auc.png]
+
+Main weakness: the Flint Hills labels
+-------------------------------------
+All 400 weak negatives lie in the Flint Hills in March–April by construction, so in_flint_hills
+became the strongest feature, worth about ±1 log-odds. Real Flint Hills wildfires score low: the
+five worst-scored test wildfires are all April 2023 Flint Hills fires. Reported burns just outside
+the region score high: all eight top false alarms. Retraining under five label designs shows the
+problem is the labels:
+
++-------------------------------------+--------------------+-------------------+-------------------+
+| Label design                        | vs reported burns  | vs reported burns | vs unreported     |
+|                                     | (cross-validation) | (test)            | Flint Hills fires |
+|                                     |                    |                   | (test)            |
++=====================================+====================+===================+===================+
+| v1: weak negatives, reduced weight  | 0.775              | 0.720             | 0.889             |
++-------------------------------------+--------------------+-------------------+-------------------+
+| Weak negatives, full weight         | 0.736              | 0.632             | 0.910             |
++-------------------------------------+--------------------+-------------------+-------------------+
+| No weak negatives                   | 0.818              | 0.813             | 0.675             |
++-------------------------------------+--------------------+-------------------+-------------------+
+| No weak negatives, no               | 0.822              | 0.825             | 0.684             |
+| in_flint_hills (v2 candidate)       |                    |                   |                   |
++-------------------------------------+--------------------+-------------------+-------------------+
+
+The v2 candidate is better on the strict metric on both views. Its cost is that it can no longer
+quiet unreported Flint Hills spring burns, a job burn notices and the likely-prescribed suppression
+rule may do better. Before adopting v2, replay a March–April season to measure the extra alert
+volume.
+
+[Figure: Satellite scorer: effect of the negative-label design. See
+docs/research/figures/scorer-v1/label_design.png]
+
+Limits
+------
+  - Labels reflect reporting. WFIGS holds the fires someone reported, so distance to town partly
+    measures who reports fires.
+  - The test set is small: 61 wildfires and 41 reported burns, about 40% of them from 2023. One
+    unusual season moves results by about 0.1.
+  - The heat-source layer was built from all ten years, so heat-source results are optimistic.
+  - The last-pass snapshot is weaker (AUC 0.72), and the app rescores events as passes arrive.
+
+4. FIRE-DAY MODEL (V1)
+======================
+
+What it does
+------------
+It answers two questions about the day, not the individual fire. First, on a day at a given
+fire-danger level, how many more wildfires start than on a High day? Second, of the fires that
+started at that level, what share grew past 300 and 1,000 acres?
+
+Data and method
+---------------
+The data is 538 NIFC WFIGS Kansas wildfires, 2016–2025. Weather is Open-Meteo archive daily maximum
+temperature, minimum humidity and maximum wind on a 1° grid (21 points). The danger index is the
+app's McArthur grassland index with a seasonal curing table, banded as the app bands it. Every grid
+point on every day is one point-day of exposure. The rate ratio (RR) compares fires per point-day
+with High days, with log-normal Poisson intervals.
+
+Results
+-------
++--------------+-------------+-------+------------------+-------------+--------------+-------------+
+| Danger band  | Share of    | Fires | Rate ratio (95%  | Per-fault   | Lockout      | Fires ≥     |
+|              | point-days  |       | CI)              | multiplier  | starting     | 1,000 ac    |
+|              |             |       |                  |             | P(fire)      |             |
++==============+=============+=======+==================+=============+==============+=============+
+| Low-Moderate | 89.3%       | 327   | 0.27 (0.22–0.34) | 0.52        | 1.6%         | 9%          |
++--------------+-------------+-------+------------------+-------------+--------------+-------------+
+| High         | 8.4%        | 112   | 1.0 (reference)  | 1.00        | 3.0%         | 32%         |
++--------------+-------------+-------+------------------+-------------+--------------+-------------+
+| Very High    | 1.9%        | 66    | 2.63 (1.94–3.57) | 1.62        | 4.9%         | 33%         |
++--------------+-------------+-------+------------------+-------------+--------------+-------------+
+| Severe       | 0.3%        | 25    | 5.95 (3.86–9.19) | 2.44        | 7.3%         | 60%         |
++--------------+-------------+-------+------------------+-------------+--------------+-------------+
+| Extreme      | <0.1%       | 8     | 17.74            | 4.21        | 12.6%        | 50%         |
+|              |             |       | (8.66–36.34)     |             |              |             |
++--------------+-------------+-------+------------------+-------------+--------------+-------------+
+
+The rate ratio counts fire starts per day. A line fault's chance of igniting is only part of that:
+on windy, dry days both faults and ignitions per fault rise. Public data can't split the two, so the
+app gives each half the increase in log terms (per-fault multiplier = RR^0.5, a district setting).
+On the Cottonwood Creek scenario, the recommendation is the same at exponents 0, 0.5 and 1. Only the
+stated confidence changes.
+
+[Figure: Fire-day model: wildfire starts per day by danger band, relative to High. See
+docs/research/figures/fire-day/ignition_rate_by_band.png]
+
+Limits
+------
+  - Reporting bias: bigger fires are likelier to be reported, so the rate ratio at high danger is
+    probably overstated.
+  - It isn't specific to power lines: almost all causes are "Human" or blank.
+  - Coarse weather (1°, daily extremes) and a seasonal curing table instead of observed greenness.
+  - Small counts at the extreme end (8 fires on Extreme days): see the intervals.
+
+5. SENSOR SMOKE MODEL (V1)
+==========================
+
+What it does
+------------
+The tower smoke rule decides whether a mesh sensor reading is smoke. It needs a PM2.5 rise of 50
+µg/m³ or more over the node's 3-hour baseline, a fine-particle ratio that isn't dust, and other
+towers not rising too (regional haze). This model sets how much a reading that passes should count
+toward P(fire). It also adds a second, weaker weight from the BME680/688 gas sensor on bare nodes.
+
+Particulate
+-----------
+The data is the Colorado State University Flint Hills 2022 campaign: 36 PurpleAir sensors (the
+Plantower family our PMSA003I belongs to), hourly from March to May. The labels are the study's
+expert daily designations, which separate smoke from a nearby fire from transported regional haze.
+There are 2,795 labelled sensor-days, 704 of them local smoke. The feature is the PM2.5 rise at the
+hour with the day's largest rise, computed exactly as the app computes it live.
+
++------------------------+-------------------------+--------------------+--------------------------+
+| Rise threshold (µg/m³) | Local-smoke days caught | Other days flagged | Likelihood ratio (95%    |
+|                        |                         |                    | CI)                      |
++========================+=========================+====================+==========================+
+| ≥ 20                   | 50.0%                   | 9.8%               | 5.1 (3.7–7.1)            |
++------------------------+-------------------------+--------------------+--------------------------+
+| ≥ 30                   | 32.7%                   | 4.8%               | 6.8 (4.6–10.1)           |
++------------------------+-------------------------+--------------------+--------------------------+
+| ≥ 50 (the app's rule)  | 15.1%                   | 1.5%               | 9.8 (5.6–19.8)           |
++------------------------+-------------------------+--------------------+--------------------------+
+| ≥ 100                  | 4.5%                    | 0.2%               | 19.0 (5.6–91.1)          |
++------------------------+-------------------------+--------------------+--------------------------+
+
+  - The rule's measured ×9.8 replaces the assumed ×15 for any sensor signal without a model weight.
+  - A logistic curve in ln(1 + rise) fits the banded likelihood ratios (AUC 0.823, 95% CI
+    0.784–0.856). It gives ×2.3 at 20 µg/m³, ×8.8 at 50 µg/m³ and reaches the ×20 cap at about 90
+    µg/m³. The cap is there because the curve runs ahead of the data above 50 µg/m³, and live single
+    readings spike higher than hourly means.
+  - Extra features did not add skill in leave-one-week-out cross-validation: absolute PM level, the
+    previous hour, and sensors 15–60 km away. Humidity helped, but mostly because burn days are dry.
+    The decision model already weighs fire weather, so humidity is left out.
+
+[Figure: Sensor smoke model: likelihood ratio of local smoke by PM2.5 rise, observed bands and
+fitted curve. See docs/research/figures/sensor-smoke/pm_likelihood_ratio.png]
+
+Gas
+---
+The data is the University of Cagliari smoke detection dataset: 5 BME688/690 nodes 100 m from
+controlled vegetation burns, 2 sessions, 52 hours of recordings. The feature is gas resistance over
+the node's own clean-air baseline (R/R0). Our telemetry reports one heater step whose temperature
+isn't known, so only the ratio transfers. Leave-one-node-out AUC is 0.902. The app's trigger, R/R0 ≤
+0.5 on two readings in a row, catches 70.6% of smoke readings and flags 3.6% of clean ones in the
+experiment.
+
+The clean air in that experiment is only about 37 minutes per session, so the field false-alarm rate
+is unknown. Until a supervised burn trial measures it:
+
+  - gas is capped at ×3;
+  - on a node with a PM sensor it adds at most ×1.7;
+  - on its own it only adds weight to an event already open within 8 km;
+  - it never opens an event or counts as a source.
+
+Limits
+------
+  - One season and one place, mostly prescribed-burn smoke; wildfire smoke on a windy winter day may
+    look different.
+  - Daily labels against one hourly feature, and hourly means in training against single live
+    readings.
+  - Gas: two sessions, Mediterranean vegetation, a dev-kit heater profile rather than Meshtastic's.
+
+6. SPREAD FORECAST (V2, BACK-TESTED)
+====================================
+
+The forecast is a physics-based grass-fire spread model. It is a 24-run ensemble using hourly wind,
+the NLCD/USDA cropland fuel map and terrain, with ±15% wind speed and ±15° direction spread standing
+in for forecast error. It isn't trained on data, but it was back-tested from the first satellite
+look of real Plains fires against every later detection within 16 hours. Weather is the archive's
+actual hourly weather, so this tests the fire model, not a weather forecast.
+
++---------------------------------+--------------------+---------------+---------------------------+
+| Detections scored               | v2 median forecast | v2 worst case | v1 (single run, constant  |
+|                                 |                    |               | wind, all grass)          |
++=================================+====================+===============+===========================+
+| 6,027 polar-orbiter pixels      | 59%                | 77%           | 34%                       |
+| (VIIRS, MODIS)                  |                    |               |                           |
++---------------------------------+--------------------+---------------+---------------------------+
+| 832 GOES pixels (every 30 min)  | 41%                | 66%           | 37%                       |
++---------------------------------+--------------------+---------------+---------------------------+
+
+"Reached" means the share of later detected fire pixels where the forecast already had fire.
+
+  - Extreme-wind days ran 2–4× faster than the base formula. Starbuck 2017 and Ranger Road 2026 ran
+    at about 20% of their 80–90 km/h gusts. 6 of the 24 runs now spread at 20% of gust speed on dry,
+    gusty days. Ranger Road's worst case at +12–14 h now reaches 53–57 km against the 49–51 km seen.
+  - On a moist night (Anderson Creek 2016) the forecast runs long: 41 km median against 24 km seen
+    at 15 h.
+  - Ranger Road's first hour is under-called: 1,306 acres median against a reported 15,000.
+  - Limits: only three fires, no suppression in the model, and hindcast weather. "Reached" rewards
+    over-prediction, so the full report puts it next to how far the fire actually ran.
+
+[Figure: Spread back-test: Starbuck fire, March 2017. See
+docs/research/figures/spread-backtest/starbuck-2017.png]
+
+7. SUPPORTING ANALYSES
+======================
+
+Alert load (the cry-wolf number)
+--------------------------------
+The real scorer, guardrails and level rules were replayed on every satellite event in March–April,
+2016–2025, inside 12-mile circles around four stand-in districts (863 events). On the held-out
+springs 2023–2025, the four together get 30.3 texts per spring (15.2 a month), including 13.3 "Reply
+PAGE" escalations.
+
++---------------------+--------------------------+---------------------+----------------------+
+| District            | Texts per month (spring) | Escalate per spring | Worst 7 days         |
++=====================+==========================+=====================+======================+
+| Comanche            | 1.2                      | 1.3                 | 4 texts              |
++---------------------+--------------------------+---------------------+----------------------+
+| Clark               | 0.5                      | 0.3                 | 2 texts              |
++---------------------+--------------------------+---------------------+----------------------+
+| Barber              | 4.3                      | 7.0                 | 7 texts (6 Escalate) |
++---------------------+--------------------------+---------------------+----------------------+
+| Chase (Flint Hills) | 9.2                      | 4.7                 | 12 texts             |
++---------------------+--------------------------+---------------------+----------------------+
+
+98–99% of alerted events match no reported incident. That is not a false-alarm rate: WFIGS has
+almost no Kansas incidents near these circles. The figure is satellite-only, with no burn registry
+or replies, so it probably overstates load where registered burns would be suppressed.
+
+NGFS (NOAA's experimental geostationary fire product)
+-----------------------------------------------------
+  - Lead time: of 56 Kansas wildfires since February 2026, 37 matched an NGFS detection. Across
+    Kansas and Oklahoma, 497 of 1,399 fires matched. Counting matches up to 3 hours early, the
+    median detection comes before discovery: 10 minutes in Kansas, 19 across both states. Many of
+    those early hits are probably an earlier burn at the same spot. Dropping detections more than an
+    hour early moves the Kansas and Oklahoma median to about 6 minutes after discovery. The fair
+    summary is that NGFS arrives about when a fire is reported.
+  - Coverage gap: 64% of Kansas and Oklahoma fires, and 87% of fires under 10 acres, have no NGFS
+    detection nearby. It sees mostly larger fires.
+  - Extra load, spring 2026: up to 149 extra Investigate texts across the four circles. 127 of them
+    were in the Flint Hills, mostly April burn season, an upper bound since burn suppression can't
+    be replayed. NGFS alone never pages.
+
+Satellite detection lead time (polar orbiters)
+----------------------------------------------
+For 209 matched wildfires, the first FIRMS detection came a median 8 minutes after the reported
+discovery. 47% were seen first by satellite and 31% more than an hour first. Small fires (under 100
+acres) are seen a median 59 minutes before their report. WFIGS discovery times are often entered
+after the fact, so treat this as indicative.
+
+8. CROSS-CUTTING LIMITS AND NEXT STEPS
+======================================
+
+Limits shared by all models
+---------------------------
+  - Labels come from what gets reported. WFIGS is the only source of fire outcomes for the scorer
+    and the fire-day model, and most rural Kansas fires never reach it.
+  - Small samples everywhere:
+    - 41 reported burns in the scorer's test years;
+    - 8 fires on Extreme days;
+    - one season of sensor data;
+    - three back-tested fires.
+
+  - Independence is assumed: P(fire) multiplies likelihood ratios. The confirmation rules count each
+    source once, and all sensors count once, but residual correlation is not measured.
+  - No outcomes logged yet. None of the people-signal ratios or false-alarm costs is fitted.
+
+Recommended next steps
+----------------------
+  1. Train the v2 satellite scorer (no weak negatives, no in_flint_hills), and replay a March–April
+     season for its alert volume before adopting it.
+  2. Make "wildfire vs reported prescribed burns" the primary scorer metric, with bootstrap
+     intervals.
+  3. Get more reported burns: Kansas burn permits, Oklahoma and Nebraska WFIGS, Firewatch's own burn
+     notices.
+  4. Log every alert's outcome (fire, burn, nothing) so the likelihood ratios and costs can be
+     refitted on the district's own data.
+  5. Calibrate the spread formula on GOES 5-minute data from more fires, instead of only widening
+     the worst case.
+  6. Run a supervised burn trial with the field nodes to measure gas and PM false alarms, then refit
+     the sensor curves.
+  7. Get co-op outage records to split the fire-day rate ratio into fault frequency and ignition per
+     fault.
+
+APPENDIX: FILES AND REBUILDING
+==============================
+
++-----------------+--------------------------+----------------------------+------------------------+
+| Model           | Code                     | Full report                | Rebuild (from          |
+|                 |                          |                            | backend/)              |
++=================+==========================+============================+========================+
+| Satellite       | ml/train.py,             | docs/research/scorer-v1-   | python -m ml.download; |
+| scorer          | ml/analyze.py,           | training-run.md;           | ml.build_dataset;      |
+|                 | app/scoring/             | backend/ml/report.md       | ml.train; ml.analyze   |
++-----------------+--------------------------+----------------------------+------------------------+
+| Fire-day model  | ml/fire_day.py           | docs/research/fire-day-    | python -m ml.fire_day  |
+|                 |                          | model-v1.md                |                        |
++-----------------+--------------------------+----------------------------+------------------------+
+| Sensor smoke    | ml/smoke_sensor.py,      | docs/research/sensor-      | python -m              |
+| model           | app/sensor_model.py      | smoke-model-v1.md          | ml.smoke_sensor (Dryad |
+|                 |                          |                            | files by hand)         |
++-----------------+--------------------------+----------------------------+------------------------+
+| Spread          | ml/backtest.py, app/sim/ | docs/research/spread-      | python -m ml.backtest  |
+| back-test       |                          | backtest-v1.md             |                        |
++-----------------+--------------------------+----------------------------+------------------------+
+| Alert load,     | ml/alert_load.py,        | backend/ml/*.md            | python -m ml.<name>    |
+| NGFS            | ml/ngfs_alert_load.py,   |                            |                        |
+|                 | ml/ngfs_lead_time.py     |                            |                        |
++-----------------+--------------------------+----------------------------+------------------------+
+
+This report: docs/research/build-ml-report.js writes ml-models-report.txt and ml-models-report.docx
+from the same content.
+
