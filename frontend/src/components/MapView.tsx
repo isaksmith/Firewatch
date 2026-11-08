@@ -209,7 +209,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
   // Offline there are no map tiles or feeds, so the map runs lean exactly as in low data mode.
   const lowData = lowDataOn || !online
   const [layersWanted, setLayers] = useState<Record<LayerKey, boolean>>({
-    power_lines: true,
+    power_lines: false,
     static_sources: true,
     flint_hills: false,
     aoi: true,
