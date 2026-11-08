@@ -105,7 +105,7 @@ def _faults(nodes: list[dict], rng: random.Random, now: datetime) -> None:
     rich = [n for n in nodes if n["tier"] == "rich"]
     picks = rng.sample(bare, 7) + rng.sample(rich, 4)
     for n, fault in zip(picks, [
-        {"capacity": 0.58}, {"panel": 0.15}, {"panel": 0.0, "soc": 0.3}, {"gas_drift": 0.38},
+        {"capacity": 0.58}, {"panel": 0.15}, {"panel": 0.0, "soc": 0.3}, {"gas_drift": 0.5},
         {"env_stall_at": iso(now - timedelta(minutes=45))},
         {"snr": -14.5}, {"offline_at": iso(now - timedelta(hours=3, minutes=20))},
         {"capacity": 0.75}, {"pm_blocked": True}, {"pm_old": True},
