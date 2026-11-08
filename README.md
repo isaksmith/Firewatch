@@ -8,7 +8,7 @@
 
 ![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white) ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white) ![XGBoost](https://img.shields.io/badge/XGBoost-scorer-EB5B2B) ![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white) ![MapLibre](https://img.shields.io/badge/MapLibre-GL-396CB2?logo=maplibre&logoColor=white) ![Meshtastic](https://img.shields.io/badge/Meshtastic-LoRa-67EA94) ![Data](https://img.shields.io/badge/data-free%20%26%20public-ff4b2b)
 
-[Demo video](https://youtu.be/55S3FNEd-2s) · [How it works](#how-it-works) · [Screens](#screens) · [Quick start](#quick-start) · [Run the demo](#run-the-demo) · [Pitch deck](docs/pitch/Firewatch-Pitch.pdf) · [Sensor video](https://youtu.be/OYTUxd2nSDk) · [Docs](#docs) · [Data sources](#data-sources-and-apis)
+[Live site](https://firewatch-watchdogs.vercel.app) · [Demo video](https://youtu.be/55S3FNEd-2s) · [How it works](#how-it-works) · [Screens](#screens) · [Quick start](#quick-start) · [Run the demo](#run-the-demo) · [Pitch deck](docs/pitch/Firewatch-Pitch.pdf) · [Sensor video](https://youtu.be/OYTUxd2nSDk) · [Docs](#docs) · [Data sources](#data-sources-and-apis)
 
 Built for [Firewatch 2026](https://wsuinnovationworks.com/) · WSU Innovation Works × Lockheed Martin Skunk Works · Nov 6–8, 2026
 
@@ -201,6 +201,10 @@ For the whole system, open the [system map](docs/system-map.html) or read the [s
 </tr>
 </table>
 
+<img src="docs/images/board.png" alt="Community board: summary tiles, the area scope with reports and burns, category filters, reports by hour, and the post feed" width="100%" />
+
+**Community board.** Summary tiles, an area scope of nearby reports and registered burns (tap one to jump to its post), category filters, reports by hour, and the feed. Shown with made-up sample posts.
+
 <table>
 <tr>
 <td align="center" width="33%"><img src="mobile/shots/08-home-radio-alert.png" width="200" alt="Phone app home with an alert received by radio" /></td>
@@ -228,6 +232,7 @@ For the whole system, open the [system map](docs/system-map.html) or read the [s
 | Phone app (Expo, iOS and Android): region packs, alert codes, built-in radio, community board | Built |
 | Community board ([evidence](docs/board-evidence.md)) | Built and tested on the backend; see below |
 | Live texting | Not yet live: texts go to a simulated outbox; Twilio sending is written but not yet tried on a real phone |
+| [Live site](#live-site) | Running in sample mode with the simulated sensor network; no radio connected |
 
 The plan, honest cost numbers, and failure modes are in [docs/PLAN.md](docs/PLAN.md).
 
@@ -246,6 +251,33 @@ Evidence, commands and gaps are in [docs/board-evidence.md](docs/board-evidence.
 | Keyword spot check, outdoor compass, real Twilio phone | Not tested yet |
 
 </details>
+
+## Live site
+
+[firewatch-watchdogs.vercel.app](https://firewatch-watchdogs.vercel.app) has the console, the community board (`/board`), the region planner (`/planner`) and the FireNode design page (`/design`, the exploded 3D node). There's no login for now.
+
+- It runs in sample mode with the simulated FireNode network. **Run scenario** plays the scripted timelines and **Satellite replay** re-feeds the bundled fixtures; it doesn't poll the live satellite feeds.
+- Nothing leaves the server: texts go to the simulated outbox, and no mesh radio is connected.
+- **Ask Firewatch** answers with the LLM when the server has an OpenRouter key, and falls back to a template otherwise.
+- Board posts are real posts on the demo server, visible to anyone who opens it.
+
+The pages are on Vercel; the API runs on a small AWS Lightsail server behind Caddy. Setup and redeploys are in [deploy/README.md](deploy/README.md).
+
+## Contributing
+
+`main` is protected: every change goes in through a pull request, which can merge only when both checks pass.
+
+| Check | What it runs |
+|---|---|
+| Backend tests | `pytest` from a clean checkout (about 660 tests, about 9 minutes on GitHub) |
+| Console and viewer | `npm run lint`, `tsc`, `vite build`, and `node sensors/viewer/verify.mjs` |
+
+Merging deploys on its own: Vercel rebuilds the pages, and when the backend changed, `.github/workflows/ci.yml` pushes it to the server after its tests pass. Run the checks locally before opening a pull request:
+
+```bash
+cd backend && .venv/bin/pytest
+cd frontend && npm run lint && npx tsc -b --noEmit && npx vite build && node ../sensors/viewer/verify.mjs
+```
 
 ## Quick start
 
@@ -401,9 +433,10 @@ Climate summaries are cached per 0.25° cell in `backend/data/climate/`. A count
 ```
 backend/app/   FastAPI app: ingestion, clustering, enrichment, scoring, spread simulation, planner
 backend/ml/    Historical download, training-set builder, model training, evaluation report
-frontend/      React console, 3D spread preview, region planner, community board
+frontend/      React console, 3D spread preview, region planner, community board, FireNode design page
 mobile/        Expo phone app
-sensors/       Sensor node designs and costed BOMs
+sensors/       Sensor node designs, costed BOMs, and the exploded 3D viewer
+deploy/        Hosting: Vercel pages, the API server (Caddy, systemd), deploy scripts
 docs/          Plan, design, research
 ```
 
@@ -435,6 +468,10 @@ docs/          Plan, design, research
 | `frontend/src/pages/Dashboard.tsx` | Alert list, map, detail drawer, actions, scenario strip |
 | `frontend/src/pages/Spread3D.tsx` | 3D terrain spread preview with wind override |
 | `frontend/src/pages/Planner.tsx` | Region planner page: controls, climate, power, plots, relays, bill of materials, map |
+| `frontend/src/pages/Board.tsx`, `components/BoardVisuals.tsx` | Community board: posting, confirms, burns today; the summary tiles, area scope, category filter and reports-by-hour chart |
+| `frontend/src/pages/Design.tsx` | FireNode design page: the `sensors/viewer` exploded 3D node, embedded |
+| `frontend/middleware.ts`, `vercel.json` | Vercel edge proxy: optional login, forwards `/api` to the server with the proxy secret and token |
+| `.github/workflows/ci.yml` | Checks on every pull request and push to `main`; backend deploy after its tests pass |
 
 </details>
 
