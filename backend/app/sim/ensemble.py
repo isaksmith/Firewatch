@@ -80,6 +80,7 @@ def forecast(sit: Situation, minutes: int = 120, members: int = 24, seed: int = 
     dom = build_domain(inp, blocks, max(max(h) for h in member_heads))
 
     arrivals = [propagate(dom, r, inp.ignitions, minutes, inp.fire_age_min) for r in member_rates]
+    dom.step_mult = []  # ~80 MB of Python floats, needed only by propagate; the forecast caches keep the domain
     stack = np.minimum(np.stack(arrivals), UNBURNED).astype(np.float32)  # (members, n, n)
 
     t10, t50, t90 = np.percentile(stack, (10, 50, 90), axis=0)

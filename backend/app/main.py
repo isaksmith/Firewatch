@@ -478,6 +478,8 @@ def simulate_alert(
         result["event_id"] = event_id
         result["observed_wind"] = {"from_deg": round(observed_dir), "kmh": round(observed_wind, 1)}
         result["overridden"] = wind_kmh is not None or wind_from_deg is not None
+        if len(_sim_cache) > 64:
+            _sim_cache.clear()
         _sim_cache[key] = result
     return _sim_cache[key]
 
@@ -511,6 +513,8 @@ def scenario_forecast(
             sit = scenario_situation(slug, weather)
         except FileNotFoundError:
             raise HTTPException(404, "unknown scenario or weather variant") from None
+        if len(_forecast_cache) > 32:
+            _forecast_cache.clear()
         _forecast_cache[key] = _public(forecast(sit, minutes, members)) | {"scenario": slug, "weather_variant": weather}
     return _forecast_cache[key]
 
