@@ -4,12 +4,12 @@ import { timeAgo } from './format'
 
 // Category styling reuses tokens already in the dashboard: fire is the escalate red,
 // smoke the investigate amber, hazard the sample cyan, burn the ok green.
-export const CAT_META: Record<string, { label: string; text: string; bg: string; border: string }> = {
-  fire: { label: 'Fire', text: 'text-escalate', bg: 'bg-escalate', border: 'border-escalate' },
-  smoke: { label: 'Smoke', text: 'text-investigate', bg: 'bg-investigate', border: 'border-investigate' },
-  hazard: { label: 'Hazard', text: 'text-sample', bg: 'bg-sample', border: 'border-sample' },
-  burn: { label: 'Burn', text: 'text-ok', bg: 'bg-ok', border: 'border-ok' },
-  other: { label: 'Other', text: 'text-muted', bg: 'bg-muted', border: 'border-muted' },
+export const CAT_META: Record<string, { label: string; text: string; bg: string; border: string; tint: string }> = {
+  fire: { label: 'Fire', text: 'text-escalate', bg: 'bg-escalate', border: 'border-escalate', tint: 'bg-escalate/10' },
+  smoke: { label: 'Smoke', text: 'text-investigate', bg: 'bg-investigate', border: 'border-investigate', tint: 'bg-investigate/10' },
+  hazard: { label: 'Hazard', text: 'text-sample', bg: 'bg-sample', border: 'border-sample', tint: 'bg-sample/10' },
+  burn: { label: 'Burn', text: 'text-ok', bg: 'bg-ok', border: 'border-ok', tint: 'bg-ok/10' },
+  other: { label: 'Other', text: 'text-muted', bg: 'bg-muted', border: 'border-muted', tint: 'bg-muted/10' },
 }
 
 export const catMeta = (c: string) => CAT_META[c] ?? CAT_META.other
@@ -31,7 +31,7 @@ export const threadLine = (p: { thread_size?: number; badge?: string | null }) =
     ? `Part of ${p.thread_size} reports in this area${p.badge ? '. The notice covers all of them.' : ''}`
     : null
 
-function ageMinutes(p: { age_min?: number; created_at: string }): number {
+export function ageMinutes(p: { age_min?: number; created_at: string }): number {
   if (p.age_min != null) return Math.max(0, Math.round(p.age_min))
   return Math.max(0, Math.round((Date.now() - Date.parse(p.created_at)) / 60_000))
 }

@@ -9,7 +9,7 @@ repo=$(cd "$(dirname "$0")/.." && pwd)
 ssh_cmd="ssh -o StrictHostKeyChecking=accept-new ${FW_SSH_KEY:+-i $FW_SSH_KEY}"
 
 remote() { $ssh_cmd "$target" "sudo sed -n 's/^$1=//p' $2"; }
-put() { printf %s "$2" | vercel env add "$1" production --force --sensitive --yes --cwd "$repo/frontend" >/dev/null; }
+put() { printf %s "$2" | vercel env add "$1" production --force --sensitive --yes --cwd "$repo" >/dev/null; }
 
 port=$(remote FW_HTTPS_PORT /etc/firewatch/caddy.env)
 put FW_API_ORIGIN "https://$(remote FW_HOST /etc/firewatch/caddy.env):${port:-443}"

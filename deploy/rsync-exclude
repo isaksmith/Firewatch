@@ -14,3 +14,6 @@ node_modules/
 /backend/tests/
 /backend/data/cache/
 /backend/data/*.sqlite*
+.ruff_cache/
+/backend/data/*.db
+/backend/data/keys/

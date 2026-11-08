@@ -80,9 +80,9 @@ export function BrandNav() {
   const { online } = useTier()
   const pages: [string, string][] = [
     ['/', 'Console'],
+    ...(online ? ([['/board', 'Board']] as [string, string][]) : []),
     ['/planner', 'FireNode planner'],
     ['/design', 'FireNode design'],
-    ...(online ? ([['/board', 'Board']] as [string, string][]) : []),
   ]
   // On a phone the links run past the edge; bring the current page's into view.
   const navRef = useRef<HTMLElement>(null)
