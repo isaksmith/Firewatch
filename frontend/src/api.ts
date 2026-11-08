@@ -318,6 +318,15 @@ export interface Health {
   sources: Record<string, SourceHealth>
 }
 
+/** The answer a texted question would get; shown in the console, never sent. */
+export interface AskAnswer {
+  answer: string
+  /** True when the LLM worded it; false when the plain template did (LLM off, failed, or its answer failed the checks). */
+  by_model: boolean
+  llm_configured: boolean
+  fires: { id: number; place: string; status: string }[]
+}
+
 export interface PlaybookOption {
   id: string
   title: string
@@ -688,6 +697,8 @@ export const api = {
   options: (id: number) => request<Playbook>(`/alerts/${id}/options`),
   chooseOption: (id: number, optionId: string, operator: string) =>
     request<Playbook>(`/alerts/${id}/options/${optionId}`, { method: 'POST', body: JSON.stringify({ operator }) }),
+  ask: (question: string, useModel: boolean) =>
+    request<AskAnswer>('/ask', { method: 'POST', body: JSON.stringify({ question, use_model: useModel }) }),
   plannerRegions: () => request<PlannerRegions>('/planner/regions'),
   plan: (region: string, params: PlanParams) => {
     const q = new URLSearchParams({ region })

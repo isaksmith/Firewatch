@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Box, ClipboardList, Flame, MessageSquare, Play, RefreshCw, Square, Wifi } from 'lucide-react'
+import { Box, ClipboardList, Flame, MessageCircleQuestion, MessageSquare, Play, RefreshCw, Square, Wifi } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { api, type ScenarioSummary, type SourceHealth } from '../api'
@@ -89,6 +89,8 @@ export function TopBar({
   onBurnLog,
   boardOpen,
   onToggleBoard,
+  askOpen,
+  onToggleAsk,
 }: {
   onRunScenario?: () => void
   onStopScenario?: () => void
@@ -103,6 +105,8 @@ export function TopBar({
   onBurnLog?: () => void
   boardOpen?: boolean
   onToggleBoard?: () => void
+  askOpen?: boolean
+  onToggleAsk?: () => void
 }) {
   const { on: lowData } = useLowData()
   const qc = useQueryClient()
@@ -216,6 +220,18 @@ export function TopBar({
             className={`btn !h-6 ${boardOpen ? '!border-sample !text-sample' : ''}`}
           >
             <MessageSquare size={11} /> <span>Board</span>
+          </button>
+        )}
+        {onToggleAsk && (
+          <button
+            type="button"
+            onClick={onToggleAsk}
+            aria-pressed={askOpen}
+            aria-label="Ask Firewatch"
+            title="Ask Firewatch a question, as a resident would by text"
+            className={`btn !h-6 ${askOpen ? '!border-sample !text-sample' : ''}`}
+          >
+            <MessageCircleQuestion size={11} /> <span>Ask</span>
           </button>
         )}
       </div>

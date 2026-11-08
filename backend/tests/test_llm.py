@@ -224,6 +224,41 @@ def test_without_a_key_questions_go_through_the_old_path(jobs):
     assert r["action"] != "question" and not jobs
 
 
+def test_console_ask_answers_without_texting_anyone(key, model):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with connect() as conn:
+        sync_roster(conn)
+        eid = _line_fault(conn)
+    c = TestClient(app)
+    r = c.post("/api/ask", json={"question": "is it heading toward Coldwater?", "lat": FIRE[0] + 0.05, "lon": FIRE[1]}).json()
+    assert r["answer"] == f"Firewatch: {model.reply} Call 911 if in danger." and r["by_model"] is True
+    assert [f["id"] for f in r["fires"]] == [eid] and r["llm_configured"] is True
+    assert "heading toward Coldwater?" in model.calls[0]["request"]
+
+    r = c.post("/api/ask", json={"question": "is it heading toward Coldwater?", "lat": FIRE[0] + 0.05, "lon": FIRE[1],
+                                 "use_model": False}).json()
+    assert r["by_model"] is False and r["answer"].startswith(f"Firewatch: fire {eid} ") and len(model.calls) == 1
+
+    c.post("/api/ask", json={"question": "where is it?"})
+    facts = model.calls[-1]["facts"]
+    assert f"Fire {eid}, " in facts and "person asking" not in facts, "no location, so nothing about reaching the asker"
+    with connect() as conn:
+        assert not conn.execute("SELECT 1 FROM messages WHERE purpose = 'answer'").fetchone(), "nothing is sent"
+
+
+def test_console_ask_falls_back_to_the_template_when_the_model_fails(key, model):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    model.reply = None
+    r = TestClient(app).post("/api/ask", json={"question": "any fires?"}).json()
+    assert r["by_model"] is False and "no open fire near you" in r["answer"] and r["fires"] == []
+
+
 # --- channel updates -------------------------------------------------------------------------------------
 
 
