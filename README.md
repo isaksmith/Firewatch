@@ -388,12 +388,13 @@ docs/          Plan, design, research
 | `backend/app/decision.py`, `playbook.py` | Expected-loss recommendation model and the playbook it drives (options, previews, receipts) |
 | `backend/ml/backtest.py` | Spread back-test against FIRMS archive detections of real fires |
 | `backend/ml/fire_day.py` | Fire-day model: ignition rate and large-fire share by fire danger, from WFIGS + archive weather |
+| `backend/ml/smoke_sensor.py`, `app/sensor_model.py` | Sensor smoke model: how much a PM2.5 rise or gas drop counts toward P(fire), fitted on Flint Hills PurpleAir and controlled-burn gas data |
 | `frontend/src/components/FireForecast.tsx` | The selected fire's forecast outline, its wind, and the time slider on the console map |
 | `backend/app/situation.py` | `Situation` contract between ingestion and forecast/recommendations; builds one from a scenario |
 | `backend/app/signals.py`, `confirm.py` | Line faults and texted reports on events; the two-source level rules and burn registry |
 | `backend/app/notify.py` | SMS gateway (outbox / Twilio), templates, neighbor asks, no-answer ladder, PAGE / NO / SEND, downwind warnings, mutual aid, inbound keywords |
 | `backend/app/mesh.py` | Meshtastic bridge: texts out as acknowledged direct messages, replies in, radio positions and crew distances |
-| `backend/app/sensors.py` | Tower sensor telemetry: readings, the smoke rule (baseline, dust check, regional check), local temperature and humidity |
+| `backend/app/sensors.py` | Tower sensor telemetry: readings (PM, gas, temperature, humidity, pressure), the smoke rule (baseline, dust check, regional check), gas drops, local temperature and humidity |
 | `backend/app/planner.py`, `climate.py` | Region planner: priority grid, wind-weighted plot siting, plot layout, relay routing with terrain line of sight, power check, bill of materials; fire-weather climatology |
 | `backend/app/scenario.py` | Scenario replay on its own clock: run, stop, instant load |
 | `backend/app/main.py` | FastAPI routes: alerts, actions, decisions, signals, SMS, simulate, layers, district, scenario, planner, health, sample replay |
@@ -416,6 +417,7 @@ cd backend
 .venv/bin/python -m ml.build_dataset --rebuild-history # replay history, derive heat sources, label, build features (~15 min)
 .venv/bin/python -m ml.train                           # evaluate, export data/model/, write ml/report.md
 .venv/bin/python -m ml.analyze                         # deeper analyses + figures for the research report (~2 min)
+.venv/bin/python -m ml.smoke_sensor                    # sensor smoke weights from open PurpleAir + gas data (see its docstring for the downloads)
 ```
 
 Spread forecasts use NLCD land cover, downloaded on first use. To cache the scenario areas ahead of a demo (and the slower USDA CDL cropland detail), run `.venv/bin/python -m scripts.fetch_fuels`.

@@ -117,7 +117,8 @@ CREATE TABLE IF NOT EXISTS signals (
   value        TEXT,
   contact_id   INTEGER REFERENCES contacts(id),
   is_sample    INTEGER NOT NULL DEFAULT 0,
-  created_at   TEXT NOT NULL
+  created_at   TEXT NOT NULL,
+  meta_json    TEXT                        -- sensor_smoke: {pm_lr, gas_lr, via} from the sensor smoke model
 );
 CREATE INDEX IF NOT EXISTS idx_signals_event ON signals(event_id);
 CREATE INDEX IF NOT EXISTS idx_signals_time ON signals(observed_at);
@@ -254,6 +255,7 @@ MIGRATIONS = {
     "posts": {"client_key": "TEXT", "queued_min": "INTEGER"},
     "sensor_readings": {"gas_kohm": "REAL", "pressure_hpa": "REAL", "pack_v": "REAL", "pack_ma": "REAL",
                         "solar_v": "REAL", "solar_ma": "REAL", "env_seq": "INTEGER", "pm_seq": "INTEGER"},
+    "signals": {"meta_json": "TEXT"},
 }
 POST_MIGRATION = """
 CREATE UNIQUE INDEX IF NOT EXISTS idx_contacts_mesh ON contacts(mesh_id);

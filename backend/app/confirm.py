@@ -245,9 +245,16 @@ def decide_level(
             independent.setdefault("satellite", item["label"])
         elif s["kind"] == "sensor_smoke":
             # Every smoke sensor together is one source: a plume reaching two of them is still one observation.
-            item["label"] = f"Smoke sensor {s['source'].split(':')[-1]}" + (f": {s['value']}" if s["value"] else "")
-            item["counts"] = "yes"
-            independent.setdefault("sensor", "smoke sensor")
+            meta = loads(s["meta_json"], {})
+            item |= {k: meta[k] for k in ("pm_lr", "gas_lr") if k in meta}
+            if meta.get("via") == "gas":
+                item["label"] = f"Gas sensor {s['source'].split(':')[-1]}" + (f": {s['value']}" if s["value"] else "")
+                item["counts"] = "no"
+                item["note"] = "gas alone adds to the chance of fire but isn't a source"
+            else:
+                item["label"] = f"Smoke sensor {s['source'].split(':')[-1]}" + (f": {s['value']}" if s["value"] else "")
+                item["counts"] = "yes"
+                independent.setdefault("sensor", "smoke sensor")
         evidence.append(item)
 
     burn, escaped, late = _registered_burn(conn, ev, signals)

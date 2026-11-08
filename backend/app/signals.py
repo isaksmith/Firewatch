@@ -3,6 +3,7 @@
 See docs/DESIGN.md section 4.5.
 """
 
+import json
 import sqlite3
 
 from .db import iso, parse_iso, utcnow
@@ -33,6 +34,7 @@ def add_signal(
     is_sample: bool = False,
     event_id: int | None = None,
     join_radius_km: float | None = None,
+    meta: dict | None = None,
 ) -> int:
     """Store a signal and attach it to an event; returns the event id.
 
@@ -57,12 +59,22 @@ def add_signal(
         else:
             event_id = join_or_create(conn, sorted(matched), lat, lon, observed_at, flag)
     conn.execute(
-        "INSERT INTO signals(event_id, kind, lat, lon, observed_at, source, value, contact_id, is_sample, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (event_id, kind, lat, lon, observed_at, source, value, contact_id, int(is_sample), iso(utcnow())),
+        "INSERT INTO signals(event_id, kind, lat, lon, observed_at, source, value, contact_id, is_sample, created_at, meta_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (event_id, kind, lat, lon, observed_at, source, value, contact_id, int(is_sample), iso(utcnow()),
+         json.dumps(meta) if meta else None),
     )
     refresh_event_geometry(conn, event_id)
     return event_id
+
+
+def open_event_near(conn: sqlite3.Connection, kind: str, lat: float, lon: float, observed_at: str, is_sample: bool) -> int | None:
+    """The open event `kind` would join at this point, or None: for evidence that may add to an event but not open one."""
+    flag = int(is_sample)
+    radius = SENSOR_JOIN_KM if kind in SENSOR_SIGNALS else SIGNAL_RADIUS_KM
+    matched = signal_matches(conn, lat, lon, parse_iso(observed_at), flag, radius)
+    matched |= _detection_matches(conn, lat, lon, observed_at, flag, radius)
+    return _nearest_open(conn, matched, lat, lon)
 
 
 def _nearest_open(conn: sqlite3.Connection, matched: set[int], lat: float, lon: float) -> int | None:

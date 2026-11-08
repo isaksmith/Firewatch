@@ -58,7 +58,8 @@ A lockout on an Extreme day therefore starts at 3% × 4.2 ≈ **13%**.
 | Text report, unknown number | ×2 | Assumption |
 | Line lockout next to an already-detected fire | ×10 | Assumption |
 | Camera smoke | ×8 | Assumption |
-| Tower smoke sensor (Isak's mesh nodes) | ×15 | Assumption. The sensor's own rule already rejects dust (coarse particles) and regional haze (other towers rising too). It's still a single fixed point that can't tell where the smoke comes from. |
+| Tower smoke sensor (Isak's mesh nodes), PM2.5 | By the size of the rise: ×8.8 at the 50 µg/m³ trigger, up to the ×20 cap from ~90 | [Sensor smoke model v1](research/sensor-smoke-model-v1.md), fitted on 2,795 Flint Hills sensor-days against expert local-smoke designations. The sensor's own rule still decides whether it's smoke and rejects dust and regional haze. A signal with no model weight uses the rule's measured ×9.8 (the old assumption was ×15). All sensors together count once. |
+| Tower or bare-node gas sensor (resistance drop) | up to ×3; half that weight in log terms on top of PM2.5 | Same model, fitted on 2 controlled-burn sessions. Capped low until a field trial measures false alarms. Gas alone never opens an event or counts as a source. |
 | Inside a registered burn that hasn't escaped | ×0.05 | Assumption. Michael's rules decide "escaped" (heat outside the radius, Severe+ danger, or a report from someone else). |
 
 **Independence.** Multiplying LRs assumes the pieces of evidence are independent. Michael's confirmation rules already count each source once (one satellite, one line, each contact once), and the model only multiplies those.

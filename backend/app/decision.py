@@ -18,6 +18,7 @@ import json
 import re
 from functools import lru_cache
 
+from . import sensor_model
 from .config import DATA_DIR
 
 FIRE_DAY_PATH = DATA_DIR / "model" / "fire_day.json"
@@ -39,7 +40,10 @@ DEFAULTS: dict[str, dict] = {
     "lr_report_unregistered": {"value": 2.0, "source": "Assumption: a texted report from an unknown number"},
     "lr_line_fault": {"value": 10.0, "source": "Assumption: a line lockout next to an already-detected fire"},
     "lr_camera": {"value": 8.0, "source": "Assumption: camera smoke detection"},
-    "lr_sensor_smoke": {"value": 15.0, "source": "Assumption: a tower sensor's smoke rule fired (PM2.5 jump of 50+ over its own baseline, fine-particle ratio that isn't dust, other towers not rising so it isn't regional haze). Specific, but one fixed point that can't tell where the smoke comes from"},
+    "lr_sensor_smoke": {"value": 15.0, "source": "Assumption: a tower sensor's smoke rule fired (PM2.5 jump of 50+ over its own baseline, fine-particle ratio that isn't dust, other towers not rising so it isn't regional haze). Specific, but one fixed point that can't tell where the smoke comes from. Used for sensor signals that carry no model weight"},
+    "lr_sensor_pm_max": {"value": 20.0, "source": "Sensor smoke model v1: cap on a PM2.5 rise's weight. Above ~50 µg/m³ the fitted curve runs ahead of the data (x19 observed at 100+), and live readings spike higher than the hourly means it was fitted on"},
+    "lr_sensor_gas_max": {"value": 3.0, "source": "Assumption: cap on a gas-resistance drop's weight until a field trial measures its false alarms. The fitted curve comes from 2 controlled-burn sessions with ~37 min of clean air each"},
+    "sensor_gas_weight": {"value": 0.5, "source": "Assumption: on a node with both sensors, the gas weight counts half (in log terms) on top of the PM2.5 weight, because both see the same plume"},
     "lr_registered_burn": {"value": 0.05, "source": "Assumption: inside a registered burn that hasn't escaped"},
     # satellite: Michael's scorer is calibrated to an even wildfire/burn prior, so score s is a likelihood ratio s/(100-s)
     # --- what a false alarm costs, in acres burned we'd accept to avoid it ---
@@ -72,15 +76,24 @@ def fire_day_model() -> dict | None:
 
 def _fitted() -> dict:
     """Weights that come from a fitted model, with their source, when the model file exists."""
-    m = fire_day_model()
-    if m is None:
-        return {}
-    d = m["data"]
-    return {"danger_multiplier": {
-        "value": m["danger_multiplier"],
-        "source": f"Fire-day model v1: Kansas wildfire starts per day by fire danger, relative to {m['reference_band']}; "
-                  f"{d['fires_used']} WFIGS wildfires {d['period'][0][:4]}-{d['period'][1][:4]} (docs/research/fire-day-model-v1.md)",
-    }}
+    out = {}
+    if (m := fire_day_model()) is not None:
+        d = m["data"]
+        out["danger_multiplier"] = {
+            "value": m["danger_multiplier"],
+            "source": f"Fire-day model v1: Kansas wildfire starts per day by fire danger, relative to {m['reference_band']}; "
+                      f"{d['fires_used']} WFIGS wildfires {d['period'][0][:4]}-{d['period'][1][:4]} (docs/research/fire-day-model-v1.md)",
+        }
+    if (r := sensor_model.rule_lr()) is not None:
+        d = r["data"]
+        out["lr_sensor_smoke"] = {
+            "value": r["lr"],
+            "source": f"Sensor smoke model v1: the PM2.5 rule (rise of {r['rise']:g}+) measured against expert local-smoke "
+                      f"designations, x{r['lr']:g} (95% CI {r['ci'][0]:g}-{r['ci'][1]:g}) on {d['sensor_days']:,} Flint Hills "
+                      f"sensor-days, {d['period'][0][:4]} (docs/research/sensor-smoke-model-v1.md). Used for sensor signals "
+                      "that carry no model weight",
+        }
+    return out
 
 
 def weights(settings: dict) -> dict:
@@ -158,8 +171,13 @@ def probability(evidence: list[dict], danger: str, w: dict, sat_score: int | Non
         steps.append({"text": f"First report, no line or satellite signal: starting chance {p0:.0%}", "p": p0})
     odds = _odds(p0)
 
+    # All smoke sensors together are one source (as in confirm.py): only the strongest one counts.
+    sensors = [e for e in items if e["kind"] == "sensor_smoke"]
+    top_sensor = max(sensors, key=lambda e: _likelihood_ratio(e, w)[0]) if sensors else None
     for e in items:
         if e is first and e["kind"] == "line_fault":
+            continue
+        if e["kind"] == "sensor_smoke" and e is not top_sensor:
             continue
         lr, why = _likelihood_ratio(e, w)
         if lr == 1.0:
@@ -193,10 +211,22 @@ def _likelihood_ratio(e: dict, w: dict) -> tuple[float, str]:
     if kind == "camera_smoke":
         return w["lr_camera"], ""
     if kind == "sensor_smoke":
-        return (w["lr_sensor_smoke"], "") if counts == "yes" else (1.0, "")
+        return _sensor_lr(e, w)
     if kind == "burn_notice":
         return (1.0, "") if str(e.get("note", "")).startswith("escaped") else (w["lr_registered_burn"], " (not escaped)")
     return 1.0, ""
+
+
+def _sensor_lr(e: dict, w: dict) -> tuple[float, str]:
+    """The sensor smoke model's weight: PM2.5 rise, times the gas drop at sensor_gas_weight; gas alone, capped."""
+    pm, gas = e.get("pm_lr"), e.get("gas_lr")
+    if pm is None and gas is None:
+        return (w["lr_sensor_smoke"], "") if e.get("counts") == "yes" else (1.0, "")
+    g = min(gas, w["lr_sensor_gas_max"]) if gas is not None else 1.0
+    if pm is None:
+        return g, " (gas alone, capped)"
+    lr = min(pm, w["lr_sensor_pm_max"]) * g ** w["sensor_gas_weight"]
+    return lr, " (PM2.5 and gas)" if gas is not None else ""
 
 
 def expected_loss(p: float, loss_if_fire: float, cost_if_not: float) -> float:
