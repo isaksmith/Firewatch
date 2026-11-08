@@ -1,6 +1,9 @@
 // Builds docs/pitch/Firewatch-Pitch.pptx. Its packages aren't project dependencies:
 //   npm i --prefix /tmp/fwdeck pptxgenjs react react-dom react-icons sharp
 //   NODE_PATH=/tmp/fwdeck/node_modules node docs/pitch/build-deck.js
+// VIDEO=<mp4> OUT=<pptx> embeds that video on slide 4 and writes OUT instead (the deck for #slides, e.g.
+//   VIDEO=docs/video/story/out/Firewatch-Short.mp4 OUT=~/Documents/Watch-Dogs.pptx). Without VIDEO, slide 4
+//   shows a still and the repo copy stays small.
 const pptxgen = require("pptxgenjs");
 const React = require("react");
 const ReactDOMServer = require("react-dom/server");
@@ -11,6 +14,7 @@ const fa = require("react-icons/fa");
 const REPO = require("path").resolve(__dirname, "../..");
 const IMG = {
   console: `${REPO}/docs/images/console.png`,
+  poster: `${REPO}/docs/images/video-poster.jpg`,
   spread: `${REPO}/docs/images/spread-3d.jpg`,
   planner: `${REPO}/docs/images/planner.png`,
   phoneHome: `${REPO}/mobile/shots/08-home-radio-alert.png`,
@@ -20,7 +24,7 @@ const IMG = {
   nodeStake: `${REPO}/sensors/cad/renders/v2_bare_stake.png`,
   nodeBand: `${REPO}/sensors/cad/renders/v2_rich_band.png`,
 };
-const SLIDES = 11;
+const SLIDES = 12;
 
 const C = {
   void: "050607", bg: "08090B", panel: "0C0E11", panel2: "121519", raised: "181C21",
@@ -173,7 +177,7 @@ function footer(slide, n) {
     title(s, "Detect → Confirm → Respond");
     const cols = [
       { name: "Detect", color: C.amber, icon: ic.sat, lead: "One event per fire", items: ["Co-op line faults on fire-weather days", "Satellite hotspots: VIIRS, MODIS, GOES, NGFS", "Texted reports and tower smoke sensors"] },
-      { name: "Confirm", color: C.sky, icon: ic.check, lead: "No drive-out needed", items: ["ML score tells wildfires from burns and flares", "Two independent signals to escalate", "Nearest neighbors texted: \"See smoke? 1 yes, 2 no, 3 my burn\""] },
+      { name: "Confirm", color: C.sky, icon: ic.check, lead: "No drive-out needed", items: ["ML score tells wildfires from burns and flares", "Two independent signals to escalate (a line fault on a red-flag day counts alone)", "Nearest neighbors texted: \"See smoke? 1 yes, 2 no, 3 my burn\""] },
       { name: "Respond", color: C.ember, icon: ic.horn, lead: "Before the first engine", items: ["Duty officer replies PAGE by text", "Downwind ranchers get direction and arrival time", "Mutual aid drafted when crews are short"] },
     ];
     const cw = 2.75, gap = 0.28, cy = 1.55, ch = 2.95;
@@ -196,25 +200,44 @@ function footer(slide, n) {
       { text: "  Every signal, text and decision is logged on the event.", options: { color: C.muted } },
     ], { x: 0.85, y: 4.68, w: 8.4, h: 0.42, fontFace: F.body, fontSize: 12, valign: "middle", margin: 0 });
     footer(s, 3);
-    s.addNotes("(35 s) Firewatch works in three steps. Detect: we combine cheap signals into one event per fire: a co-op line fault on a fire-weather day, satellite hotspots, a texted report, a tower smoke sensor. Confirm: a machine-learning score separates wildfires from prescribed burns and refinery flares, it takes two independent signals to escalate, and we text the nearest neighbors to ask if they see smoke. Respond: the duty officer gets one text and replies PAGE; downwind ranchers get a warning with an arrival time. A person decides every page.");
+    s.addNotes("(35 s) Firewatch works in three steps. Detect: we combine cheap signals into one event per fire: a co-op line fault on a fire-weather day, satellite hotspots, a texted report, a tower smoke sensor. Confirm: a machine-learning score separates wildfires from prescribed burns and refinery flares, it takes two independent signals to escalate, unless the co-op reports a line fault on a red-flag day, and we text the nearest neighbors to ask if they see smoke. Respond: the duty officer gets one text and replies PAGE; downwind ranchers get a warning with an arrival time. A person decides every page.");
   }
 
-  // 4. Console
+  // 4. The video (1:49, all seven features, captions only)
+  {
+    const s = pres.addSlide();
+    s.background = { color: C.bg };
+    brackets(s, pres);
+    kicker(s, "SEE IT WORK  ·  1:49, NO SOUND NEEDED", C.ember);
+    title(s, "The packet's fire, replayed in Firewatch", 0.72, 26);
+    const vw = 6.5, vh = vw * 9 / 16, vx = (W - vw) / 2, vy = 1.4;
+    s.addShape(pres.shapes.RECTANGLE, { x: vx - 0.03, y: vy - 0.03, w: vw + 0.06, h: vh + 0.06, fill: { color: C.line2 }, line: { type: "none" } });
+    const cover = await photo(IMG.poster, 1600);
+    if (process.env.VIDEO) {
+      s.addMedia({ type: "video", path: require("path").resolve(process.env.VIDEO), cover, x: vx, y: vy, w: vw, h: vh });
+    } else {
+      s.addImage({ data: cover, x: vx, y: vy, w: vw, h: vh });
+    }
+    footer(s, 4);
+    s.addNotes("(1 min 49 s, play it) Here it is running. This is the packet's Tuesday replayed through the real decision code: the line fault, the texts to the duty officer and the chief, the page, the burn log, the 3D spread forecast, the neighbours' board, the sensor planner, the chief's phone and the result. The replies are simulated, and the video says so.");
+  }
+
+  // 5. Console
   {
     const s = pres.addSlide();
     s.background = { color: C.bg };
     brackets(s, pres);
     kicker(s, "THE CONSOLE  ·  COTTONWOOD CREEK REPLAY");
-    title(s, "Escalated in 8 minutes, paged in 9");
+    title(s, "Duty officer asked at once, district paged at T+7", 0.72, 26);
     const iw = 5.9, ih = iw / 1.6, ix = 0.6, iy = 1.42;
     s.addShape(pres.shapes.RECTANGLE, { x: ix - 0.03, y: iy - 0.03, w: iw + 0.06, h: ih + 0.06, fill: { color: C.line2 }, line: { type: "none" } });
     s.addImage({ path: IMG.console, x: ix, y: iy, w: iw, h: ih });
     const steps = [
-      { t: "T+0", text: "Line fault on a red-flag day starts an event; neighbors are texted" },
-      { t: "T+0", text: "Duty officer gets an FYI" },
-      { t: "T+8", text: "Satellite confirms: score 99, Escalate" },
-      { t: "T+9", text: "Duty officer replies PAGE; county dispatch pages the district" },
-      { t: "T+12", text: "Mutual aid requested; downwind ranchers warned with arrival time" },
+      { t: "T+0", text: "Co-op line locks out on a red-flag day: Escalate, the duty officer is texted" },
+      { t: "T+3", text: "No reply in 3 minutes: the chief is texted, with a link to the alert" },
+      { t: "T+7", text: "Chief replies PAGE; county dispatch tones out the district" },
+      { t: "T+7", text: "Crew paged; neighbors with a disc or water truck asked to help" },
+      { t: "T+7", text: "Mutual aid drafted: up to 1,030 ac in an hour, more than 2 trucks can hold" },
     ];
     const sx = 6.8, sy = 1.42, rh = 0.74;
     steps.forEach((st, i) => {
@@ -223,22 +246,22 @@ function footer(slide, n) {
       s.addText(st.t, { x: sx, y, w: 0.62, h: 0.3, fontFace: F.mono, fontSize: 10, bold: true, color: i >= 2 ? C.void : C.text, align: "center", valign: "middle", margin: 0 });
       s.addText(st.text, { x: sx + 0.75, y: y - 0.03, w: 9.4 - sx - 0.75, h: 0.66, fontFace: F.body, fontSize: 10.5, color: C.text, valign: "top", margin: 0 });
     });
-    footer(s, 4);
-    s.addNotes("(40 s) This is the console during the replay. At T+0 the co-op's line lockout on a red-flag day opens an event, the duty officer gets an FYI, and the three nearest neighbors are asked by text. At T+8 a satellite pass gives the second independent source: score 99, Escalate. At T+9 the duty officer replies PAGE from his phone and county dispatch pages the district. Mutual aid goes out at T+12, and downwind ranchers get the direction and an arrival estimate from our spread forecast. Every text is in the drawer on the right.");
+    footer(s, 5);
+    s.addNotes("(40 s) This is the console during the replay. At T+0 the co-op's line lockout on a red-flag day is enough to escalate, and the duty officer gets one text: reply PAGE or NO. No answer in three minutes, so the chief gets the same text with a link to the alert. At T+7 the chief replies PAGE, county dispatch is told to tone out the district, the crew is paged, neighbors with a disc or a water truck are asked to help, and a mutual-aid request is drafted because the forecast is bigger than two trucks can hold. The satellite doesn't see this fire until T+38, after the trucks have rolled. Every text is in the drawer on the right.");
   }
 
-  // 5. Results
+  // 6. Results
   {
     const s = pres.addSlide();
     s.background = { color: C.bg };
     brackets(s, pres);
     kicker(s, "SAME FIRE, SAME CREW", C.ok);
-    title(s, "First truck on scene 24 minutes sooner");
+    title(s, "First truck on scene 26 minutes sooner");
     const x0 = 1.95, x1 = 9.3, T = 62;
     const X = (t) => x0 + (x1 - x0) * (t / T);
     const rows = [
-      { name: "Today", y: 1.6, segs: [[0, 31, C.ember, "Nobody knows"], [31, 44, "3A424C", "911 to roll"], [44, 62, "4A535E", "Driving"]], end: 62, endLabel: "~1,070 ac", endColor: C.ember },
-      { name: "Firewatch", y: 2.25, segs: [[0, 9, C.ok, "Paged"], [9, 20, "3A424C", "Turnout"], [20, 38, "4A535E", "Driving"]], end: 38, endLabel: "~360 ac", endColor: C.ok },
+      { name: "Today", y: 1.6, segs: [[0, 31, C.ember, "Nobody knows"], [31, 44, "3A424C", "911 to roll"], [44, 62, "4A535E", "Driving"]], end: 62, endLabel: "~830 ac", endColor: C.ember },
+      { name: "Firewatch", y: 2.25, segs: [[0, 7, C.ok, "Paged"], [7, 18, "3A424C", "Turnout"], [18, 36, "4A535E", "Driving"]], end: 36, endLabel: "~270 ac", endColor: C.ok },
     ];
     for (const r of rows) {
       s.addText(r.name, { x: 0.6, y: r.y, w: 1.25, h: 0.38, fontFace: F.head, bold: true, fontSize: 13, color: C.text, valign: "middle", margin: 0 });
@@ -252,16 +275,16 @@ function footer(slide, n) {
         s.addText(r.endLabel, { x: X(r.end) + 0.38, y: r.y, w: 1.4, h: 0.38, fontFace: F.mono, fontSize: 11, bold: true, color: r.endColor, valign: "middle", margin: 0 });
       }
     }
-    s.addText("~1,070 ac", { x: X(62) - 1.45, y: 1.6 - 0.32, w: 1.6, h: 0.28, fontFace: F.mono, fontSize: 11, bold: true, color: C.ember, align: "right", margin: 0 });
+    s.addText("~830 ac", { x: X(62) - 1.45, y: 1.6 - 0.32, w: 1.6, h: 0.28, fontFace: F.mono, fontSize: 11, bold: true, color: C.ember, align: "right", margin: 0 });
     const ticks = [[0, "1:50"], [10, "2:00"], [20, "2:10"], [30, "2:20"], [40, "2:30"], [50, "2:40"], [60, "2:50"]];
     ticks.forEach(([t, lab]) => {
       s.addText(lab, { x: X(t) - 0.3, y: 2.72, w: 0.6, h: 0.22, fontFace: F.mono, bold: true, fontSize: 8, color: C.dim, align: "center", margin: 0 });
     });
 
     const stats = [
-      { big: "T+9", label: "district paged", was: "today: 911 call at T+31" },
-      { big: "T+38", label: "first truck on scene", was: "today: T+62" },
-      { big: "~360 ac", label: "burned when it arrives", was: "today: ~1,070 acres" },
+      { big: "T+7", label: "district paged", was: "today: 911 call at T+31" },
+      { big: "T+36", label: "first truck on scene", was: "today: T+62" },
+      { big: "~270 ac", label: "burned when it arrives", was: "today: ~830 acres" },
     ];
     const cw = 2.75, gap = 0.28, cy = 3.2;
     stats.forEach((st, i) => {
@@ -274,11 +297,11 @@ function footer(slide, n) {
     s.addText("Fire sizes are our spread forecast's median for the packet's red-flag Tuesday, not field data. The forecast is back-tested on real Kansas fires (Anderson Creek 2016, Starbuck 2017).", {
       x: 0.6, y: 4.75, w: 8.8, h: 0.35, fontFace: F.body, fontSize: 8.5, italic: true, color: C.dim, margin: 0, valign: "top",
     });
-    footer(s, 5);
-    s.addNotes("(35 s) Same fire, same crew, same roads. Today the district hears about it at T+31 and the first truck arrives at T+62 to about 1,070 acres. With Firewatch the district is paged at T+9, the truck is on scene at T+38, and our forecast puts the fire at about 360 acres: a third of the size. Those sizes are our forecast's median, which we back-tested against real Kansas fires, not field measurements.");
+    footer(s, 6);
+    s.addNotes("(35 s) Same fire, same crew, same roads. Today the district hears about it at T+31 and the first truck arrives at T+62 to about 830 acres. With Firewatch the district is paged at T+7, the truck is on scene at T+36, and our forecast puts the fire at about 270 acres: a third of the size. Those sizes are our forecast's median, which we back-tested against real Kansas fires, not field measurements.");
   }
 
-  // 6. False alarms
+  // 7. False alarms
   {
     const s = pres.addSlide();
     s.background = { color: C.bg };
@@ -306,7 +329,7 @@ function footer(slide, n) {
     s.addShape(pres.shapes.RECTANGLE, { x: px, y: 1.55, w: pw, h: 3.2, fill: { color: C.panel }, line: { color: C.line, width: 0.75 } });
     const facts = [
       { big: "10 years", text: "of Kansas satellite fires, matched to 224 reported wildfires and 490 burns" },
-      { big: "2 sources", text: "before anyone is paged; one source only sends the duty officer an FYI" },
+      { big: "A person pages", text: "Two sources to escalate, or a line fault on a red-flag day. Then someone replies PAGE." },
       { big: "0 texts", text: "for a burn the landowner registered, unless it escapes" },
     ];
     facts.forEach((f, i) => {
@@ -314,11 +337,11 @@ function footer(slide, n) {
       s.addText(f.big, { x: px + 0.25, y, w: pw - 0.5, h: 0.34, fontFace: F.head, bold: true, fontSize: 16, color: C.amber, margin: 0 });
       s.addText(f.text, { x: px + 0.25, y: y + 0.36, w: pw - 0.5, h: 0.56, fontFace: F.body, fontSize: 10, color: C.muted, margin: 0, valign: "top" });
     });
-    footer(s, 6);
-    s.addNotes("(30 s) Trust is the whole game, so we measured false alarms. Our scorer is trained on ten years of Kansas satellite fires and tested on 2023 to 2025 fires it never saw. It keeps 99 percent of refinery and plant heat and 82 percent of unreported spring pasture burns quiet, while 76 percent of real wildfires reach the duty officer. On top of that, it takes two independent sources to page anyone, and a registered burn texts nobody unless it escapes.");
+    footer(s, 7);
+    s.addNotes("(30 s) Trust is the whole game, so we measured false alarms. Our scorer is trained on ten years of Kansas satellite fires and tested on 2023 to 2025 fires it never saw. It keeps 99 percent of refinery and plant heat and 82 percent of unreported spring pasture burns quiet, while 76 percent of real wildfires reach the duty officer. On top of that, it takes two independent sources to escalate, or a co-op line fault on a red-flag day, and even then nobody is paged until a person replies PAGE. A registered burn texts nobody unless it escapes.");
   }
 
-  // 7. One bar
+  // 8. One bar
   {
     const s = pres.addSlide();
     s.background = { color: C.bg };
@@ -344,11 +367,11 @@ function footer(slide, n) {
       s.addShape(pres.shapes.RECTANGLE, { x: x - 0.03, y: y - 0.03, w: pw + 0.06, h: ph + 0.06, fill: { color: C.line2 }, line: { type: "none" } });
       s.addImage({ path: p, x, y, w: pw, h: ph });
     });
-    footer(s, 7);
+    footer(s, 8);
     s.addNotes("(30 s) Rural Kansas often has one bar of cell, so everything is plain text: reply PAGE, or 1, 2, 3. Where there's no cell at all, the same texts go over Meshtastic LoRa mesh radios to trucks and ranches; we've run it on real radios this weekend. And the phone app gets alerts by text or by radio, shows where the fire is heading on an offline map, and lets neighbors report and confirm smoke.");
   }
 
-  // 8. Sensor node (CAD revision 2 renders from sensors/cad)
+  // 9. Sensor node (CAD revision 2 renders from sensors/cad)
   {
     const s = pres.addSlide();
     s.background = { color: C.bg };
@@ -403,11 +426,11 @@ function footer(slide, n) {
     s.addText("Blender design model, not a routed board. Detection distance, power budget and radio range are what the field burn trial measures.", {
       x: 0.6, y: 4.9, w: 8.8, h: 0.22, fontFace: F.body, fontSize: 8.5, italic: true, color: C.dim, margin: 0,
     });
-    footer(s, 8);
+    footer(s, 9);
     s.addNotes("(20 s) This is our sensor node. One weatherproof box in two tiers: the bare node measures gas, temperature, humidity and pressure; the rich node adds a particle sensor that sees smoke. Both run on solar, talk over the same Meshtastic mesh and relay each other's messages, and mount on a ground stake or band onto a pole. At about a hundred units it's 136 dollars bare and 204 rich. It's a design model today; the field burn trial measures how far away it can smell a fire.");
   }
 
-  // 9. Planner
+  // 10. Planner
   {
     const s = pres.addSlide();
     s.background = { color: C.bg };
@@ -432,11 +455,11 @@ function footer(slide, n) {
       s.addText(c.big, { x: 0.8, y, w: 1.35, h: 0.56, fontFace: F.head, bold: true, fontSize: 12.5, color: C.ok, valign: "middle", margin: 0, fit: "shrink" });
       s.addText(c.text, { x: 2.15, y, w: 1.95, h: 0.56, fontFace: F.body, fontSize: 9, color: C.muted, valign: "middle", margin: 0 });
     });
-    footer(s, 9);
+    footer(s, 10);
     s.addNotes("(25 s) For districts that want their own sensors, the planner lays out a network for any Kansas county. It puts sensor plots where fires start and where the wind carries smoke, routes relays with terrain line of sight, and prices it. For Cottonwood Creek, ten plots and five relays come to about fifteen and a half thousand dollars with spares, and every data source is free.");
   }
 
-  // 10. Proof + next
+  // 11. Proof + next
   {
     const s = pres.addSlide();
     s.background = { color: C.bg };
@@ -444,7 +467,7 @@ function footer(slide, n) {
     kicker(s, "WHERE IT STANDS");
     title(s, "Built this weekend, tested on real data");
     const built = [
-      "598 automated tests pass",
+      "662 automated tests pass",
       "Scorer trained on 10 years of Kansas fires",
       "Spread forecast back-tested on real fires",
       "13 live public data feeds checked today",
@@ -472,11 +495,11 @@ function footer(slide, n) {
       { text: "To run a district", options: { bold: true, color: C.text, breakLine: true } },
       { text: "Free public data, about 1 cent a text, optional sensors from $136 a node", options: { color: C.muted } },
     ], { x: 6.1, y: 3.95, w: 2.95, h: 0.78, fontFace: F.body, fontSize: 10, valign: "middle", margin: 0 });
-    footer(s, 10);
-    s.addNotes("(25 s) It's real code: 598 automated tests, a scorer trained on ten years of Kansas fires, a spread forecast back-tested on real fires, and thirteen live public data feeds we checked working today. Next: a field burn to measure sensor range, live texting on real phones, and a pilot with one Kansas district before spring burn season.");
+    footer(s, 11);
+    s.addNotes("(25 s) It's real code: 662 automated tests, a scorer trained on ten years of Kansas fires, a spread forecast back-tested on real fires, and thirteen live public data feeds we checked working today. Next: a field burn to measure sensor range, live texting on real phones, and a pilot with one Kansas district before spring burn season.");
   }
 
-  // 11. Close
+  // 12. Close
   {
     const s = pres.addSlide();
     s.background = { color: C.void };
@@ -486,13 +509,13 @@ function footer(slide, n) {
     s.addImage({ data: LOGO, x: W / 2 - 0.35, y: 1.0, w: 0.7, h: 0.7 });
     s.addText("Win back the first 31 minutes.", { x: 0.6, y: 1.95, w: 8.8, h: 0.8, fontFace: F.head, bold: true, fontSize: 34, color: C.text, align: "center", margin: 0 });
     s.addText("Firewatch  ·  Detect → Confirm → Respond", { x: 0.6, y: 2.8, w: 8.8, h: 0.4, fontFace: F.body, fontSize: 16, color: C.ember, bold: true, align: "center", margin: 0 });
-    s.addText("Paged at T+9 instead of T+31  ·  on scene at T+38 instead of T+62  ·  humans decide every page", {
+    s.addText("Paged at T+7 instead of T+31  ·  on scene at T+36 instead of T+62  ·  humans decide every page", {
       x: 0.6, y: 3.35, w: 8.8, h: 0.35, fontFace: F.body, fontSize: 12, color: C.text, align: "center", margin: 0,
     });
     s.addText("github.com/isaksmith/Firewatch", { x: 0.6, y: 4.45, w: 8.8, h: 0.3, fontFace: F.mono, bold: true, fontSize: 11, color: C.muted, align: "center", margin: 0, charSpacing: 1 });
     s.addNotes("(10 s) Firewatch wins back those first 31 minutes, with people deciding every page. Thank you; we'd love your questions.");
   }
 
-  await pres.writeFile({ fileName: `${REPO}/docs/pitch/Firewatch-Pitch.pptx` });
+  await pres.writeFile({ fileName: process.env.OUT || `${REPO}/docs/pitch/Firewatch-Pitch.pptx` });
   console.log("written");
 })();
