@@ -1,0 +1,16 @@
+[Unit]
+Description=Firewatch API (FastAPI: scorer, decisions, forecasts, feeds)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/srv/firewatch/backend
+# One worker: the feed pollers, replay clock and sensor simulator run inside this process, and a second
+# worker would run them twice.
+ExecStart=/srv/firewatch/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

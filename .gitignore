@@ -30,3 +30,6 @@ backend/ml/data/
 
 # FW1 signing keys (private; never commit)
 backend/data/keys/
+
+# Vercel project link (frontend/.vercel)
+.vercel/

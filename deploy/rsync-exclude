@@ -1,0 +1,16 @@
+/.git/
+/.env
+.DS_Store
+__pycache__/
+.pytest_cache/
+node_modules/
+.venv/
+/docs/
+/design/
+/mobile/
+/frontend/
+/sensors/
+/backend/ml/
+/backend/tests/
+/backend/data/cache/
+/backend/data/*.sqlite*

@@ -9,7 +9,7 @@ import { api, type SimulationResult } from '../api'
 import { KV, RecTag, ScoreReadout } from '../components/ui'
 import { compass, pad3, trackId } from '../lib/format'
 import { setLowData, useLowData } from '../lib/lowData'
-import { BLANK_STYLE, IMAGERY_TERRAIN_STYLE } from '../lib/map'
+import { BLANK_STYLE, IMAGERY_TERRAIN_STYLE, MAPLIBRE_WORKER } from '../lib/map'
 
 const DURATION = 60
 const PLAY_SECONDS_AT_1X = 15
@@ -116,6 +116,7 @@ export function Spread3D() {
             bearing: ((a.weather.wind_dir_deg ?? 0) + 180) % 360,
           }}
           mapStyle={lowData ? BLANK_STYLE : IMAGERY_TERRAIN_STYLE}
+          workerUrl={MAPLIBRE_WORKER}
           maxPitch={80}
           style={{ width: '100%', height: '100%' }}
           attributionControl={false}

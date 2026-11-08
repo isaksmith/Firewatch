@@ -131,7 +131,7 @@ def facts_text(fires: list[dict], asker: bool) -> str:
             lines.append(f"  Forecast size: about {x['acres_now']:,} acres now, likely {x['acres_60']:,} acres in 1 hour.")
         if x["sites_60"]:
             lines.append(f"  {x['sites_60']} homes, farmsteads or leases are in its likely path in the next hour.")
-        if asker and x["acres_now"] is not None:
+        if asker and x["dist_mi"] is not None and x["acres_now"] is not None:
             if x["eta_min"] is None:
                 lines.append("  The forecast does not have it reaching the person asking in the next 2 hours.")
             elif x["eta_min"] == 0:
@@ -196,11 +196,16 @@ def template(fires: list[dict], limit: int) -> str:
 
 
 def compose(question: str, fires: list[dict]) -> str:
+    return reply(question, fires)[0]
+
+
+def reply(question: str, fires: list[dict], use_model: bool = True) -> tuple[str, bool]:
+    """The answer, and whether the model worded it (False: the template)."""
     n = LIMIT - len(PREFIX) - len(SAFETY)
     facts = facts_text(fires, asker=True)
     words = llm.complete(SYSTEM.format(district=load_district().name, n=n, words=n // 7), facts,
-                         f"QUESTION: {question.strip()[:300]}", n)
-    return f"{PREFIX}{words}{SAFETY}" if words else template(fires, LIMIT)
+                         f"QUESTION: {question.strip()[:300]}", n) if use_model else None
+    return (f"{PREFIX}{words}{SAFETY}", True) if words else (template(fires, LIMIT), False)
 
 
 def _spawn(fn, *args) -> None:

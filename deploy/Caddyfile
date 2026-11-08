@@ -1,0 +1,33 @@
+# The API server behind the Vercel site. Vercel serves the pages, asks for the console login and forwards /api and
+# /lite here with the proxy secret, the API token and the visitor's IP. Anything without the secret is refused,
+# which is what lets the backend trust the IP header.
+# Environment (set in /etc/firewatch/caddy.env on the server):
+#   FW_HOST          this server's address, e.g. 3-14-15-92.sslip.io (Caddy gets the HTTPS certificate)
+#   FW_BACKEND       the API, e.g. 127.0.0.1:8000
+#   FW_PROXY_SECRET  the same value as FW_PROXY_SECRET in the Vercel project
+#   FW_HTTPS_PORT    443, or 8443 when port 443 carries SSH (deploy/ssh-over-tls.sh)
+
+{
+	https_port {$FW_HTTPS_PORT:443}
+}
+
+{$FW_HOST} {
+	encode {
+		zstd
+		gzip
+		match {
+			header Content-Type text/*
+			header Content-Type application/json*
+			header Content-Type application/geo+json*
+		}
+	}
+
+	@vercel header X-Firewatch-Proxy {$FW_PROXY_SECRET}
+	handle @vercel {
+		request_header -X-Firewatch-Proxy
+		reverse_proxy {$FW_BACKEND}
+	}
+	handle {
+		respond "Forbidden" 403
+	}
+}

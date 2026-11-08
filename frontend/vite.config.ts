@@ -22,6 +22,8 @@ export default defineConfig(({ mode }) => {
           headers: env.API_TOKEN ? { 'X-Firewatch-Token': env.API_TOKEN } : {},
         },
         '/lite': target,
+        // The FireNode Explorer (sensors/viewer/serve.py); the deployed site copies it to /nodes/.
+        '/nodes': { target: 'http://127.0.0.1:5174', rewrite: (p) => p.replace(/^\/nodes/, '') },
       },
     },
   }

@@ -16,7 +16,7 @@ import {
   type StationAction,
 } from '../api'
 import { CompassPicker, type Pointing } from '../components/CompassPicker'
-import { Mark } from '../components/ui'
+import { BrandNav } from '../components/TopBar'
 import { WaitingBox } from '../components/WaitingBox'
 import { compassPostIds, DISTRICT_TEXT_NUMBER, newClientKey, rememberCompassPost, saveRecord, type Saved } from '../lib/outbox'
 import { useOutbox } from '../lib/useOutbox'
@@ -766,10 +766,10 @@ export function Board() {
   return (
     <div className="h-full overflow-y-auto bg-bg">
       <header className="sticky top-0 z-10 border-b border-line bg-void">
-        <div className="mx-auto flex h-11 max-w-[640px] items-center gap-3 px-4">
-          <Mark size={16} />
-          <span className="num text-[13px] font-semibold tracking-[0.28em]">FIREWATCH</span>
-          <span className="label">Community board</span>
+        {/* The console's header, without its status row: residents use this page without the console login. */}
+        <div className="topbar-scroll flex h-12 items-center gap-4 overflow-x-auto px-4 whitespace-nowrap [&>*]:shrink-0">
+          <BrandNav />
+          <span className="label ml-auto pl-4">Community board</span>
         </div>
         <p className="border-t border-escalate/60 bg-escalate px-4 py-2 text-center text-[14px] font-semibold text-white">
           Call 911 first if anyone is in danger.

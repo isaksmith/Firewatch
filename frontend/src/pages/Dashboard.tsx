@@ -6,6 +6,7 @@ import { Attribution } from '../components/Attribution'
 import { AlertDrawer } from '../components/AlertDrawer'
 import { BurnLog } from '../components/BurnLog'
 import { AlertList } from '../components/AlertList'
+import { AskPanel } from '../components/AskPanel'
 import { MapView } from '../components/MapView'
 import { ScenarioStrip } from '../components/ScenarioStrip'
 import { CommunityBoard } from '../components/CommunityBoard'
@@ -38,6 +39,7 @@ export function Dashboard() {
   const [slug, setSlug] = useState(SCENARIO)
   const [boardOpen, setBoardOpen] = useState(false)
   const [boardPostId, setBoardPostId] = useState<number | null>(null)
+  const [askOpen, setAskOpen] = useState(false)
 
   const scenarios = useQuery({ queryKey: ['scenarios'], queryFn: api.scenarios, staleTime: Infinity })
   const scenario = useQuery({
@@ -134,15 +136,24 @@ export function Dashboard() {
         burnOpen={burnOpen}
         onBurnLog={() => {
           setBoardOpen(false)
+          setAskOpen(false)
           setBurnOpen((o) => !o)
         }}
         boardOpen={boardOpen}
         onToggleBoard={internet ? () => {
           if (!boardOpen && selectedId != null) navigate('/')
           setBurnOpen(false)
+          setAskOpen(false)
           setBoardPostId(null)
           setBoardOpen(!boardOpen)
         } : undefined}
+        askOpen={askOpen}
+        onToggleAsk={() => {
+          if (!askOpen && selectedId != null) navigate('/')
+          setBurnOpen(false)
+          setBoardOpen(false)
+          setAskOpen(!askOpen)
+        }}
       />
       {!internet && (
         <div role="status" className="flex shrink-0 items-center gap-3 border-b border-line bg-degraded/10 px-4 py-1.5 text-[12.5px] text-degraded">
@@ -194,11 +205,13 @@ export function Dashboard() {
           onSelect={(id) => {
             setBoardOpen(false)
             setBurnOpen(false)
+            setAskOpen(false)
             navigate(`/alerts/${id}`)
           }}
           onHover={setHoveredId}
           onBoardPin={(post) => {
             setBurnOpen(false)
+            setAskOpen(false)
             if (post.event_id != null) {
               setBoardOpen(false)
               navigate(`/alerts/${post.event_id}`)
@@ -216,6 +229,15 @@ export function Dashboard() {
         )}
         {boardOpen && !burnOpen && selectedId == null && (
           <CommunityBoard focusId={boardPostId} onClose={() => setBoardOpen(false)} />
+        )}
+        {askOpen && !boardOpen && !burnOpen && selectedId == null && (
+          <AskPanel
+            onClose={() => setAskOpen(false)}
+            onOpenAlert={(id) => {
+              setAskOpen(false)
+              navigate(`/alerts/${id}`)
+            }}
+          />
         )}
       </div>
 

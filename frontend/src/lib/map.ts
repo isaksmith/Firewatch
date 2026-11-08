@@ -1,4 +1,9 @@
 import type { StyleSpecification } from 'maplibre-gl'
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
+
+// maplibre-gl v6 looks for its worker beside its own file, which the production build doesn't copy; without
+// the worker no tile ever loads. Pass this as every <Map>'s workerUrl.
+export const MAPLIBRE_WORKER = workerUrl
 
 export const BASEMAP_STYLE = 'https://tiles.openfreemap.org/styles/dark'
 

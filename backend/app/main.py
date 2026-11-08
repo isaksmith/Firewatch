@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from . import cap, climate, fw1_feed, livesend, mesh, notify, planner, playbook, posts, routes_posts, sample, scenario
+from . import ask, cap, climate, fw1_feed, livesend, llm, mesh, notify, planner, playbook, posts, routes_posts, sample, scenario
 from . import sensor_health, sensor_sim
 from .config import DATA_DIR, get_settings
 from .confirm import evaluate_event
@@ -845,6 +845,31 @@ def sms_simulate(msg: SimulatedSms):
         raise HTTPException(400, "simulated texts are only allowed in sample mode")
     with connect() as conn:
         return notify.handle_inbound(conn, msg.from_, msg.body, scenario.running_now() or utcnow(), is_sample=True)
+
+
+class Question(BaseModel):
+    question: str = Field(min_length=1, max_length=300)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lon: float | None = Field(default=None, ge=-180, le=180)
+    use_model: bool = True
+
+
+@api.post("/ask", dependencies=[Depends(require_token)])
+def ask_question(q: Question):
+    """The answer a texted question would get, shown in the console and never sent. Without a location it covers
+    the district's open fires."""
+    replay_now = scenario.running_now()
+    now = replay_now or utcnow()
+    here = (q.lat, q.lon) if q.lat is not None and q.lon is not None else None
+    with connect() as conn:
+        fires = ask.nearby_fires(conn, here, replay_now is not None or get_settings().mode == "sample", now)
+    text, by_model = ask.reply(q.question, fires, use_model=q.use_model)
+    return {
+        "answer": text,
+        "by_model": by_model,
+        "llm_configured": llm.enabled(),
+        "fires": [{"id": f["id"], "place": f["place"], "status": f["status"]} for f in fires],
+    }
 
 
 @api.get("/messages", dependencies=[Depends(require_admin)])
