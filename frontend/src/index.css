@@ -252,6 +252,38 @@ input[type='number']::-webkit-inner-spin-button {
   animation: blink 1.2s steps(1) infinite;
 }
 
+@keyframes scope-ping {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.8);
+    opacity: 0;
+  }
+}
+.scope-ping {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: scope-ping 2.2s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+}
+
+@keyframes live-dot {
+  50% {
+    opacity: 0.3;
+  }
+}
+.live-dot {
+  animation: live-dot 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scope-ping,
+  .live-dot {
+    animation: none;
+  }
+}
+
 /* MapLibre chrome */
 .maplibregl-ctrl-attrib {
   font-family: var(--font-mono);
