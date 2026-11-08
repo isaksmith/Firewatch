@@ -1,0 +1,37 @@
+# Push the backend to the API server when main changes it. The pages deploy through Vercel's own GitHub connection.
+# Repository settings: secret FW_SSH_KEY (a key in the server's ~/.ssh/authorized_keys), secret FW_KNOWN_HOSTS (the
+# server's host key line) and variable FW_SERVER (ubuntu@<ip>). See deploy/README.md.
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - backend/**
+      - deploy/deploy.sh
+      - deploy/rsync-exclude
+      - deploy/firewatch.service
+      - deploy/Caddyfile
+  workflow_dispatch:
+
+# One deploy at a time; a newer push waits for the running one rather than cutting it off mid-restart.
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: SSH access to the server
+        env:
+          KEY: ${{ secrets.FW_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.FW_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Deploy
+        run: deploy/deploy.sh "${{ vars.FW_SERVER }}"

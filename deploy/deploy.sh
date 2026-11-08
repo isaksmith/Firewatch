@@ -9,8 +9,11 @@ ssh_cmd="ssh -o StrictHostKeyChecking=accept-new ${FW_SSH_KEY:+-i $FW_SSH_KEY}"
 # --delete keeps the code in step with this checkout; excluded paths (the server's .env, database, venv and
 # tile cache) are never deleted.
 rsync -az --delete -e "$ssh_cmd" --exclude-from="$repo/deploy/rsync-exclude" "$repo/" "$target:/srv/firewatch/"
-# Map and fuel tiles the spread forecast reads; copying them means no forecast waits on a download.
-rsync -az -e "$ssh_cmd" "$repo/backend/data/cache/" "$target:/srv/firewatch/backend/data/cache/"
+# Map and fuel tiles the spread forecast reads; copying them means no forecast waits on a download. A checkout
+# without them (GitHub Actions) leaves the server's copy alone.
+if [ -d "$repo/backend/data/cache" ]; then
+  rsync -az -e "$ssh_cmd" "$repo/backend/data/cache/" "$target:/srv/firewatch/backend/data/cache/"
+fi
 
 $ssh_cmd "$target" 'bash -s' <<'EOF'
 set -euo pipefail

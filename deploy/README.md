@@ -48,11 +48,23 @@ Any other Ubuntu 24.04 server works too: `FW_SITE=... deploy/setup.sh ubuntu@<ip
 free Arm machines, which were out of capacity every time we tried.
 
 The login user is `firewatch` unless `FW_USER` was set. To open the console to everyone with no login, set
-`FW_LOGIN=off` in the Vercel project (`printf off | vercel env add FW_LOGIN production --force --cwd frontend`) and
+`FW_LOGIN=off` in the Vercel project (`printf off | vercel env add FW_LOGIN production --force`) and
 redeploy; remove it to bring the login back. Unset login settings keep the console locked.
 The server's backend settings are in `/srv/firewatch/.env` (sample mode, simulated sensors, no radio).
 
 ## Every deploy
+
+A push to `main` deploys on its own:
+
+- **Pages:** the Vercel project is connected to the GitHub repo with root directory `frontend`, so Vercel builds
+  every push to `main`. `ignoreCommand` in `frontend/vercel.json` skips pushes that change nothing under
+  `frontend/` or `sensors/viewer/`.
+- **Backend:** `.github/workflows/deploy-backend.yml` runs `deploy.sh` when a push changes `backend/` or the
+  server files in `deploy/`. It uses the repository secret `FW_SSH_KEY` (a key of its own in the server's
+  `~/.ssh/authorized_keys`), the secret `FW_KNOWN_HOSTS` (the server's host key line) and the variable `FW_SERVER`
+  (`ubuntu@<ip>`). Actions, Deploy backend, Run workflow deploys without a push.
+
+To deploy from this computer instead:
 
 ```bash
 deploy/vercel-deploy.sh                                             # pages
@@ -60,7 +72,9 @@ FW_SSH_KEY=~/.ssh/firewatch_lightsail deploy/deploy.sh ubuntu@<ip>  # backend
 ```
 
 `deploy.sh` copies the backend and the tile cache, installs Python packages and restarts the backend and Caddy.
-The first copy of the tile cache is about 700 MB; later deploys send only what changed.
+The first copy of the tile cache is about 700 MB; later deploys send only what changed. The GitHub checkout has no
+tile cache, so automatic deploys leave the server's copy as it is. Files the server makes for itself (the database,
+`backend/data/keys/`) are excluded in `rsync-exclude`, so no deploy deletes them.
 
 ## Looking around on the server
 
