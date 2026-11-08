@@ -125,6 +125,9 @@ class Assets(StaticFiles):
     def __init__(self):
         super().__init__(directory=str(DIST / "assets"), check_dir=False)
 
+    async def check_config(self):
+        """No build yet means 404s, not a startup-time RuntimeError."""
+
     async def get_response(self, path, scope):
         self.directory = str(DIST / "assets")
         self.all_directories = self.get_directories(self.directory, self.packages)

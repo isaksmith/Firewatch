@@ -24,6 +24,8 @@ cd backend && .venv/bin/pytest          # about 650 tests, 2.5 min
 cd frontend && npx tsc -b --noEmit && npx vite build
 ```
 
+`.github/workflows/ci.yml` runs these, plus `npm run lint` and `node sensors/viewer/verify.mjs`, on every push to `main` and every pull request, from a clean checkout with no `frontend/dist` or data cache. The backend deploys only after its tests pass.
+
 `backend/tests/conftest.py` gives every test its own database in sample mode and blanks the OpenRouter key, the radio, `API_TOKEN` and `SENSOR_SIM`, so a local `.env` can't leak into tests.
 
 ## Things that aren't obvious

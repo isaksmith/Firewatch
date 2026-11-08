@@ -59,10 +59,14 @@ A push to `main` deploys on its own:
 - **Pages:** the Vercel project is connected to the GitHub repo with root directory `frontend`, so Vercel builds
   every push to `main`. `ignoreCommand` in `frontend/vercel.json` skips pushes that change nothing under
   `frontend/` or `sensors/viewer/`.
-- **Backend:** `.github/workflows/deploy-backend.yml` runs `deploy.sh` when a push changes `backend/` or the
-  server files in `deploy/`. It uses the repository secret `FW_SSH_KEY` (a key of its own in the server's
-  `~/.ssh/authorized_keys`), the secret `FW_KNOWN_HOSTS` (the server's host key line) and the variable `FW_SERVER`
-  (`ubuntu@<ip>`). Actions, Deploy backend, Run workflow deploys without a push.
+- **Backend:** `.github/workflows/ci.yml` runs `deploy.sh` when a push changes `backend/` or the server files in
+  `deploy/`, and only after the backend tests pass. It uses the repository secret `FW_SSH_KEY` (a key of its own in
+  the server's `~/.ssh/authorized_keys`), the secret `FW_KNOWN_HOSTS` (the server's host key line) and the variable
+  `FW_SERVER` (`ubuntu@<ip>`). Actions, CI, Run workflow on `main` runs the checks and deploys without a push.
+
+The same workflow checks every push to `main` and every pull request: the backend tests, and the console's lint, type
+check and build plus `sensors/viewer/verify.mjs`. Vercel doesn't wait for these checks, so a push that fails them
+still updates the pages.
 
 To deploy from this computer instead:
 
