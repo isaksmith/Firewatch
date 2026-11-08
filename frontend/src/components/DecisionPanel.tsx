@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { api, type Playbook, type PlaybookOption } from '../api'
 import { useOperator } from '../lib/operator'
 import { useTier } from '../lib/tier'
+import { LastData } from './LastData'
 
 const pct = (p: number) => (p >= 0.995 ? '>99%' : p < 0.01 ? '<1%' : `${Math.round(p * 100)}%`)
 const pColor = (p: number) => (p >= 0.5 ? 'text-escalate' : p >= 0.15 ? 'text-investigate' : 'text-muted')
@@ -147,17 +148,18 @@ function Receipts({ p }: { p: Playbook }) {
 
 /** Which engine produced this panel. The LLM in FireCast Plus words texted answers and FireMesh channel updates;
  *  the probability and expected-loss figures here are the FireCast model in every tier. */
-function CastBrand() {
+function CastBrand({ eventId }: { eventId: number }) {
   const { castName, castPlus, online } = useTier()
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, retry: false })
   const llmOff = castPlus && health.data && !health.data.llm_configured
   return (
-    <div className="flex items-baseline gap-2 px-4 pt-2.5">
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-4 pt-2.5">
       <span className="label !text-text">{castName}</span>
       <span className="text-[10.5px] text-dim">
-        {castPlus ? 'ML model; the LLM answers texted questions and posts channel updates' : online ? 'ML score and expected-loss model' : 'ML model on the station computer; LLM unavailable offline'}
+        {castPlus ? 'ML model; the LLM answers texted questions and posts channel updates' : online ? 'ML score and expected-loss model' : 'ML model on the station computer'}
       </span>
       {llmOff && <span className="ml-auto text-[10.5px] text-degraded" title="Set OPENROUTER_API_KEY on the server">LLM not configured</span>}
+      {!online && <LastData eventId={eventId} className="basis-full text-[10.5px] leading-snug" />}
     </div>
   )
 }
@@ -185,7 +187,7 @@ export function DecisionPanel({ eventId }: { eventId: number }) {
 
   return (
     <section className="border-b border-line bg-panel-2">
-      <CastBrand />
+      <CastBrand eventId={eventId} />
       <Header p={p} />
       {d ? (
         <div className="px-4 pt-3 pb-3">

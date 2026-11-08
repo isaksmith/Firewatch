@@ -12,6 +12,7 @@ import { TrackGlyph } from './ui'
 import { FireForecastLayer, ForecastSlider } from './FireForecast'
 import { SensorHealthChip, SensorLayer, SensorPanel } from './SensorNetwork'
 import { useTier } from '../lib/tier'
+import { LastData } from './LastData'
 
 interface Props {
   alerts: AlertSummary[]
@@ -25,6 +26,8 @@ interface Props {
 const SIZE = { escalate: 18, investigate: 14, monitor: 9 }
 const RINGS_KM = [5, 10]
 const HEAVY_OFF = { flint_hills: false, distribution_lines: false, dry_grid: false, wind_lines: false, fire_forecast: false }
+// Offline the internet-fed layers are gone, but FireCast's spread forecast runs on this computer from the last data.
+const OFFLINE_OFF = { flint_hills: false, distribution_lines: false, dry_grid: false, wind_lines: false }
 
 const AOI: GeoJSON.Feature = {
   type: 'Feature',
@@ -221,8 +224,10 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
     burns: true,
   })
   // Low data mode switches the heavy layers off without forgetting what the person picked.
+  const heavyOff: Partial<Record<LayerKey, boolean>> = lowDataOn ? HEAVY_OFF : !online ? OFFLINE_OFF : {}
   const layers = {
-    ...(lowData ? { ...layersWanted, ...HEAVY_OFF } : layersWanted),
+    ...layersWanted,
+    ...heavyOff,
     ...(fireNode ? {} : { sensors: false, mesh: false }), // FireNode is the paid tier
   }
   const [liveWanted, setLiveOn] = useState<Record<FeedKey, boolean>>(() => Object.fromEntries(FEEDS.map((f) => [f.key, false])) as Record<FeedKey, boolean>)
@@ -448,7 +453,13 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
         <SensorPanel id={sensorId} onClose={() => setSensorId(null)} />
       )}
       {layers.fire_forecast && selectedId != null && (
-        <ForecastSlider fire={fire} aheadMin={aheadMin} setAheadMin={setAheadMin} loading={fireForecast.isFetching} />
+        <ForecastSlider
+          fire={fire}
+          aheadMin={aheadMin}
+          setAheadMin={setAheadMin}
+          loading={fireForecast.isFetching}
+          note={!online ? <LastData eventId={selectedId} /> : undefined}
+        />
       )}
 
       <div className="hud absolute top-4 right-4 flex max-h-[calc(100%-5rem)] w-[200px] flex-col overflow-y-auto">
@@ -480,7 +491,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
                 ] as const
               ).map(([k, label]) => (
                 <label key={k} className="flex cursor-pointer items-center gap-2.5 text-[11.5px] text-muted hover:text-text">
-                  <input type="checkbox" disabled={lowData && k in HEAVY_OFF} checked={layers[k]} onChange={(e) => setLayers((l) => ({ ...l, [k]: e.target.checked }))} />
+                  <input type="checkbox" disabled={k in heavyOff} checked={layers[k]} onChange={(e) => setLayers((l) => ({ ...l, [k]: e.target.checked }))} />
                   <span className="flex-1">{label}</span>
                   <span className="flex w-4 items-center justify-center">
                     <span className={SWATCH[k]} />

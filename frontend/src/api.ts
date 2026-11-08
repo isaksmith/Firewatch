@@ -217,6 +217,8 @@ export interface AlertDetail extends AlertSummary {
     temp_c?: number
     precip_72h_mm?: number
     source?: string
+    /** Hour of the weather sample the alert was scored and forecast with. */
+    valid_time?: string
     gfdi?: number
     gfdi_band?: string
   }

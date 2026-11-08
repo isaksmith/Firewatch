@@ -1,4 +1,5 @@
 import { Layer, Marker, Source } from 'react-map-gl/maplibre'
+import type { ReactNode } from 'react'
 import type { AlertForecast } from '../api'
 
 const STEP_MIN = 15
@@ -50,11 +51,13 @@ function clock(iso: string): string {
   return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
 }
 
-export function ForecastSlider({ fire, aheadMin, setAheadMin, loading }: {
+export function ForecastSlider({ fire, aheadMin, setAheadMin, loading, note }: {
   fire?: AlertForecast
   aheadMin: number
   setAheadMin: (m: number) => void
   loading: boolean
+  /** A line under the slider, e.g. what data an offline forecast is running on. */
+  note?: ReactNode
 }) {
   const step = fire ? stepAt(fire, aheadMin) : undefined
   return (
@@ -84,6 +87,7 @@ export function ForecastSlider({ fire, aheadMin, setAheadMin, loading }: {
         aria-label="Forecast time"
       />
       <div className="mt-0.5 text-[10.5px] text-dim">Likely (filled) · worst case (dashed) · {fire ? `${fire.members} forecast runs` : '…'}</div>
+      {note && <div className="mt-1 text-[10.5px] leading-snug">{note}</div>}
     </div>
   )
 }
