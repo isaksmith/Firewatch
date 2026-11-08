@@ -349,6 +349,24 @@ def test_a_second_open_fire_is_named_in_texts_and_replies_can_pick_one():
         assert r["action"] == "help" and "no open fire 999" in r["reply"]
 
 
+def test_r_with_a_fire_number_only_joins_fires_you_were_paged_for():
+    with connect() as conn:
+        sync_roster(conn)
+        a = _line_fault(conn)
+        b = _line_fault(conn, at=5, where=SECOND_FIRE)
+        notify.handle_inbound(conn, DUTY, f"PAGE {a}", _at(6), is_sample=True)  # Sam is paged for a only
+        assert not [m for m in _out(conn, "page", b) if m["phone"] == SAM]
+
+        r = notify.handle_inbound(conn, SAM, f"R {b}", _at(7), is_sample=True)
+        wrong = notify.handle_inbound(conn, SAM, "R 999", _at(7), is_sample=True)
+        assert r["action"] == "help" and r["event_id"] is None
+        assert r["reply"].replace(str(b), "N") == wrong["reply"].replace("999", "N"), "same words as a wrong number"
+        assert not notify._state(notify._event(conn, b)).get("responders"), "not joined to a fire never paged for"
+
+        r = notify.handle_inbound(conn, SAM, f"R {a}", _at(8), is_sample=True)
+        assert r["action"] == "responding" and r["event_id"] == a
+
+
 def test_three_fire_scenario_pages_each_fire_by_number():
     slug = "cottonwood-creek-three-fires"
     scenario.run_now(slug)

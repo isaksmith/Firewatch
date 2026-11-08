@@ -993,7 +993,13 @@ def handle_inbound(
             reply = {"page": f"Paged{at}. Dispatch and crews notified.", "no": f"Stood down{at}. Logged.",
                      "send": f"Mutual aid requested{at}."}[word.lower()]
             out.update(action=word.lower(), event_id=eid, reply=f"Firewatch: {reply}")
-    elif word == "R" and contact and named_event() == (True, None):
+    elif word == "R" and contact and named_event()[0] and (
+        named_event()[1] is None
+        or (contact["role"] not in LADDER_ROLES
+            and named_event()[1] not in _open_fires(conn, contact["id"], PAGE_PURPOSES, is_sample))
+    ):
+        # Only fires this person was paged about (officers: any). Same words as a wrong number, so a
+        # reply never confirms that a fire exists or where it is.
         out.update(action="help", reply=f"Firewatch: no open fire {rest.strip()[:12]}. Check the number in the page.")
     elif word == "R" and (eid := (contact and named_event()[1]) or latest_event(PAGE_PURPOSES)):
         ev = _event(conn, eid)
