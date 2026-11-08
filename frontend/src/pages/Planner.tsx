@@ -6,7 +6,7 @@ import { api, type Climatology, type NodePricing, type PlanParams, type PlanSite
 import { TopBar } from '../components/TopBar'
 import { KV, SectionHeader } from '../components/ui'
 import { useLowData } from '../lib/lowData'
-import { BASEMAP_STYLE, BLANK_STYLE, KANSAS_VIEW } from '../lib/map'
+import { BASEMAP_STYLE, BLANK_STYLE, KANSAS_VIEW, MAPLIBRE_WORKER } from '../lib/map'
 
 const DEFAULT_REGION = 'district:cottonwood-creek'
 const MONTHS = 'JFMAMJJASOND'
@@ -329,6 +329,7 @@ function PlanMap({
         ref={mapRef}
         initialViewState={KANSAS_VIEW}
         mapStyle={lowData ? BLANK_STYLE : BASEMAP_STYLE}
+        workerUrl={MAPLIBRE_WORKER}
         style={{ width: '100%', height: '100%' }}
         attributionControl={{ compact: true }}
         onLoad={() => setReady(true)}

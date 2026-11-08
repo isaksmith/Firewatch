@@ -6,7 +6,7 @@ import { api, type AdminBurn, type AdminPost, type AlertSummary, type MeshNode, 
 import { catMeta, isPinnable, useBoardBurns, useBoardPosts } from '../lib/board'
 import { REC_META, latLon, trackId } from '../lib/format'
 import { useLowData } from '../lib/lowData'
-import { AOI_BBOX, BASEMAP_STYLE, BLANK_STYLE, KANSAS_VIEW, ringPolygon } from '../lib/map'
+import { AOI_BBOX, BASEMAP_STYLE, BLANK_STYLE, KANSAS_VIEW, MAPLIBRE_WORKER, ringPolygon } from '../lib/map'
 import { FEEDS, LiveLayers, LiveToggles, useLiveFeeds, type FeedKey } from './LiveFeeds'
 import { TrackGlyph } from './ui'
 import { FireForecastLayer, ForecastSlider } from './FireForecast'
@@ -312,6 +312,7 @@ export function MapView({ alerts, selectedId, hoveredId, onSelect, onHover, onBo
         ref={mapRef}
         initialViewState={{ bounds: [AOI_BBOX[0], AOI_BBOX[1], AOI_BBOX[2], AOI_BBOX[3]], fitBoundsOptions: { padding: 40 } }}
         mapStyle={lowData ? BLANK_STYLE : BASEMAP_STYLE}
+        workerUrl={MAPLIBRE_WORKER}
         style={{ width: '100%', height: '100%' }}
         attributionControl={{ compact: true }}
         onLoad={() => {
