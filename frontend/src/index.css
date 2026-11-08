@@ -289,3 +289,11 @@ input[type='number']::-webkit-inner-spin-button {
   font-size: 9px;
   letter-spacing: 0.08em;
 }
+
+/* The top bar scrolls sideways with no visible scrollbar, so the 40px bar never changes height or shifts. */
+.topbar-scroll {
+  scrollbar-width: none;
+}
+.topbar-scroll::-webkit-scrollbar {
+  display: none;
+}

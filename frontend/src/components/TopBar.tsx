@@ -37,7 +37,7 @@ function SourceChips({ sources }: { sources: Record<string, SourceHealth> }) {
   const detail = entries.map(([k, h]) => `${k}: ${h.status}`).join('\n')
   return (
     <>
-      <span className="hidden items-center gap-5 min-[1700px]:flex">
+      <span className="flex items-center gap-5">
         {entries.filter(([k]) => k in SOURCE_LABELS).map(([k, h]) => <SourceStatus key={k} name={k} h={h} />)}
       </span>
       <span className="flex items-center gap-2" title={detail}>
@@ -61,7 +61,7 @@ function Clock() {
   return (
     <span className="num flex items-center gap-3 text-[11px]">
       <span className="text-text">{z}Z</span>
-      <span className="hidden text-dim xl:inline">{ct}</span>
+      <span className="text-dim">{ct}</span>
     </span>
   )
 }
@@ -117,8 +117,8 @@ export function TopBar({
   const { tier, online } = useTier()
 
   return (
-    <header className="flex h-10 shrink-0 items-center gap-4 overflow-hidden border-b border-line bg-void px-4 whitespace-nowrap">
-      <div className="flex min-w-0 flex-1 items-center gap-4 overflow-hidden">
+    <header className="flex h-10 shrink-0 items-center gap-4 overflow-hidden border-b border-line bg-void pl-4 whitespace-nowrap">
+      {/* Always visible: the mark and the three pages. */}
       <div className="flex shrink-0 items-center gap-2.5 text-text">
         <Mark size={16} />
         <span className="num hidden text-[13px] font-semibold tracking-[0.28em] 2xl:inline">FIREWATCH</span>
@@ -144,6 +144,14 @@ export function TopBar({
           </NavLink>
         ))}
       </nav>
+      <Divider />
+      {/* Everything else scrolls sideways when the window is too narrow; a mouse wheel scrolls it too. */}
+      <div
+        className="topbar-scroll flex h-full min-w-0 flex-1 items-center gap-4 overflow-x-auto overflow-y-hidden [&>*]:shrink-0"
+        onWheel={(e) => {
+          if (e.deltaX === 0 && e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY
+        }}
+      >
       <TierSwitch tier={tier} />
       <Divider />
       {threeDId != null && (
@@ -153,10 +161,10 @@ export function TopBar({
           title={threeDSelected ? 'Open the 3D spread view for the selected alert' : 'Open the 3D spread view for the top alert. Select another alert first to see its own.'}
         >
           <Box size={12} /> 3D view
-          <span className="hidden text-[10px] font-normal tracking-normal text-muted min-[1900px]:inline">{threeDSelected ? 'selected alert' : 'top alert'}</span>
+          <span className="text-[10px] font-normal tracking-normal text-muted">{threeDSelected ? 'selected alert' : 'top alert'}</span>
         </Link>
       )}
-      <span className="label hidden 2xl:inline">Kansas AOI · Confirmation Layer</span>
+      <span className="label">Kansas AOI · Confirmation Layer</span>
       {mode === 'sample' && (
         <span className="num border border-sample/50 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-sample">
           SAMPLE REPLAY
@@ -167,15 +175,14 @@ export function TopBar({
           <span className="blink h-1.5 w-1.5 bg-ok" /> LIVE
         </span>
       )}
-      <div className="hidden items-center gap-5 min-[1400px]:flex">
+      <div className="flex items-center gap-5">
         <Divider />
         {health.data && online && <SourceChips sources={health.data.sources} />}
         {!online && <span className="num text-[10px] tracking-[0.12em] text-degraded">INTERNET DOWN · FIRENODE ONLY</span>}
         {health.isError && <span className="num text-[10px] tracking-[0.12em] text-escalate">Can't reach the Firewatch server. Showing the last update.</span>}
       </div>
-      </div>
 
-      <div className="flex shrink-0 items-center gap-4">
+      <div className="ml-auto flex items-center gap-4 pl-4">
         <button
           role="switch"
           aria-checked={lowData}
@@ -184,14 +191,14 @@ export function TopBar({
           aria-label={`Low data ${lowData ? 'on' : 'off'}`}
           title={`Low data ${lowData ? 'on' : 'off'}. Use less data: no map pictures, slower updates`}
         >
-          <Wifi size={11} /> <span className="hidden xl:inline">Low data {lowData ? 'on' : 'off'}</span>
+          <Wifi size={11} /> <span>Low data {lowData ? 'on' : 'off'}</span>
         </button>
         {onBurnLog && (
           <button onClick={onBurnLog} aria-pressed={burnOpen} aria-label="Burn log" title="Burn log" className={`btn !h-6 ${burnOpen ? '!border-text' : ''}`}>
-            <ClipboardList size={11} /> <span className="hidden 2xl:inline">Burn log</span>
+            <ClipboardList size={11} /> <span>Burn log</span>
           </button>
         )}
-        <div className="hidden items-center gap-4 min-[1900px]:flex">
+        <div className="flex items-center gap-4">
           <Clock />
           <Divider />
           <label className="flex items-center gap-2">
@@ -208,9 +215,13 @@ export function TopBar({
             title="Community board"
             className={`btn !h-6 ${boardOpen ? '!border-sample !text-sample' : ''}`}
           >
-            <MessageSquare size={11} /> <span className="hidden 2xl:inline">Board</span>
+            <MessageSquare size={11} /> <span>Board</span>
           </button>
         )}
+      </div>
+      </div>
+      {/* Always visible on the right: the demo controls. */}
+      <div className="flex shrink-0 items-center gap-4 border-l border-line px-4 empty:hidden">
         {onRunScenario && scenarios && scenarios.length > 1 && (
           <select
             value={scenarioSlug}
@@ -218,7 +229,7 @@ export function TopBar({
             disabled={scenarioRunning}
             aria-label="Scenario to replay"
             title={scenarios.find((s) => s.slug === scenarioSlug)?.story}
-            className="field hidden !h-6 max-w-44 xl:block"
+            className="field !h-6 max-w-44"
           >
             {scenarios.map((s) => (
               <option key={s.slug} value={s.slug}>
@@ -258,7 +269,7 @@ export function TopBar({
           </button>
         )}
         {mode === 'live' && online && (
-          <button onClick={() => ingest.mutate()} disabled={ingest.isPending} className="btn hidden !h-6 md:inline-flex">
+          <button onClick={() => ingest.mutate()} disabled={ingest.isPending} className="btn !h-6">
             <RefreshCw size={11} className={ingest.isPending ? 'animate-spin' : ''} /> Ingest
           </button>
         )}

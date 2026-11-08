@@ -1,4 +1,5 @@
-import { AlertTriangle, RotateCcw } from 'lucide-react'
+import { AlertTriangle, PanelLeftClose, PanelLeftOpen, RotateCcw } from 'lucide-react'
+import { useState } from 'react'
 import type { AlertSummary, AlertsResponse } from '../api'
 import { REC_META, SUPPRESSION_LABEL, seenLabel, sourcesLabel, trackId } from '../lib/format'
 import { filterQueue, type QueueTab } from '../lib/queue'
@@ -17,7 +18,27 @@ interface Props {
   onHover: (id: number | null) => void
 }
 
+const COLLAPSED_KEY = 'fw.queueCollapsed'
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 export function AlertList(p: Props) {
+  const [collapsed, setCollapsedState] = useState(readCollapsed)
+  const setCollapsed = (c: boolean) => {
+    setCollapsedState(c)
+    try {
+      localStorage.setItem(COLLAPSED_KEY, c ? '1' : '0')
+    } catch {
+      /* storage can be blocked; the choice lasts until reload */
+    }
+  }
+  if (collapsed) return <CollapsedQueue alerts={p.alerts} onExpand={() => setCollapsed(false)} />
   const visible = filterQueue(p.alerts, p.tab)
   const tabs: [QueueTab, string][] = [
     ['active', 'Active'],
@@ -28,7 +49,19 @@ export function AlertList(p: Props) {
     <aside className="flex max-h-[42%] w-full shrink-0 flex-col border-b border-line bg-panel md:max-h-none md:w-[360px] md:border-r md:border-b-0">
       <div className="flex h-9 items-center justify-between border-b border-line px-4">
         <span className="label !text-muted">Alert queue</span>
-        <span className="num text-[10px] text-dim">SORT: LEVEL ▸ SCORE</span>
+        <span className="flex items-center gap-3">
+          <span className="num text-[10px] text-dim">SORT: LEVEL ▸ SCORE</span>
+          <button
+            type="button"
+            onClick={() => setCollapsed(true)}
+            aria-expanded
+            aria-label="Collapse the alert queue"
+            title="Collapse the alert queue"
+            className="text-dim hover:text-text"
+          >
+            <PanelLeftClose size={14} />
+          </button>
+        </span>
       </div>
       <div className="grid grid-cols-3 border-b border-line">
         {tabs.map(([k, label]) => {
@@ -83,6 +116,31 @@ export function AlertList(p: Props) {
           </li>
         )}
       </ul>
+    </aside>
+  )
+}
+
+/** The queue folded away: a thin rail beside the map (a short strip on phones) that still shows the counts. */
+function CollapsedQueue({ alerts, onExpand }: { alerts: AlertSummary[]; onExpand: () => void }) {
+  const esc = alerts.filter((a) => a.recommendation === 'escalate').length
+  const inv = alerts.filter((a) => a.recommendation === 'investigate').length
+  return (
+    <aside className="flex w-full shrink-0 border-b border-line bg-panel md:w-9 md:border-r md:border-b-0">
+      <button
+        type="button"
+        onClick={onExpand}
+        aria-expanded={false}
+        aria-label={`Show the alert queue: ${esc} escalate, ${inv} investigate`}
+        title="Show the alert queue"
+        className="flex h-9 w-full items-center gap-3 px-4 text-dim hover:bg-raised hover:text-text md:h-full md:flex-col md:gap-4 md:px-0 md:py-3"
+      >
+        <PanelLeftOpen size={14} className="shrink-0" />
+        <span className="label !text-muted md:[writing-mode:vertical-rl]">Alert queue</span>
+        <span className="num flex items-center gap-3 text-[10px] md:flex-col md:gap-2">
+          <span title="Escalate" style={{ color: esc ? REC_META.escalate.color : undefined }}>{String(esc).padStart(2, '0')}</span>
+          <span title="Investigate" style={{ color: inv ? REC_META.investigate.color : undefined }}>{String(inv).padStart(2, '0')}</span>
+        </span>
+      </button>
     </aside>
   )
 }

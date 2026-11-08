@@ -209,6 +209,8 @@ For the whole system, open the [system map](docs/system-map.html) or read the [s
 | Cottonwood Creek replay: line fault, neighbor texts, two-source confirmation, PAGE by text, downwind warnings, mutual aid, a registered burn that texts nobody | Runs end to end |
 | Mesh radios (Meshtastic): texts out, replies and GPS positions back | Built |
 | Tower sensor nodes: temperature, humidity, smoke signal | Built |
+| FireNode sensor network: gas, power and sample-counter telemetry, health checks (radio link vs stale sensors, battery, solar, gas drift, PM inlet) | Built and running on a simulated network (`SENSOR_SIM=true`); no real nodes yet |
+| Tier views (Free / Paid / Offline) | Built; a view setting, not access control |
 | Region planner | Built |
 | Phone app (Expo, iOS and Android): region packs, alert codes, built-in radio, community board | Built |
 | Community board ([evidence](docs/board-evidence.md)) | Built and tested on the backend; see below |
@@ -251,6 +253,23 @@ npm install && npm run dev
 ```
 
 The Vite dev server proxies `/api` to `http://127.0.0.1:8000` (override with `API_PROXY_TARGET`). It uses `127.0.0.1` rather than `localhost` so it can't hit some other service bound to IPv6 port 8000.
+
+### Live demo
+
+Live mode polls the real feeds; the scenarios, tier views and simulated sensors run on top of it. Set these in the repo-root `.env`, then start (or restart) **both** servers as above:
+
+```bash
+MODE=live
+FIRMS_MAP_KEY=...        # free: https://firms.modaps.eosdis.nasa.gov/api/map_key/
+API_TOKEN=...            # any long random string: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+SENSOR_SIM=true          # simulated FireNode network (FireSense sensors + FireMesh relays) with health checks
+OPENROUTER_API_KEY=      # optional: turns on the FireCast Plus LLM (answers to texted questions, channel updates)
+```
+
+- **`API_TOKEN` is required in live mode.** Without it, Run scenario, Ingest, the board panel and the other admin routes return `503 set API_TOKEN to use admin routes`. The Vite dev server reads it at startup and adds it to every `/api` request, so it never reaches the browser; restart the frontend after changing it.
+- **Simulated sensors** are installed on first start: the region planner's plots, relays and bridge for the district, with a day of history and a few injected faults. Click a node for its health. Their smoke signals are sample events: they show on the map but never text anyone. `POST /api/sensors/sim/reset` reinstalls them.
+- **Tier views:** the top-bar switch shows the console as **Free**, **Paid**, or **Offline** (paid with the station's internet down). It changes only what's shown. See [docs/FEATURES.md](docs/FEATURES.md).
+- Tests ignore `API_TOKEN` and `SENSOR_SIM` from your `.env`.
 
 > [!TIP]
 > Every data source is free and needs no map token. The only data key is a free [FIRMS MAP_KEY](https://firms.modaps.eosdis.nasa.gov/api/map_key/). Twilio is the one paid service (about 1 cent per text), used only for live texting.
@@ -394,10 +413,12 @@ docs/          Plan, design, research
 | `backend/app/signals.py`, `confirm.py` | Line faults and texted reports on events; the two-source level rules and burn registry |
 | `backend/app/notify.py` | SMS gateway (outbox / Twilio), templates, neighbor asks, no-answer ladder, PAGE / NO / SEND, downwind warnings, mutual aid, inbound keywords |
 | `backend/app/mesh.py` | Meshtastic bridge: texts out as acknowledged direct messages, replies in, radio positions and crew distances |
-| `backend/app/sensors.py` | Tower sensor telemetry: readings (PM, gas, temperature, humidity, pressure), the smoke rule (baseline, dust check, regional check), gas drops, local temperature and humidity |
+| `backend/app/sensors.py` | Sensor telemetry: readings (PM, gas, temperature, humidity, pressure, pack and solar power, sample counters), the smoke rule (baseline, dust check, regional check), gas drops, local temperature and humidity |
+| `backend/app/sensor_health.py`, `sensor_sim.py` | FireNode health from telemetry (radio link, stale sensors, battery, solar, gas drift, PM inlet and fan); the simulated network behind `SENSOR_SIM` |
+| `frontend/src/components/SensorNetwork.tsx`, `lib/tier.ts` | FireNode map layer and health panel; the Free / Paid / Offline view switch |
 | `backend/app/planner.py`, `climate.py` | Region planner: priority grid, wind-weighted plot siting, plot layout, relay routing with terrain line of sight, power check, bill of materials; fire-weather climatology |
 | `backend/app/scenario.py` | Scenario replay on its own clock: run, stop, instant load |
-| `backend/app/main.py` | FastAPI routes: alerts, actions, decisions, signals, SMS, simulate, layers, district, scenario, planner, health, sample replay |
+| `backend/app/main.py` | FastAPI routes: alerts, actions, decisions, signals, SMS, simulate, layers, district, scenario, planner, sensors, health, sample replay |
 | `frontend/src/pages/Dashboard.tsx` | Alert list, map, detail drawer, actions, scenario strip |
 | `frontend/src/pages/Spread3D.tsx` | 3D terrain spread preview with wind override |
 | `frontend/src/pages/Planner.tsx` | Region planner page: controls, climate, power, plots, relays, bill of materials, map |

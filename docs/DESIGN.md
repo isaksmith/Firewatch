@@ -587,6 +587,21 @@ A language model on OpenRouter writes two kinds of text. It never writes the ale
 - **Checks.** The model gets a block of facts and must answer from those facts alone. Its answer is turned into one line of ASCII (a curly quote would turn an SMS into 70-character segments) and cut at a sentence end to fit. It is then rejected if it uses any number that isn't in the facts (911 aside). If the call fails, times out (12 s), or the answer is rejected, a plain template goes out with the same facts. So the model changes the wording only, never whether a text goes out.
 - **Model.** `OPENROUTER_MODEL`, default `openrouter/free`. That router picks one of OpenRouter's free models for each request, so it costs nothing, but the quality of the wording varies from text to text. Some of those models refuse to answer with reasoning turned off; for them the call is retried once with reasoning on. A paid model such as `anthropic/claude-haiku-5.5` (about a tenth of a cent per answer) words things more reliably.
 
+### 5.12 FireNode health and the simulated network
+
+`backend/app/sensor_health.py` judges each field node (`sensor_nodes`: sensor, relay, or station bridge) from its telemetry alone. A check with no data says so instead of guessing. Radio health and sensor health are separate, and a node is healthy only when both are:
+
+- **Radio link.** No heartbeat for 30 min is Watch; for 2 h it's **Radio link down, cause unknown** (`offline`). An SNR under −12 dB is Watch.
+- **Stale sensors.** FireWatch firmware sends a per-sensor sample counter (`firewatchMetrics.envSeq`, `pmSeq` in the telemetry packet; stored as `env_seq`, `pm_seq`). If heartbeats keep arriving but a counter repeats for 3 reports, that sensor is **stale, may need replacement**. Its value-based checks are skipped, and a resent PM or gas sample can't raise a smoke signal. A node that sends no counters (stock Meshtastic) is never called stale.
+- **Battery.** Usable capacity = energy drawn overnight (pack V × current) ÷ the fall in charge it caused, against the pack's nominal Wh (bare 16.3, rich and relay 24.4). Below 70% is Replace, below 80% Watch. Power comes from Meshtastic power telemetry: channel 1 the pack, channel 2 the panel.
+- **Solar.** Yesterday's peak panel output against the network's median. Under 45% of it is Service (clean or re-aim); no output in daylight is Replace.
+- **Gas head.** Clean-air resistance against the value logged at commissioning: ±30% Watch, ±50% Replace.
+- **PM sensor (rich).** Zero for 3 h while other rich nodes read ≥ 2 µg/m³ means a blocked inlet or stopped fan (Service). Fan hours are estimated at 25% duty against an assumed 2-year service life.
+
+Service intervals are placeholders until the first field season sets real ones.
+
+**Simulator** (`backend/app/sensor_sim.py`, `SENSOR_SIM=true`). On start it installs the region planner's plan for the district: 10 plots of 7 bare and 2 rich nodes, the relays and the station bridge. It backfills 26 h of telemetry (a night and a day of solar charge and discharge), then sends a report from every node every 2 min through `mesh.handle_packet`, the same path a real radio's packets take. Eleven nodes get faults a field season would find: worn packs, a dirty panel, a dead panel lead, gas drift, a stalled environmental head, a stalled PM sensor, a blocked PM inlet, an old PM fan, a weak antenna, a silent node, and a relay low on charge. Everything is marked `simulated`: its smoke signals are sample events that show on the live map (the live alert list admits sample events whose signals came from simulated nodes) but never text anyone, its temperatures never replace the forecast, and its PM is compared only with other simulated nodes.
+
 ## 6. Spread simulation
 
 Every estimate from this model is shown as a worst case ("as little as", "up to", "soonest"). It runs fast: on the packet's weather it gives 7.7 mi at minute 62, against the packet's 2 to 3 mi. A downwind text warned too early costs little; one warned too late does not.
@@ -788,10 +803,18 @@ Query: `minutes` (default 60, max 120), optional `wind_kmh`, `wind_from_deg`. Re
 - `GET /api/messages?event_id=&limit=` → outbox and inbox, oldest first.
 - `GET /api/contacts` → the roster (phone numbers masked except the last 4 digits).
 - `GET /api/district` → district settings and boundary GeoJSON (drawn on the map).
+- `GET /api/sensors` → the FireNode network: every sensor node, relay and station bridge with its position, `status` (`ok | watch | service | replace | stale | offline`), `radio` (`ok | down`), `sensors` (`ok | stale | unknown | n/a`), the actions it needs, latest readings, status counts, and the radio links as GeoJSON. Cached 20 s.
+- `GET /api/sensors/{node_id}` → one node: every health check with its value, detail and action, latest readings, and 26 h series (battery V, solar W, PM2.5, gas kΩ, temperature, RH) for the panel's trends.
+- `POST /api/sensors/sim/plume` → `{node_id}`: blows simulated smoke over that node's plot for 20 min (simulated nodes only). `POST /api/sensors/sim/reset` reinstalls the simulated network.
 - `POST /api/alerts/{id}/decision` → `{action: page | no | send, operator}`; the console's equivalent of a duty officer's reply.
 - `GET /api/scenario/{slug}` → scenario timeline: baseline milestones, Firewatch milestones as they happen, the fire's growth curve, and size at first truck on scene. `POST /api/scenario/{slug}/run` replays it; `POST /api/scenario/{slug}/load` runs it instantly; `POST /api/scenario/stop` stops a running replay at its current minute and keeps its events.
 
-When `API_TOKEN` is set, the endpoints that can text people (`/signals`, `/sms/simulate`, `/alerts/{id}/decision`) require it in `X-Firewatch-Token`.
+Two levels of protection, both using `X-Firewatch-Token`:
+
+- **Token routes** can text people or change an alert: `/signals`, `/sms/simulate`, `/burns`, `/alerts/{id}/actions`, `/alerts/{id}/decision`, `/alerts/{id}/options/{option}`, `/sensors/sim/plume`. They require the token when `API_TOKEN` is set.
+- **Admin routes** run replays and ingest or show personal data: `/scenario/{slug}/run`, `/scenario/{slug}/load`, `/scenario/stop`, `/sample/replay`, `/sample/load`, `/ingest/run`, `/sensors/sim/reset`, `/messages`, `/contacts`, and the board's admin routes. They require the token too, and fail closed: in live mode with `API_TOKEN` blank they return `503 set API_TOKEN to use admin routes`. In sample mode a blank token lets them through.
+
+The dashboard never holds the token. The Vite dev server reads `API_TOKEN` from the root `.env` at startup and adds the header to every proxied `/api` request; restart it after changing the token.
 
 ## 8. Frontend design
 
@@ -850,6 +873,14 @@ Behavior:
 - New escalations get a pulsing marker, a toast, and an optional sound until acknowledged.
 - The bottom strip is the "we filtered the noise" message: the count of suppressed detections and why. Clicking it enables "Show suppressed."
 - Source chips turn amber when `stale` and red when `down`, with a tooltip giving the last successful pull.
+
+**Tier views.** A Free / Paid / Offline switch in the top bar (`frontend/src/lib/tier.ts`) shows the console as each product tier would see it. It's a view setting stored in the browser, not access control; the server runs everything either way.
+
+- **Free** (FireWatchOS, FireCast, FireWatch Mobile): no FireNode layers, crew-on-mesh section or sensor-only alerts. The alert's decision panel is labelled FireCast.
+- **Paid** (adds FireCast Plus and FireNode): everything. The panel is labelled FireCast Plus and says "LLM not configured" when `/api/health` reports `llm_configured: false`.
+- **Offline** (paid, station internet down): no map tiles, live feeds, board or Ingest. The alert list keeps only alerts with evidence that arrives without the internet (`sensor_smoke`, `report`, `neighbor_reply`), and a banner says what still works.
+
+**FireNode layer.** Below zoom 12.5 each plot is one marker coloured by its worst node; zoomed in, shape gives the node type (circle bare, diamond rich, triangle relay, square bridge) and colour its health (red for radio down, stale sensors or a part to replace). A chip counts nodes by status; clicking a node opens its panel: the FireMesh link and FireSense indicators, actions, every check, 24 h trends and latest readings.
 
 ### 8.4 Alert detail drawer (`/alerts/:id`)
 
@@ -983,10 +1014,11 @@ TWILIO_ACCOUNT_SID=
 TWILIO_AUTH_TOKEN=
 TWILIO_FROM=
 PUBLIC_BASE_URL=           # used to check Twilio signatures and in console links
-API_TOKEN=                 # when set, required on endpoints that can text people
+API_TOKEN=                 # required in live mode for admin routes; when set, also on routes that can text people (section 7)
 MESH_GATEWAY=off           # off | serial | tcp: a Meshtastic radio attached to the server
 MESH_DEVICE=               # serial port (first Meshtastic port when blank) or the radio's host for tcp
 MESH_CHANNEL_INDEX=0
+SENSOR_SIM=false           # true = install and run the simulated FireNode network (section 5.12)
 OPENROUTER_API_KEY=        # blank = no model: questions get the HELP reply, no channel updates
 OPENROUTER_MODEL=openrouter/free  # a free model per request; or a paid one, e.g. anthropic/claude-haiku-5.5
 MESH_CHANNEL_UPDATES=true  # with a key and a radio, post situation updates while a paged fire is open
