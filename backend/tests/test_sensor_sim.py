@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pytest
@@ -12,15 +12,18 @@ WEATHER = {"wind_kmh": 26, "gust_kmh": 45, "wind_dir_deg": 200, "rh_pct": 18, "t
 
 
 @pytest.fixture(autouse=True)
-def network(monkeypatch):
+def network(request, monkeypatch):
     monkeypatch.setattr(planner, "elevation_grid", lambda lats, lons, z=10: np.full((len(lats), len(lons)), 400.0))
     real = climate.climatology
     monkeypatch.setattr(climate, "climatology", lambda lat, lon, fetch=True: real(lat, lon, fetch=False))
     monkeypatch.setattr(confirm, "fetch_weather", lambda conn, event_id: dict(WEATHER))
+    now = getattr(request, "param", None)
+    if now:
+        monkeypatch.setattr("app.main.utcnow", lambda: now)
     _sensor_cache.clear()
     with connect() as conn:
         sync_roster(conn)
-        sensor_sim.seed(conn)
+        sensor_sim.seed(conn, now)
 
 
 def _by_label() -> dict:
@@ -38,6 +41,10 @@ def test_seed_lays_out_the_plan_with_a_day_of_history():
     assert n > 90 * 100
 
 
+# Humid nights lower every gas reading, so a drifting head must still stand out then, not only in the dry afternoon.
+@pytest.mark.parametrize("network", [datetime(2026, 11, 8, 7, 30, tzinfo=timezone.utc),
+                                     datetime(2026, 11, 7, 23, 0, tzinfo=timezone.utc)],
+                         ids=["night", "afternoon"], indirect=True)
 def test_injected_faults_are_found_and_healthy_nodes_are_not_flagged():
     nodes = list_sensors()["nodes"]
     with connect() as conn:
