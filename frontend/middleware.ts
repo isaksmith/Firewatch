@@ -4,6 +4,7 @@ import { ipAddress, next, rewrite } from '@vercel/functions'
 // login, then forwards /api and /lite to the server with the API token, the visitor's IP and the proxy secret.
 // None of those three reach a browser. Environment (Vercel project settings):
 //   FW_USER, FW_PASSWORD   console login
+//   FW_LOGIN=off           no login: anyone can use the console, including Run scenario and the other admin actions
 //   FW_API_ORIGIN          the server, e.g. https://3-14-15-92.sslip.io
 //   FW_API_TOKEN           the backend's API_TOKEN
 //   FW_PROXY_SECRET        the server refuses requests without it, so the IP and token headers can be trusted
@@ -29,7 +30,8 @@ export default async function middleware(request: Request) {
   // Chrome doesn't always send the saved password with the page's own API calls, so a login also sets a cookie
   // that every request carries.
   let setCookie: string | undefined
-  if (!open && !(await hasSession(request.headers.get('cookie')))) {
+  const loginOff = process.env.FW_LOGIN === 'off'
+  if (!open && !loginOff && !(await hasSession(request.headers.get('cookie')))) {
     if (!(await loggedIn(request.headers.get('authorization')))) {
       // Only pages ask for the password; a prompt raised by a background API call would be confusing.
       const ask = backend ? {} : { 'WWW-Authenticate': 'Basic realm="Firewatch", charset="UTF-8"' }

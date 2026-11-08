@@ -47,7 +47,9 @@ Any other Ubuntu 24.04 server works too: `FW_SITE=... deploy/setup.sh ubuntu@<ip
 `setup.sh`, `deploy.sh` and `vercel-env.sh` don't care where the server runs. `oracle.sh` tries Oracle Cloud's
 free Arm machines, which were out of capacity every time we tried.
 
-The login user is `firewatch` unless `FW_USER` was set.
+The login user is `firewatch` unless `FW_USER` was set. To open the console to everyone with no login, set
+`FW_LOGIN=off` in the Vercel project (`printf off | vercel env add FW_LOGIN production --force --cwd frontend`) and
+redeploy; remove it to bring the login back. Unset login settings keep the console locked.
 The server's backend settings are in `/srv/firewatch/.env` (sample mode, simulated sensors, no radio).
 
 ## Every deploy
