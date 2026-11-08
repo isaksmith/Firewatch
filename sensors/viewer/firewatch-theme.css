@@ -1,0 +1,156 @@
+/* FireWatchOS look for the Node Explorer: the console's dark palette, IBM Plex type, square corners and mono
+   micro-labels. Loaded last, so it restyles base.css without changing its layout. Tokens match
+   frontend/src/index.css. */
+
+@font-face { font-family: 'IBM Plex Sans'; font-weight: 400; font-display: swap; src: url('./vendor/fonts/ibm-plex-sans-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans'; font-weight: 500; font-display: swap; src: url('./vendor/fonts/ibm-plex-sans-latin-500-normal.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Sans'; font-weight: 600; font-display: swap; src: url('./vendor/fonts/ibm-plex-sans-latin-600-normal.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 400; font-display: swap; src: url('./vendor/fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 500; font-display: swap; src: url('./vendor/fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 600; font-display: swap; src: url('./vendor/fonts/ibm-plex-mono-latin-600-normal.woff2') format('woff2'); }
+
+:root {
+  --fw-void: #050607;
+  --fw-bg: #08090b;
+  --fw-panel: #0c0e11;
+  --fw-panel-2: #121519;
+  --fw-raised: #181c21;
+  --fw-line: #1d2127;
+  --fw-line-2: #2a3038;
+  --fw-text: #e6e8eb;
+  --fw-muted: #8b939d;
+  --fw-dim: #565e68;
+  --fw-accent: #ff4b2b;
+  --fw-ok: #3ddc97;
+  --fw-sample: #5cc8ff;
+  --fw-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+
+  /* base.css's own tokens, remapped */
+  --ink: var(--fw-text);
+  --muted: var(--fw-muted);
+  --line: var(--fw-line);
+  --green: var(--fw-raised);
+  --orange: var(--fw-accent);
+  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  font-family: var(--fw-sans);
+  color: var(--fw-text);
+  background: var(--fw-bg);
+  color-scheme: dark;
+}
+
+body { background: var(--fw-bg); -webkit-font-smoothing: antialiased; font-size: 13px; }
+::selection { background: rgb(92 200 255 / 0.3); }
+* { scrollbar-width: thin; scrollbar-color: var(--fw-line-2) transparent; }
+
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible,
+.segments input:focus-visible + span, #detail-panel:focus-visible, .details-resizer:focus-visible {
+  outline: 1px solid var(--fw-sample);
+  outline-offset: 2px;
+}
+
+/* --- Header: the console's 40px top bar --------------------------------------------------------- */
+.header { height: 40px; padding: 0 16px; background: var(--fw-void); border-bottom: 1px solid var(--fw-line); color: var(--fw-text); }
+.brand { gap: 10px; font: 600 13px var(--mono); letter-spacing: 0.28em; }
+.brand-mark { display: inline-flex; transform: none; font-size: 0; line-height: 0; }
+.brand-mark svg { width: 16px; height: 16px; }
+.brand-divider { height: 16px; background: var(--fw-line-2); margin: 0 4px; }
+.brand-sub { font: 500 10px var(--mono); letter-spacing: 0.14em; color: var(--fw-text); background: var(--fw-raised); padding: 2px 8px; }
+.header-right { font: 10px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--fw-dim); }
+.status-dot { border-radius: 0; background: var(--fw-ok); }
+.revision { border-radius: 0; border-color: var(--fw-line-2); color: var(--fw-muted); padding: 2px 6px; letter-spacing: 0.14em; }
+.app { height: calc(100dvh - 40px); }
+
+/* --- Shared type --------------------------------------------------------------------------------- */
+.eyebrow, .parts-heading > span, .stage-footer #pose-label, .control-footer, .pill, .spec-facts dt, .spec-basis, .spec-sources p {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fw-dim);
+}
+h1 { font-weight: 600; letter-spacing: -0.02em; color: var(--fw-text); }
+.intro p, .field-note, .detail-body, .spec-section p, .design-note { color: var(--fw-muted); }
+.design-note { color: var(--fw-dim); border-top-color: var(--fw-line); }
+
+/* --- Left controls -------------------------------------------------------------------------------- */
+.controls { background: var(--fw-panel); border-right-color: var(--fw-line); }
+.control-section { border-top-color: var(--fw-line); }
+.section-heading h2 { font: 500 10px var(--mono); letter-spacing: 0.14em; color: var(--fw-dim); }
+.section-heading h2 span { font: 600 12px var(--fw-sans); color: var(--fw-text); }
+legend, .field-label { font: 500 10px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--fw-dim); }
+
+.segments { border-radius: 0; border-color: var(--fw-line); background: var(--fw-void); padding: 0; gap: 0; }
+.segments span { border-radius: 0; color: var(--fw-dim); font: 500 10px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; padding: 8px 0; }
+.segments label:hover span { color: var(--fw-muted); }
+.segments input:checked + span { background: var(--fw-raised); color: var(--fw-text); box-shadow: inset 0 -2px 0 var(--fw-text); }
+.segments small { font-size: 9px; opacity: 0.6; text-transform: none; letter-spacing: 0; }
+
+.control-section > select {
+  border-radius: 0; border-color: var(--fw-line-2); background: var(--fw-void); color: var(--fw-text); padding: 8px; font-size: 12px;
+}
+.control-section output { font: 500 11px var(--mono); border-radius: 0; background: var(--fw-raised); color: var(--fw-text); }
+input[type='range'], .layer input { accent-color: var(--fw-accent); }
+.text-button { font: 500 10px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--fw-dim); }
+.text-button:hover { color: var(--fw-text); text-decoration: none; }
+.layer { color: var(--fw-muted); font-size: 12px; }
+.layer:hover { color: var(--fw-text); }
+.layer small { color: var(--fw-dim); }
+.layer-swatch { border-radius: 0; }
+.small-dot { border-radius: 0; background: var(--fw-dim); }
+
+/* --- Stage ---------------------------------------------------------------------------------------- */
+.stage { background: radial-gradient(ellipse at 50% 47%, #14181d 0%, #0a0c0f 62%, var(--fw-void) 100%); }
+.stage-heading h2 { color: var(--fw-text); font-weight: 500; }
+.stage-heading h2 span { color: var(--fw-dim); }
+.pill { border-radius: 0; border-color: var(--fw-line-2); background: rgb(8 9 11 / 0.8); padding: 3px 8px; }
+.view-toolbar { border-radius: 0; background: rgb(8 9 11 / 0.92); border-color: var(--fw-line); padding: 0; gap: 0; backdrop-filter: blur(6px); }
+.view-toolbar button { border-radius: 0; font: 500 10px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--fw-dim); padding: 6px 10px; }
+.view-toolbar button:hover { background: var(--fw-raised); color: var(--fw-text); }
+.view-toolbar > span { background: var(--fw-line-2); margin: 0; }
+.stage-footer { color: var(--fw-dim); font: 10px var(--mono); letter-spacing: 0.06em; }
+.hint-divider { color: var(--fw-line-2); }
+.loading { background: rgb(5 6 7 / 0.92); color: var(--fw-muted); }
+.loading strong { color: var(--fw-text); font-weight: 600; }
+.spinner { border-color: var(--fw-line-2); border-top-color: var(--fw-accent); }
+
+/* --- Right details panel -------------------------------------------------------------------------- */
+.details { background: var(--fw-panel); border-left-color: var(--fw-line); }
+.detail-icon { border-radius: 0; background: var(--fw-raised); color: var(--fw-text); border: 1px solid var(--fw-line-2); }
+.detail-title { color: var(--fw-text); font-weight: 600; letter-spacing: -0.02em; }
+.detail-subtitle { color: var(--fw-accent); letter-spacing: 0.14em; font-size: 10px; }
+.detail-facts { border-top-color: var(--fw-line); }
+.detail-facts > div { border-bottom-color: var(--fw-line); font-size: 11px; }
+.detail-facts dt { color: var(--fw-dim); font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px; }
+.detail-facts dd { color: var(--fw-text); font-family: var(--mono); }
+.focus-button { border-radius: 0; border-color: var(--fw-line-2); background: var(--fw-void); color: var(--fw-text); font: 500 10px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; }
+.focus-button:hover { background: var(--fw-raised); border-color: var(--fw-muted); }
+.parts-heading h2 { color: var(--fw-text); font-weight: 600; }
+.component-button { border-radius: 0; color: var(--fw-muted); font-size: 12px; }
+.component-button:hover { background: var(--fw-panel-2); color: var(--fw-text); }
+.component-button.active { background: var(--fw-raised); color: var(--fw-text); box-shadow: inset 2px 0 0 var(--fw-accent); }
+.component-button .part-index { font-family: var(--mono); color: var(--fw-dim); opacity: 1; }
+.component-button .part-arrow { color: var(--fw-dim); }
+
+.detail-tabs { border-radius: 0; background: var(--fw-void); border-color: var(--fw-line); padding: 0; gap: 0; }
+.detail-tabs button { border-radius: 0; color: var(--fw-dim); font: 500 10px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; }
+.detail-tabs button:hover { color: var(--fw-muted); }
+.detail-tabs button[aria-selected='true'] { background: var(--fw-raised); color: var(--fw-text); box-shadow: inset 0 -2px 0 var(--fw-text); }
+.spec-basis { background: var(--fw-void); border-left-color: var(--fw-line-2); text-transform: none; letter-spacing: 0.02em; line-height: 1.7; }
+.spec-section h3, .spec-sources h3 { color: var(--fw-text); }
+.spec-facts { border-top-color: var(--fw-line); }
+.spec-facts > div { border-bottom-color: var(--fw-line); }
+.spec-facts dd { color: var(--fw-text); }
+.spec-sources { border-top-color: var(--fw-line); }
+.spec-sources a { color: var(--fw-sample); }
+.spec-sources p { text-transform: none; letter-spacing: 0.02em; }
+
+/* --- Resizer -------------------------------------------------------------------------------------- */
+@media (min-width: 861px) {
+  .details-resizer { background: var(--fw-panel); border-left-color: var(--fw-line); border-right-color: var(--fw-line); }
+}
+.details-resizer span { border-radius: 0; width: 1px; background: var(--fw-line-2); }
+.details-resizer:hover span, .details-resizer:focus-visible span { background: var(--fw-muted); }
+
+noscript { background: var(--fw-panel-2); color: var(--fw-text); }
