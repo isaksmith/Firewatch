@@ -15,7 +15,12 @@ function Header({ p }: { p: Playbook }) {
   return (
     <div className="px-4 pt-3">
       <div className="flex items-baseline gap-2">
-        <span className="text-[12.5px] text-muted">Chance it's a real fire</span>
+        <span
+          className="text-[12.5px] text-muted"
+          title="FireCast's estimate: starts from how common a wildfire is for the first signal, then multiplies the odds by each piece of evidence. Built on stated assumptions, so read it as a ranking until outcomes are logged."
+        >
+          Chance it's a real fire
+        </span>
         <span className={`text-[20px] font-semibold ${pColor(pr.p)}`}>{pct(pr.p)}</span>
         <button onClick={() => setOpen(open === 'chain' ? null : 'chain')} className="ml-auto inline-flex items-center gap-0.5 text-[11px] text-dim hover:text-text">
           {open === 'chain' ? <ChevronDown size={12} /> : <ChevronRight size={12} />} how we got here

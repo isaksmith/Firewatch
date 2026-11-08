@@ -103,6 +103,19 @@ The **forecast** and the **playbook** sit beside the confirmation rules:
 - The playbook shows the dispatcher three options, one recommended with the reason, and does what's chosen.
 - Downwind warnings use the forecast's earliest plausible arrival. See [How Firewatch recommends actions](docs/RECOMMENDATIONS.md).
 
+### Reading an alert: the score and the chance of fire
+
+An alert shows two numbers that are easy to confuse:
+
+| Number | Example | What it means |
+|---|---|---|
+| **Score** (0–100) | 61/100 | How much the **satellite hotspot looks like a wildfire rather than a planned burn**, from the ML model (season, Flint Hills, time of day, weather, heat output, distance to towns and lines). It's scored as if wildfires and burns were equally common, so 61 means "a little more wildfire-like than burn-like". It is **not** a percentage and **not** a measure of fire danger: fire danger is the GFDI under Conditions. Alerts with no satellite evidence have no score (—). |
+| **Chance it's a real fire** | 22% | FireCast's estimate that this is a real wildfire. It starts from how common that is for the first signal, then multiplies the odds by each piece of evidence. Click "how we got here" to see the steps. |
+
+How 61 becomes 22%: most Kansas hotspots are planned burns, so a hotspot starts at a 15% chance. A score of 61 multiplies the odds by 61/39 ≈ 1.56, which gives 22%. More satellite passes, NGFS included, count as the same source and add little. An independent source (a public report, a neighbour's reply, a line fault, a FireSense sensor) raises it sharply, and two independent sources escalate.
+
+Several starting rates are assumptions with their sources listed, so until real outcomes are logged and the weights re-fitted, read the percentage as a consistent ranking, not a measured frequency. Full method: [How Firewatch recommends actions](docs/RECOMMENDATIONS.md).
+
 <details>
 <summary><b>The full decision flow</b> (diagram)</summary>
 

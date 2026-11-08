@@ -30,6 +30,7 @@ The duty officer's console, and the server behind it.
 The engine that decides what an alert means and what to do about it. It runs on the station computer.
 
 1. **ML fire score.** A model trained on Kansas FIRMS detections from 2016–2025, matched to reported wildfires and prescribed burns, scores each detection 0–100. It shows the factors behind the score, such as season, Flint Hills location, wind, humidity and distance to town.
+   The score is not a percentage or a danger rating: it's scored as if wildfires and burns were equally common. The alert's **chance it's a real fire** combines it with how common wildfires are: a hotspot starts at 15%, and a score of 61 brings it to 22%. See [Reading an alert](../README.md#reading-an-alert-the-score-and-the-chance-of-fire).
 2. **Expected-loss recommendation.** For each option (page now, ask a neighbour, wait), it weighs the chance it's a real fire, the acres burned before help arrives and the cost of a false alarm. It shows its working, step by step.
 3. **Fire spread forecast.** An ensemble spread model draws where the fire could be over the next hour on the map, with a time slider. It gives worst-case ("up to", "soonest") arrival times for towns, roads and homes.
 4. **3D spread preview.** The same forecast on terrain, with adjustable wind.

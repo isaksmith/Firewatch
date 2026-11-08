@@ -44,7 +44,11 @@ export function ScoreReadout({ score, rec, size = 'md' }: { score: number | null
     )
   }
   return (
-    <span className="num inline-flex items-baseline leading-none" aria-label={`Score ${score} of 100`}>
+    <span
+      className="num inline-flex items-baseline leading-none"
+      aria-label={`Score ${score} of 100`}
+      title="Satellite score: how much the hotspot looks like a wildfire rather than a planned burn. Not a percentage or a danger rating; the chance it's a real fire is in the FireCast panel."
+    >
       <span className={`${cls} font-semibold tracking-tight`} style={{ color: REC_META[rec].color }}>
         {String(score).padStart(2, '0')}
       </span>
