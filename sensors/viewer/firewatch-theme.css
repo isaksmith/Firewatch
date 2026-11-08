@@ -60,6 +60,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .status-dot { border-radius: 0; background: var(--fw-ok); }
 .revision { border-radius: 0; border-color: var(--fw-line-2); color: var(--fw-muted); padding: 2px 6px; letter-spacing: 0.14em; }
 .app { height: calc(100dvh - 40px); }
+/* Inside the console's FireNode design page (?embed), whose own header already shows the mark. */
+.embedded .header { display: none; }
+.embedded .app { height: 100dvh; min-height: 0; }
 
 /* --- Shared type --------------------------------------------------------------------------------- */
 .eyebrow, .parts-heading > span, .stage-footer #pose-label, .control-footer, .pill, .spec-facts dt, .spec-basis, .spec-sources p {

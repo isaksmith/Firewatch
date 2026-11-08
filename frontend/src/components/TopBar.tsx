@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Box, ClipboardList, Flame, MessageCircleQuestion, MessageSquare, Play, RefreshCw, Square, Wifi } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { api, type ScenarioSummary, type SourceHealth } from '../api'
 import { setLowData, useLowData } from '../lib/lowData'
@@ -75,6 +75,45 @@ const SCENARIO_LABEL: Record<string, string> = {
 
 const Divider = () => <span className="h-4 w-px shrink-0 bg-line-2" />
 
+/** The mark and the pages: the start of every page's header, the public board's included. */
+export function BrandNav() {
+  const { online } = useTier()
+  const pages: [string, string][] = [
+    ['/', 'Console'],
+    ['/planner', 'FireNode planner'],
+    ['/design', 'FireNode design'],
+    ...(online ? ([['/board', 'Board']] as [string, string][]) : []),
+  ]
+  // On a phone the links run past the edge; bring the current page's into view.
+  const navRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    navRef.current?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [])
+  return (
+    <>
+      <div className="flex shrink-0 items-center gap-2.5 text-text">
+        <Mark size={16} />
+        <span className="num hidden text-[13px] font-semibold tracking-[0.28em] min-[1320px]:inline">FIREWATCH</span>
+      </div>
+      <Divider />
+      <nav ref={navRef} className="flex shrink-0 items-center gap-1">
+        {pages.map(([to, label]) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={to === '/'}
+            className={({ isActive }) =>
+              `num px-2 py-[2px] text-[10px] tracking-[0.14em] uppercase ${isActive ? 'bg-raised text-text' : 'text-dim hover:text-muted'}`
+            }
+          >
+            {label}
+          </NavLink>
+        ))}
+      </nav>
+    </>
+  )
+}
+
 export function TopBar({
   onRunScenario,
   onStopScenario,
@@ -121,88 +160,148 @@ export function TopBar({
   const { tier, online } = useTier()
 
   return (
-    <header className="flex h-10 shrink-0 items-center gap-4 overflow-hidden border-b border-line bg-void pl-4 whitespace-nowrap">
-      {/* Always visible: the mark and the three pages. */}
-      <div className="flex shrink-0 items-center gap-2.5 text-text">
-        <Mark size={16} />
-        <span className="num hidden text-[13px] font-semibold tracking-[0.28em] 2xl:inline">FIREWATCH</span>
+    <header className="shrink-0 border-b border-line bg-void whitespace-nowrap">
+      {/* Top row, always visible: the mark, the pages, and the main actions. */}
+      <div className="flex h-12 items-center gap-4 overflow-hidden px-4">
+        <BrandNav />
+
+        <div className="ml-auto flex shrink-0 items-center gap-3">
+          {onToggleAsk && (
+            <button
+              type="button"
+              onClick={onToggleAsk}
+              aria-pressed={askOpen}
+              aria-label="Ask Firewatch"
+              title="Ask Firewatch a question, as a resident would by text"
+              className={`btn !h-8 !px-3.5 !text-[12.5px] !border-sample ${askOpen ? '!bg-sample !text-void' : '!text-sample'}`}
+            >
+              <MessageCircleQuestion size={14} /> Ask Firewatch
+            </button>
+          )}
+          {onToggleBoard && (
+            <button
+              type="button"
+              onClick={onToggleBoard}
+              aria-pressed={boardOpen}
+              aria-label="Community board"
+              title="Community board"
+              className={`btn !h-8 !px-3.5 !text-[12.5px] ${boardOpen ? '!border-sample !text-sample' : ''}`}
+            >
+              <MessageSquare size={14} /> Board
+            </button>
+          )}
+          {(onToggleAsk || onToggleBoard) && (onRunScenario || mode) && <Divider />}
+          {onRunScenario && scenarios && scenarios.length > 1 && (
+            <select
+              value={scenarioSlug}
+              onChange={(e) => onPickScenario?.(e.target.value)}
+              disabled={scenarioRunning}
+              aria-label="Scenario to replay"
+              title={scenarios.find((s) => s.slug === scenarioSlug)?.story}
+              className="field !h-8 max-w-44"
+            >
+              {scenarios.map((s) => (
+                <option key={s.slug} value={s.slug}>
+                  {SCENARIO_LABEL[s.slug] ?? s.title}
+                </option>
+              ))}
+            </select>
+          )}
+          {onRunScenario && scenarioRunning && onStopScenario ? (
+            <button
+              onClick={onStopScenario}
+              disabled={scenarioStopping}
+              title="Stop the scenario where it is. Its alerts stay on screen; Run scenario starts it over."
+              className="btn !h-8 !border-escalate !px-3.5 !text-[12.5px] !text-escalate"
+            >
+              <Square size={13} fill="currentColor" /> {scenarioStopping ? 'Stopping' : 'Stop scenario'}
+            </button>
+          ) : (
+            onRunScenario && (
+              <button
+                onClick={onRunScenario}
+                disabled={scenarioRunning}
+                aria-label={scenarioRunning ? 'Scenario running' : 'Run scenario'}
+                className="btn btn-danger !h-8 !px-3.5 !text-[12.5px]"
+              >
+                <Flame size={14} /> {scenarioRunning ? 'Scenario running' : 'Run scenario'}
+              </button>
+            )
+          )}
+          {mode === 'sample' && (
+            <button
+              onClick={() => replay.mutate()}
+              disabled={replay.isPending || health.data?.replay_running}
+              aria-label={health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}
+              title="Replay past satellite detections"
+              className="btn !h-8 !px-3.5 !text-[12.5px]"
+            >
+              <Play size={14} />
+              <span className="hidden min-[1320px]:inline">{health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}</span>
+            </button>
+          )}
+          {mode === 'live' && online && (
+            <button onClick={() => ingest.mutate()} disabled={ingest.isPending} className="btn !h-8 !px-3.5 !text-[12.5px]">
+              <RefreshCw size={14} className={ingest.isPending ? 'animate-spin' : ''} /> Ingest
+            </button>
+          )}
+        </div>
       </div>
-      <Divider />
-      <nav className="flex shrink-0 items-center gap-1">
-        {(
-          [
-            ['/', 'Console'],
-            ['/planner', 'FireNode planner'],
-            ...(online ? ([['/board', 'Board']] as const) : []),
-          ] as const
-        ).map(([to, label]) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/'}
-            className={({ isActive }) =>
-              `num px-2 py-[2px] text-[10px] tracking-[0.14em] uppercase ${isActive ? 'bg-raised text-text' : 'text-dim hover:text-muted'}`
-            }
-          >
-            {label}
-          </NavLink>
-        ))}
-      </nav>
-      <Divider />
-      {/* Everything else scrolls sideways when the window is too narrow; a mouse wheel scrolls it too. */}
+
+      {/* Second row: views, data status and settings. It scrolls sideways when the window is too narrow; a mouse
+          wheel scrolls it too. */}
       <div
-        className="topbar-scroll flex h-full min-w-0 flex-1 items-center gap-4 overflow-x-auto overflow-y-hidden [&>*]:shrink-0"
+        className="topbar-scroll flex h-9 items-center gap-4 overflow-x-auto overflow-y-hidden border-t border-line px-4 [&>*]:shrink-0"
         onWheel={(e) => {
           if (e.deltaX === 0 && e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY
         }}
       >
-      <TierSwitch tier={tier} />
-      <Divider />
-      {threeDId != null && (
-        <Link
-          to={`/alerts/${threeDId}/3d`}
-          className="btn !h-6 shrink-0 !border-investigate/60 !text-investigate"
-          title={threeDSelected ? 'Open the 3D spread view for the selected alert' : 'Open the 3D spread view for the top alert. Select another alert first to see its own.'}
-        >
-          <Box size={12} /> 3D view
-          <span className="text-[10px] font-normal tracking-normal text-muted">{threeDSelected ? 'selected alert' : 'top alert'}</span>
-        </Link>
-      )}
-      <span className="label">Kansas AOI · Confirmation Layer</span>
-      {mode === 'sample' && (
-        <span className="num border border-sample/50 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-sample">
-          SAMPLE REPLAY
-        </span>
-      )}
-      {mode === 'live' && (
-        <span className="num flex items-center gap-1.5 border border-ok/50 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-ok">
-          <span className="blink h-1.5 w-1.5 bg-ok" /> LIVE
-        </span>
-      )}
-      <div className="flex items-center gap-5">
+        <TierSwitch tier={tier} />
         <Divider />
-        {health.data && online && <SourceChips sources={health.data.sources} />}
-        {!online && <span className="num text-[10px] tracking-[0.12em] text-degraded">INTERNET DOWN · FIRENODE ONLY</span>}
-        {health.isError && <span className="num text-[10px] tracking-[0.12em] text-escalate">Can't reach the Firewatch server. Showing the last update.</span>}
-      </div>
-
-      <div className="ml-auto flex items-center gap-4 pl-4">
-        <button
-          role="switch"
-          aria-checked={lowData}
-          onClick={() => setLowData(!lowData)}
-          className={`btn !h-6 ${lowData ? '!border-degraded !text-degraded' : ''}`}
-          aria-label={`Low data ${lowData ? 'on' : 'off'}`}
-          title={`Low data ${lowData ? 'on' : 'off'}. Use less data: no map pictures, slower updates`}
-        >
-          <Wifi size={11} /> <span>Low data {lowData ? 'on' : 'off'}</span>
-        </button>
-        {onBurnLog && (
-          <button onClick={onBurnLog} aria-pressed={burnOpen} aria-label="Burn log" title="Burn log" className={`btn !h-6 ${burnOpen ? '!border-text' : ''}`}>
-            <ClipboardList size={11} /> <span>Burn log</span>
-          </button>
+        {threeDId != null && (
+          <Link
+            to={`/alerts/${threeDId}/3d`}
+            className="btn !h-6 shrink-0 !border-investigate/60 !text-investigate"
+            title={threeDSelected ? 'Open the 3D spread view for the selected alert' : 'Open the 3D spread view for the top alert. Select another alert first to see its own.'}
+          >
+            <Box size={12} /> 3D view
+            <span className="text-[10px] font-normal tracking-normal text-muted">{threeDSelected ? 'selected alert' : 'top alert'}</span>
+          </Link>
         )}
-        <div className="flex items-center gap-4">
+        <span className="label">Kansas AOI · Confirmation Layer</span>
+        {mode === 'sample' && (
+          <span className="num border border-sample/50 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-sample">
+            SAMPLE REPLAY
+          </span>
+        )}
+        {mode === 'live' && (
+          <span className="num flex items-center gap-1.5 border border-ok/50 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-ok">
+            <span className="blink h-1.5 w-1.5 bg-ok" /> LIVE
+          </span>
+        )}
+        <div className="flex items-center gap-5">
+          <Divider />
+          {health.data && online && <SourceChips sources={health.data.sources} />}
+          {!online && <span className="num text-[10px] tracking-[0.12em] text-degraded">INTERNET DOWN · FIRENODE ONLY</span>}
+          {health.isError && <span className="num text-[10px] tracking-[0.12em] text-escalate">Can't reach the Firewatch server. Showing the last update.</span>}
+        </div>
+
+        <div className="ml-auto flex items-center gap-4 pl-4">
+          <button
+            role="switch"
+            aria-checked={lowData}
+            onClick={() => setLowData(!lowData)}
+            className={`btn !h-6 ${lowData ? '!border-degraded !text-degraded' : ''}`}
+            aria-label={`Low data ${lowData ? 'on' : 'off'}`}
+            title={`Low data ${lowData ? 'on' : 'off'}. Use less data: no map pictures, slower updates`}
+          >
+            <Wifi size={11} /> <span>Low data {lowData ? 'on' : 'off'}</span>
+          </button>
+          {onBurnLog && (
+            <button onClick={onBurnLog} aria-pressed={burnOpen} aria-label="Burn log" title="Burn log" className={`btn !h-6 ${burnOpen ? '!border-text' : ''}`}>
+              <ClipboardList size={11} /> <span>Burn log</span>
+            </button>
+          )}
           <Clock />
           <Divider />
           <label className="flex items-center gap-2">
@@ -210,85 +309,6 @@ export function TopBar({
             <input value={operator} onChange={(e) => setOperator(e.target.value)} className="field w-28 !h-6 uppercase" aria-label="Operator name" />
           </label>
         </div>
-        {onToggleBoard && (
-          <button
-            type="button"
-            onClick={onToggleBoard}
-            aria-pressed={boardOpen}
-            aria-label="Community board"
-            title="Community board"
-            className={`btn !h-6 ${boardOpen ? '!border-sample !text-sample' : ''}`}
-          >
-            <MessageSquare size={11} /> <span>Board</span>
-          </button>
-        )}
-        {onToggleAsk && (
-          <button
-            type="button"
-            onClick={onToggleAsk}
-            aria-pressed={askOpen}
-            aria-label="Ask Firewatch"
-            title="Ask Firewatch a question, as a resident would by text"
-            className={`btn !h-6 ${askOpen ? '!border-sample !text-sample' : ''}`}
-          >
-            <MessageCircleQuestion size={11} /> <span>Ask</span>
-          </button>
-        )}
-      </div>
-      </div>
-      {/* Always visible on the right: the demo controls. */}
-      <div className="flex shrink-0 items-center gap-4 border-l border-line px-4 empty:hidden">
-        {onRunScenario && scenarios && scenarios.length > 1 && (
-          <select
-            value={scenarioSlug}
-            onChange={(e) => onPickScenario?.(e.target.value)}
-            disabled={scenarioRunning}
-            aria-label="Scenario to replay"
-            title={scenarios.find((s) => s.slug === scenarioSlug)?.story}
-            className="field !h-6 max-w-44"
-          >
-            {scenarios.map((s) => (
-              <option key={s.slug} value={s.slug}>
-                {SCENARIO_LABEL[s.slug] ?? s.title}
-              </option>
-            ))}
-          </select>
-        )}
-        {onRunScenario && scenarioRunning && onStopScenario ? (
-          <button
-            onClick={onStopScenario}
-            disabled={scenarioStopping}
-            title="Stop the scenario where it is. Its alerts stay on screen; Run scenario starts it over."
-            className="btn !h-8 !border-escalate !px-3.5 !text-[12.5px] !text-escalate"
-          >
-            <Square size={13} fill="currentColor" /> {scenarioStopping ? 'Stopping' : 'Stop scenario'}
-          </button>
-        ) : (
-          onRunScenario && (
-            <button
-              onClick={onRunScenario}
-              disabled={scenarioRunning}
-              aria-label={scenarioRunning ? 'Scenario running' : 'Run scenario'}
-              className="btn btn-danger !h-8 !px-3.5 !text-[12.5px]"
-            >
-              <Flame size={14} /> {scenarioRunning ? 'Scenario running' : 'Run scenario'}
-            </button>
-          )
-        )}
-        {mode === 'sample' && (
-          <button
-            onClick={() => replay.mutate()}
-            disabled={replay.isPending || health.data?.replay_running}
-            className="btn !h-8 !px-3.5 !text-[12.5px]"
-          >
-            <Play size={14} /> {health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}
-          </button>
-        )}
-        {mode === 'live' && online && (
-          <button onClick={() => ingest.mutate()} disabled={ingest.isPending} className="btn !h-6">
-            <RefreshCw size={11} className={ingest.isPending ? 'animate-spin' : ''} /> Ingest
-          </button>
-        )}
       </div>
     </header>
   )
