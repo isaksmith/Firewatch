@@ -1,0 +1,13 @@
+{
+ "count": 1,
+ "items": [
+  {
+   "name": "Sample fixture perimeter",
+   "acres": 120,
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [[[-96.7, 38.2], [-96.5, 38.2], [-96.5, 38.4], [-96.7, 38.4], [-96.7, 38.2]]]
+   }
+  }
+ ]
+}

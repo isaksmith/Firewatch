@@ -1,0 +1,12 @@
+{
+ "count": 2,
+ "scan_start": "2021-12-15T22:11:17+00:00",
+ "satellites": [
+  {"satellite": "goes19", "key": "SAMPLE_FDCC_G19.nc", "count": 1, "scan_start": "2021-12-15T22:11:17+00:00"},
+  {"satellite": "goes18", "key": "SAMPLE_FDCC_G18.nc", "count": 1, "scan_start": "2021-12-15T22:11:17+00:00"}
+ ],
+ "points": [
+  {"lon": -98.9, "lat": 38.9, "satellite": "goes19", "mask": 10, "class": "good", "filtered": false, "power_mw": 24.5, "temp_k": 410.0, "scan_start": "2021-12-15T22:11:17+00:00"},
+  {"lon": -99.4, "lat": 38.5, "satellite": "goes18", "mask": 30, "class": "good", "filtered": true, "power_mw": 11.2, "temp_k": 395.0, "scan_start": "2021-12-15T22:11:17+00:00"}
+ ]
+}

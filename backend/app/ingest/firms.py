@@ -60,19 +60,21 @@ def parse_csv(text: str, source: str) -> list[dict]:
     return out
 
 
-def fetch_area(key: str, source: str, bbox: tuple[float, float, float, float], days: int = 1) -> list[dict]:
-    url = AREA_URL.format(key=key, source=source, bbox=",".join(str(v) for v in bbox), days=days)
-    # The MAP_KEY sits in the URL path, and httpx error strings include the URL,
-    # so never let a raw httpx exception escape: it would be logged and stored.
+def fetch_text(url: str, source: str) -> str:
+    """GET a FIRMS URL. The key is in the URL path, so errors must never carry the URL."""
     try:
         resp = httpx.get(url, timeout=30)
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
-        raise RuntimeError(f"FIRMS {source}: HTTP {e.response.status_code}") from None
-    except httpx.HTTPError as e:
-        raise RuntimeError(f"FIRMS {source}: {type(e).__name__}") from None
-    text = resp.text
+        raise RuntimeError(f"FIRMS {source} HTTP {e.response.status_code}") from None
+    except httpx.RequestError as e:
+        raise RuntimeError(f"FIRMS {source} {type(e).__name__}") from None
+    return resp.text
+
+
+def fetch_area(key: str, source: str, bbox: tuple[float, float, float, float], days: int = 1) -> list[dict]:
+    url = AREA_URL.format(key=key, source=source, bbox=",".join(str(v) for v in bbox), days=days)
+    text = fetch_text(url, source)
     if text.lower().startswith("invalid") or "error" in text[:200].lower():
-        snippet = text[:200].replace(key, "***") if key else text[:200]
-        raise RuntimeError(f"FIRMS error for {source}: {snippet}")
+        raise RuntimeError(f"FIRMS error for {source}: {text[:200]}")
     return parse_csv(text, source)

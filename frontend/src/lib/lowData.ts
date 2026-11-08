@@ -2,7 +2,6 @@ import { useSyncExternalStore } from 'react'
 
 const KEY = 'fw.lowData'
 const SLOW_MS = 2000
-const SLOW_TYPES = ['slow-2g', '2g', '3g']
 
 interface State {
   on: boolean
@@ -10,36 +9,30 @@ interface State {
   auto: boolean
 }
 
+/** Used when storage is blocked, so the choice still lasts until reload. */
+let memory: '1' | '0' | null = null
+
 function read(): '1' | '0' | null {
   try {
     const v = localStorage.getItem(KEY)
-    return v === '1' || v === '0' ? v : null
+    if (v === '1' || v === '0') return v
   } catch {
-    return null
+    /* storage can be blocked */
   }
+  return memory
 }
 
 function write(v: '1' | '0') {
+  memory = v
   try {
     localStorage.setItem(KEY, v)
   } catch {
-    /* storage can be blocked; the choice just lasts until reload */
+    /* storage can be blocked; the in-memory choice is used */
   }
-}
-
-function slowConnection(): boolean {
-  const c = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection
-  return !!c && (c.saveData === true || SLOW_TYPES.includes(c.effectiveType ?? ''))
 }
 
 function initial(): State {
-  const saved = read()
-  if (saved) return { on: saved === '1', auto: false }
-  if (slowConnection()) {
-    write('1')
-    return { on: true, auto: true }
-  }
-  return { on: false, auto: false }
+  return { on: read() === '1', auto: false }
 }
 
 let state: State = initial()
@@ -66,10 +59,13 @@ export function noteFetchTime(ms: number) {
   }
 }
 
-/** A failed alerts fetch counts toward the same streak as a slow one. Offline is not slow, so it is ignored. */
-export function noteFetchFailure() {
+/**
+ * A failed alerts fetch counts toward the same streak only if it was slow, like a timeout on a weak link.
+ * A fast failure means the server is down or restarting, and offline is not slow, so both are ignored.
+ */
+export function noteFetchFailure(ms: number) {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return
-  noteFetchTime(Infinity)
+  if (ms > SLOW_MS) noteFetchTime(ms)
 }
 
 export function dismissAutoBanner() {

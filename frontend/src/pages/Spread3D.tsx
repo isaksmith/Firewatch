@@ -1,4 +1,5 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { Attribution } from '../components/Attribution'
 import { ArrowUp, ChevronLeft, Pause, Play, RotateCcw } from 'lucide-react'
 import type { GeoJSONSource } from 'maplibre-gl'
 import { useEffect, useRef, useState } from 'react'
@@ -7,7 +8,8 @@ import { Link, useParams } from 'react-router-dom'
 import { api, type SimulationResult } from '../api'
 import { KV, RecTag, ScoreReadout } from '../components/ui'
 import { compass, pad3, trackId } from '../lib/format'
-import { IMAGERY_TERRAIN_STYLE } from '../lib/map'
+import { setLowData, useLowData } from '../lib/lowData'
+import { BLANK_STYLE, IMAGERY_TERRAIN_STYLE } from '../lib/map'
 
 const DURATION = 60
 const PLAY_SECONDS_AT_1X = 15
@@ -23,6 +25,7 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export function Spread3D() {
+  const { on: lowData } = useLowData()
   const id = Number(useParams().id)
   const alert = useQuery({ queryKey: ['alert', id], queryFn: () => api.alert(id) })
   const [override, setOverride] = useState(false)
@@ -73,7 +76,7 @@ export function Spread3D() {
     return <div className="label flex h-full items-center justify-center">{alert.isError ? 'Alert not found' : 'Loading…'}</div>
   }
 
-  const impactedNow = new Set((s?.impacts ?? []).filter((i) => i.minutes <= t).map((i) => i.name))
+  const impactedNow = new Set((s?.impacts ?? []).filter((i) => i.minutes <= t).map((i) => i.id))
   const area = s?.isochrones.features.filter((f) => f.properties.minutes <= Math.max(t, 5)).at(-1)?.properties.area_ha ?? 0
   const togglePlay = () => {
     if (t >= DURATION) setT(0)
@@ -82,23 +85,25 @@ export function Spread3D() {
 
   return (
     <div className="flex h-full flex-col bg-void">
-      <header className="flex h-10 shrink-0 items-center gap-4 border-b border-line bg-void px-3">
+      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-void px-3 sm:gap-4">
         <Link to={`/alerts/${id}`} className="btn !h-6 !px-2">
-          <ChevronLeft size={12} /> Back
+          <ChevronLeft size={12} /> Back to map
         </Link>
-        <span className="label !text-muted">
-          Spread preview · <span className="text-text">{trackId(id)}</span>
+        <span className="num border border-investigate/60 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-investigate">3D VIEW</span>
+        <span className="label hidden !text-muted sm:inline">
+          FireCast spread preview · <span className="text-text">{trackId(id)}</span>
         </span>
-        <span className="h-4 w-px bg-line-2" />
+        <span className="hidden h-4 w-px bg-line-2 sm:block" />
         <ScoreReadout score={a.score} rec={a.recommendation} size="sm" />
-        <span className="text-[13px] font-medium">{a.place_label}</span>
+        <span className="hidden text-[13px] font-medium sm:inline">{a.place_label}</span>
         <RecTag rec={a.recommendation} />
         <span
-          className="num ml-auto border border-investigate/40 px-1.5 py-[1px] text-[10px] tracking-[0.12em] text-investigate"
+          className="num ml-auto min-w-0 border border-investigate/40 px-1.5 py-[1px] text-[10px] tracking-[0.12em] text-investigate"
           title="Simplified grass-fire estimate for planning. Not an operational fire behavior prediction."
         >
           ESTIMATE · NOT AN OPERATIONAL PREDICTION
         </span>
+        <Attribution placement="header" />
       </header>
 
       <div className="relative min-h-0 flex-1">
@@ -110,10 +115,10 @@ export function Spread3D() {
             pitch: 62,
             bearing: ((a.weather.wind_dir_deg ?? 0) + 180) % 360,
           }}
-          mapStyle={IMAGERY_TERRAIN_STYLE}
+          mapStyle={lowData ? BLANK_STYLE : IMAGERY_TERRAIN_STYLE}
           maxPitch={80}
           style={{ width: '100%', height: '100%' }}
-          attributionControl={{ compact: true }}
+          attributionControl={false}
         >
           {s && (
             <Source id="iso" type="geojson" data={s.isochrones}>
@@ -146,8 +151,8 @@ export function Spread3D() {
                 id="lines"
                 type="line"
                 paint={{
-                  'line-color': ['case', ['in', ['get', 'name'], ['literal', [...impactedNow]]], '#ff4b2b', '#e6e8eb'],
-                  'line-width': ['case', ['in', ['get', 'name'], ['literal', [...impactedNow]]], 3, 1.5],
+                  'line-color': ['case', ['in', ['get', 'id'], ['literal', [...impactedNow]]], '#ff4b2b', '#e6e8eb'],
+                  'line-width': ['case', ['in', ['get', 'id'], ['literal', [...impactedNow]]], 3, 1.5],
                 }}
               />
             </Source>
@@ -157,9 +162,10 @@ export function Spread3D() {
             const [lon, lat] = (f.geometry as GeoJSON.Point).coordinates
             if (Math.abs(lat - a.lat) > 0.25 || Math.abs(lon - a.lon) > 0.3) return null
             const name = f.properties?.name as string
-            const hit = impactedNow.has(name)
+            const fid = (f.properties?.id as string | undefined) ?? name
+            const hit = impactedNow.has(fid)
             return (
-              <Marker key={name} longitude={lon} latitude={lat} anchor="bottom">
+              <Marker key={fid} longitude={lon} latitude={lat} anchor="bottom">
                 <div className="flex flex-col items-center">
                   <div
                     className={`num px-1.5 py-[2px] text-[10px] tracking-[0.1em] uppercase ${hit ? 'bg-escalate text-white' : 'hud text-text'}`}
@@ -179,6 +185,15 @@ export function Spread3D() {
         </Map>
 
         <div className="pointer-events-none absolute inset-3 brackets" style={{ ['--b' as string]: '#e6e8eb66' }} />
+
+        {lowData && (
+          <div role="status" className="hud absolute bottom-28 left-1/2 flex -translate-x-1/2 items-center gap-3 px-4 py-2 text-[12.5px]">
+            <span className="text-degraded">Low data mode is on, so the 3D view skips aerial imagery and terrain.</span>
+            <button onClick={() => setLowData(false)} className="btn !h-7">
+              Turn off
+            </button>
+          </div>
+        )}
 
         <div className="hud pointer-events-none absolute top-6 left-6 px-4 py-3">
           <div className="label">Elapsed</div>
@@ -301,13 +316,13 @@ function SidePanel({ s, t, override, setOverride, shownWind, setWind, fetching }
 
       <div className="flex h-8 items-center justify-between border-t border-b border-line px-4">
         <span className="label">Impacts · 60 min</span>
-        <span className="num text-[10px] text-dim">ETA</span>
+        <span className="num text-[10px] text-dim">SOONEST, WORST CASE</span>
       </div>
       <ul className="space-y-1.5 px-4 py-3">
         {(s?.impacts ?? []).map((i) => {
           const hit = i.minutes <= t
           return (
-            <li key={`${i.kind}-${i.name}`} className="flex items-center justify-between gap-3">
+            <li key={i.id} className="flex items-center justify-between gap-3">
               <span className={`min-w-0 truncate text-[12px] ${hit ? 'text-escalate' : 'text-text'}`}>{i.name}</span>
               <span className={`num shrink-0 text-[11px] ${hit ? 'text-escalate' : 'text-muted'}`}>
                 {hit ? 'REACHED' : `T+${String(i.minutes).padStart(2, '0')}`}
@@ -336,7 +351,7 @@ function SidePanel({ s, t, override, setOverride, shownWind, setWind, fetching }
   )
 }
 
-function Timeline({ t, impacts, onScrub }: { t: number; impacts: { name: string; minutes: number }[]; onScrub: (v: number) => void }) {
+function Timeline({ t, impacts, onScrub }: { t: number; impacts: { id: string; name: string; minutes: number }[]; onScrub: (v: number) => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const fromEvent = (clientX: number) => {
     const r = ref.current!.getBoundingClientRect()
@@ -374,7 +389,7 @@ function Timeline({ t, impacts, onScrub }: { t: number; impacts: { name: string;
         </div>
       ))}
       {impacts.map((i) => (
-        <div key={i.name} className="absolute top-0" style={{ left: pct(i.minutes) }} title={`${i.name} · T+${i.minutes} min`}>
+        <div key={i.id} className="absolute top-0" style={{ left: pct(i.minutes) }} title={`${i.name} · T+${i.minutes} min`}>
           <div className={`h-2 w-2 -translate-x-1/2 rotate-45 ${i.minutes <= t ? 'bg-escalate' : 'border border-escalate bg-void'}`} />
         </div>
       ))}

@@ -1,81 +1,205 @@
 import asyncio
+import hmac
+import json
 import logging
+import math
 from contextlib import asynccontextmanager
-import re
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from zoneinfo import ZoneInfo
+from typing import Annotated, Literal
+from urllib.parse import parse_qsl
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
-from fastapi.exceptions import RequestValidationError
+import numpy as np
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from . import sample
-from .config import get_settings
-from .db import connect, init_db, iso, loads, parse_iso, utcnow
+from . import cap, climate, fw1_feed, livesend, mesh, notify, planner, playbook, posts, routes_posts, sample, scenario
+from . import sensor_health, sensor_sim
+from .config import DATA_DIR, get_settings
+from .confirm import evaluate_event
+from .db import connect, init_db, iso, load_snapshot, loads, mark_source, parse_iso, redact, utcnow
+from .mobile import router as mobile_router
+from .district import boundary_geojson, load_district, sync_roster
 from .fire_weather import default_curing, gfdi_band
-from .layers import LAYER_NAMES, load_layer, nearest_assets
-from .pipeline import add_burn, poll_firms_once, process_line_fault, process_report
-from .alerts.routes import router as alerts_router
+from .geo import compass
+from .ingest import goes_fire, goes_lightning, goes_smoke, hms, landsat_nrt, lsr, metar, ngfs, nws, risk_grid, rtma_ru, spc, wfigs
+from .layers import LAYER_NAMES, load_layer, nearest_assets, segment_index
 from .lite import router as lite_router
-from .sim.spread import SpreadInput, simulate
+from .pipeline import poll_firms_once
+from .signals import add_signal
+from .sim.ensemble import forecast
+from .sim.spread import SpreadInput, _contours, _rings, interp_weather, simulate
+from .situation import Situation, scenario_situation
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)  # INFO logs full URLs, and the FIRMS key is in the path
 log = logging.getLogger("firewatch")
 
-_poll_task: asyncio.Task | None = None
+_tasks: list[asyncio.Task] = []
+TICK_SECONDS = 30
+MESH_RETRY_SECONDS = 30
 
 
-async def _poll_loop() -> None:
-    minutes = get_settings().poll_minutes
+async def _source_loop(name: str, interval_s: int, job) -> None:
+    """Poll one source forever. A failure is logged and recorded, never raised."""
     while True:
         try:
-            summary = await asyncio.to_thread(poll_firms_once)
-            log.info("FIRMS poll: %s", summary)
+            result = await asyncio.to_thread(job)
+            log.info("%s poll: %s", name, result)
+        except Exception as e:
+            log.exception("%s poll failed", name)
+            try:
+                with connect() as conn:
+                    mark_source(conn, name, ok=False, error=str(e))
+            except Exception:
+                log.exception("could not record failure for %s", name)
+        await asyncio.sleep(interval_s)
+
+
+def poll_jobs() -> dict:
+    """Source name -> callable. Sources without a job here are not polled."""
+    jobs = {
+        "firms": poll_firms_once,
+        "nws_alerts": nws.poll,
+        "lsr": lsr.poll,
+        "wfigs_incidents": wfigs.poll_incidents,
+        "wfigs_perimeters": wfigs.poll_perimeters,
+        "metar": metar.poll,
+        "open_meteo": risk_grid.poll,
+        "spc": spc.poll,
+        "hms": hms.poll,
+        "goes_fire": goes_fire.poll,
+        "ngfs": ngfs.poll,
+        "goes_lightning": goes_lightning.poll,
+        "goes_smoke": goes_smoke.poll,
+        "rtma_ru": rtma_ru.poll,
+    }
+    if get_settings().firms_map_key:
+        jobs["landsat_nrt"] = landsat_nrt.poll
+    return jobs
+
+
+def _tick_live() -> None:
+    with connect() as conn:
+        now = utcnow()
+        notify.hold_tick(conn, now, is_sample=get_settings().mode == "sample",
+                         skip_slugs=[p.stem for p in scenario.SCENARIOS_DIR.glob("*.json")])
+        notify.tick(conn, now, is_sample=False)
+        posts.tick(conn, now, is_sample=get_settings().mode == "sample")
+
+
+async def _tick_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(_tick_live)
         except Exception:
-            log.exception("FIRMS poll failed")
-        await asyncio.sleep(minutes * 60)
+            log.exception("response tick failed")
+        await asyncio.sleep(TICK_SECONDS)
+
+
+async def _mesh_loop() -> None:
+    """Keep the server's Meshtastic radio connected; reconnect if it is unplugged or reboots."""
+    while True:
+        if mesh.get_bridge() is None:
+            try:
+                await asyncio.to_thread(mesh.start)
+            except Exception:
+                log.exception("mesh connect failed")
+        await asyncio.sleep(MESH_RETRY_SECONDS)
+
+
+async def _sensor_sim_loop() -> None:
+    """Install the simulated sensor network if it isn't there, then report from it every couple of minutes."""
+    def seed():
+        with connect() as conn:
+            if not sensor_sim.installed(conn):
+                sensor_sim.seed(conn)
+
+    try:
+        await asyncio.to_thread(seed)
+    except Exception:
+        log.exception("sensor sim seed failed")
+        return
+    while True:
+        await asyncio.sleep(sensor_sim.TICK_S)
+        try:
+            def tick():
+                with connect() as conn:
+                    sensor_sim.tick(conn)
+            await asyncio.to_thread(tick)
+        except Exception:
+            log.exception("sensor sim tick failed")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _poll_task
     init_db()
+    with connect() as conn:
+        conn.execute("UPDATE replay_clock SET running = 0")
     s = get_settings()
-    if s.mode == "sample" and not sample.sample_is_current():
+    try:
+        with connect() as conn:
+            log.info("district %s: %d contacts", s.district, sync_roster(conn))
+    except FileNotFoundError:
+        log.warning("no district data for %s; texting is off", s.district)
+    if s.mode == "sample" and not sample.has_sample_events():
         n = await asyncio.to_thread(sample.load_all_now)
         log.info("loaded %d sample fixtures", n)
     if s.mode == "live":
-        _poll_task = asyncio.create_task(_poll_loop())
+        intervals = s.source_intervals
+        _tasks.extend(asyncio.create_task(_source_loop(n, intervals[n], job)) for n, job in poll_jobs().items())
+    _tasks.append(asyncio.create_task(_tick_loop()))
+    if s.mesh_gateway != "off":
+        _tasks.append(asyncio.create_task(_mesh_loop()))
+    if s.sensor_sim:
+        _tasks.append(asyncio.create_task(_sensor_sim_loop()))
     yield
-    if _poll_task:
-        _poll_task.cancel()
+    with connect() as conn:
+        conn.execute("UPDATE replay_clock SET running = 0")
+    for t in _tasks:
+        t.cancel()
+    _tasks.clear()
+    mesh.stop()
+
+
+def require_admin(x_firewatch_token: str = Header(default="")) -> None:
+    """Admin routes mint credentials, so a blank token fails closed outside sample mode."""
+    s = get_settings()
+    if not s.api_token and s.mode != "sample":
+        raise HTTPException(503, "set API_TOKEN to use admin routes")
+    require_token(x_firewatch_token)
+
+
+def require_token(x_firewatch_token: str = Header(default="")) -> None:
+    token = get_settings().api_token
+    if token and not hmac.compare_digest(token, x_firewatch_token):
+        raise HTTPException(401, "missing or wrong X-Firewatch-Token")
 
 
 app = FastAPI(title="Firewatch Confirmation Layer", lifespan=lifespan)
-# One bar of signal: compress anything over 500 bytes.
-app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in get_settings().cors_origins.split(",")],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=500)
 api = APIRouter(prefix="/api")
-
-
-@app.exception_handler(RequestValidationError)
-async def _validation_error(_: Request, exc: RequestValidationError):
-    # FastAPI's default 422 echoes the rejected input back. That would put a phone number in the
-    # response (and in any proxy log), so report only where the problem is and what it is.
-    errors = [{"loc": list(e["loc"]), "msg": e["msg"], "type": e["type"]} for e in exc.errors()]
-    return JSONResponse(status_code=422, content={"detail": errors})
 
 RECOMMENDATION_ORDER = {"escalate": 0, "investigate": 1, "monitor": 2}
 TRANSITIONS = {
-    "acknowledge": ({"new"}, "acknowledged"),
+    "acknowledge": ({"new", "acknowledged", "escalated"}, "acknowledged"),
     "escalate": ({"new", "acknowledged"}, "escalated"),
     "dismiss": ({"new", "acknowledged", "escalated"}, "dismissed"),
     "reopen": ({"acknowledged", "escalated", "dismissed", "closed"}, "new"),
@@ -87,8 +211,6 @@ def _sources(conn, event_id: int) -> dict[str, int]:
     for r in conn.execute("SELECT source FROM detections WHERE event_id = ?", (event_id,)):
         family = r["source"].split("_")[0]
         out[family] = out.get(family, 0) + 1
-    for r in conn.execute("SELECT kind FROM signals WHERE event_id = ?", (event_id,)):
-        out[r["kind"]] = out.get(r["kind"], 0) + 1
     return out
 
 
@@ -101,8 +223,6 @@ def _summary(conn, ev) -> dict:
     ).fetchone()
     reasons = loads(latest["reasons_json"], []) if latest else []
     top = next((r for r in reasons if r["contribution"] > 0), reasons[0] if reasons else None)
-    if ev["suppression"] == "logged_burn" and reasons:
-        top = reasons[0]
     return {
         "id": ev["id"],
         "lat": ev["lat"],
@@ -120,9 +240,54 @@ def _summary(conn, ev) -> dict:
         "suppression": ev["suppression"],
         "reraised": bool(ev["reraised"]),
         "sources": _sources(conn, ev["id"]),
+        "signals": _signal_counts(conn, ev["id"]),
         "top_reason": top["label"] if top else None,
+        "level_reason": ev["level_reason"],
+        "evidence": loads(ev["evidence_json"], []),
+        "response": _response_brief(conn, ev),
         "is_sample": bool(ev["is_sample"]),
         "sample_slug": ev["sample_slug"],
+    }
+
+
+def _signal_counts(conn, event_id: int) -> dict[str, int]:
+    return {r["kind"]: r["n"] for r in conn.execute(
+        "SELECT kind, COUNT(*) n FROM signals WHERE event_id = ? GROUP BY kind", (event_id,)
+    )}
+
+
+def _response_brief(conn, ev) -> dict | None:
+    """Where the response stands: who Firewatch is waiting on, and what has gone out."""
+    state = loads(ev["response_json"], None)
+    if not state:
+        return None
+    awaiting = None
+    if not state.get("decision"):
+        if state.get("escalate_at"):
+            step = state.get("ladder_step", 1) - 1
+            ladder = [r["name"] for r in conn.execute(
+                "SELECT name FROM contacts WHERE ladder_rank IS NOT NULL ORDER BY ladder_rank"
+            )]
+            awaiting = ladder[step] if 0 <= step < len(ladder) else "County Dispatch (voice call)"
+        else:
+            awaiting = "neighbor replies"
+    ma = state.get("mutual_aid")
+    return {
+        "investigate_at": state.get("investigate_at"),
+        "escalate_at": state.get("escalate_at"),
+        "awaiting": awaiting,
+        "decision": state.get("decision"),
+        "decision_by": state.get("decision_by"),
+        "decision_at": state.get("decision_at"),
+        "page_at": state.get("page_at"),
+        "ladder": state.get("ladder", []),
+        "responders": state.get("responders", []),
+        "mutual_aid": ma,
+        "plan": state.get("plan"),
+        "texts_sent": conn.execute(
+            "SELECT COUNT(*) n FROM messages WHERE event_id = ? AND direction = 'out'", (ev["id"],)
+        ).fetchone()["n"],
+        "crew": mesh.crew_positions(conn, ev["lat"], ev["lon"]),
     }
 
 
@@ -135,13 +300,24 @@ def list_alerts(
 ):
     statuses = [s.strip() for s in status.split(",") if s.strip()]
     since = iso(utcnow() - timedelta(hours=since_hours))
+    live = get_settings().mode == "live"
+    # Live mode hides the frozen sample fixtures but keeps scenario replay events, which are
+    # is_sample = 1 rows tagged with a scenario slug.
+    scenario_slugs = [p.stem for p in scenario.SCENARIOS_DIR.glob("*.json")] if live else []
+    sample_clause = (
+        f"(is_sample = 1 AND sample_slug IN ({','.join('?' * len(scenario_slugs))}))" if live and scenario_slugs
+        else "0" if live else "is_sample = 1"
+    )
+    if live:  # smoke from the simulated sensor network is a sample event, but it belongs on the live map
+        sample_clause = f"({sample_clause} OR (is_sample = 1 AND sample_slug IS NULL AND id IN ({_SIM_SMOKE_EVENTS})))"
     with connect() as conn:
         rows = conn.execute(
             f"SELECT * FROM events WHERE status IN ({','.join('?' * len(statuses))}) "
-            "AND score IS NOT NULL AND (is_sample = 1 OR last_seen >= ?)",
-            (*statuses, since),
+            f"AND recommendation IS NOT NULL AND ({sample_clause} OR (is_sample = 0 AND last_seen >= ?))",
+            (*statuses, *scenario_slugs, since),
         ).fetchall()
-        alerts, suppressed = [], {"total": 0, "static_source": 0, "likely_prescribed": 0, "logged_burn": 0, "low_signal": 0}
+        suppressed = {"total": 0, "static_source": 0, "likely_prescribed": 0, "registered_burn": 0, "low_signal": 0}
+        alerts = []
         for ev in rows:
             if ev["recommendation"] == "monitor":
                 suppressed["total"] += 1
@@ -149,10 +325,15 @@ def list_alerts(
                     suppressed[ev["suppression"]] += 1
                 if not include_monitor:
                     continue
-            if ev["score"] < min_score:
+            # Signal-only events have no satellite score; the score filter applies to satellite evidence.
+            if ev["score"] is not None and ev["score"] < min_score:
                 continue
             alerts.append(_summary(conn, ev))
-    alerts.sort(key=lambda a: (RECOMMENDATION_ORDER.get(a["recommendation"], 9), -a["score"], a["last_seen"]))
+    alerts.sort(key=lambda a: (
+        RECOMMENDATION_ORDER.get(a["recommendation"], 9),
+        -(a["score"] if a["score"] is not None else 101),
+        a["last_seen"],
+    ))
     return {"mode": get_settings().mode, "generated_at": iso(utcnow()), "alerts": alerts, "suppressed": suppressed}
 
 
@@ -191,168 +372,31 @@ def get_alert(event_id: int):
         out["actions"] = [dict(r) for r in conn.execute(
             "SELECT action, operator, note, created_at FROM actions WHERE event_id = ? ORDER BY id DESC", (event_id,)
         )]
+        out["signal_list"] = [dict(r) for r in conn.execute(
+            "SELECT s.id, s.kind, s.lat, s.lon, s.observed_at, s.source, s.value, c.name AS contact_name "
+            "FROM signals s LEFT JOIN contacts c ON c.id = s.contact_id WHERE s.event_id = ? ORDER BY s.observed_at",
+            (event_id,),
+        )]
+        out["messages"] = _messages(conn, event_id=event_id)
         out["nearest_assets"] = nearest_assets(ev["lat"], ev["lon"])
-        out["signals"] = [
-            {"id": r["id"], "kind": r["kind"], "lat": r["lat"], "lon": r["lon"], "time": r["time"], **_signal_public(r)}
-            for r in conn.execute("SELECT * FROM signals WHERE event_id = ? ORDER BY time", (event_id,))
-        ]
-        out["data_age"] = _data_age(conn, ev, out["detections"], out["signals"], out["weather"])
     return out
 
 
-def _signal_public(row) -> dict:
-    """What the screen may show of a signal. A reporter's phone number is never sent back out."""
-    p = loads(row["payload_json"], {})
-    if row["kind"] == "line_fault":
-        return {"circuit": p.get("circuit"), "fault_kind": p.get("kind")}
-    phone = p.get("phone") or ""
-    return {"text": p.get("text"), "phone_last4": phone[-4:] if phone else None}
+def _mask(phone: str | None) -> str | None:
+    return None if phone is None else f"…{phone[-4:]}"
 
 
-def _data_age(conn, ev, detections: list[dict], signals: list[dict], weather: dict) -> list[dict]:
-    """One row per source with when it was last heard from, so the screen can say "3 min ago".
-    A source with no timestamp keeps its row with last_seen null: a gap, not a quiet "no fire"."""
-    rows: list[dict] = []
-    latest_by_source: dict[str, str] = {}
-    for d in detections:
-        latest_by_source[d["source"]] = max(latest_by_source.get(d["source"], ""), d["acq_time"])
-    for source, t in sorted(latest_by_source.items(), key=lambda kv: kv[1], reverse=True):
-        rows.append({"source": source, "label": "Satellite", "last_seen": t})
-    for kind, label in (("line_fault", "Line fault"), ("report", "Public report")):
-        times = [x for x in signals if x["kind"] == kind]
-        if times:
-            last = max(times, key=lambda x: x["time"])
-            rows.append({"source": last.get("circuit") or kind, "label": label, "last_seen": last["time"]})
-    if weather:
-        station = re.sub(r"\s*\([^)]*\)\s*$", "", weather.get("station") or "") or None  # "Medicine Lodge airport (K51)" -> "Medicine Lodge airport"
-        rows.append({
-            "source": station or weather.get("source") or "weather",
-            "label": f"Weather ({station})" if station else "Weather",
-            "last_seen": weather.get("observed_at"),
-        })
-    return rows
-
-
-def _utc_iso(dt: datetime) -> str:
-    return iso(dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc))
-
-
-class BurnIn(BaseModel):
-    lat: float = Field(ge=-90, le=90)
-    lon: float = Field(ge=-180, le=180)
-    start: datetime
-    end: datetime
-    called_in: datetime | None = None
-    caller: str = Field(min_length=1, max_length=80)
-    label: str | None = Field(default=None, max_length=120)
-
-    @model_validator(mode="after")
-    def _window(self):
-        if self.end <= self.start:
-            raise ValueError("end must be after start")
-        # A logged burn hides real fires near it, so its window is bounded.
-        if self.end - self.start > timedelta(hours=24):
-            raise ValueError("a burn window can be at most 24 hours")
-        start = self.start if self.start.tzinfo else self.start.replace(tzinfo=timezone.utc)
-        if start - datetime.now(timezone.utc) > timedelta(days=14):
-            raise ValueError("a burn can be logged at most 14 days ahead")
-        return self
-
-
-@api.post("/burns", status_code=201)
-def post_burn(body: BurnIn):
-    called_in = body.called_in or utcnow()
-    with connect() as conn:
-        r = add_burn(conn, body.lat, body.lon, _utc_iso(body.start), _utc_iso(body.end), _utc_iso(called_in),
-                     body.caller, body.label, is_sample=get_settings().mode == "sample")
-        return _burn_row(conn.execute("SELECT * FROM burns WHERE id = ?", (r["id"],)).fetchone())
-
-
-def _burn_row(b) -> dict:
-    return {"id": b["id"], "lat": b["lat"], "lon": b["lon"], "start": b["start"], "end": b["end"],
-            "called_in": b["called_in"], "caller": b["caller"], "label": b["label"], "is_sample": bool(b["is_sample"])}
-
-
-@api.get("/burns")
-def list_burns():
-    with connect() as conn:
-        return {"burns": [_burn_row(b) for b in conn.execute('SELECT * FROM burns ORDER BY "start", id')]}
-
-
-def _recent(v: datetime | None) -> datetime | None:
-    """Live signal times: within the last 48 hours, at most 10 minutes ahead (clocks drift)."""
-    if v is None:
-        return v
-    t = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
-    now = utcnow()
-    if t < now - timedelta(hours=48) or t > now + timedelta(minutes=10):
-        raise ValueError("time must be within the last 48 hours and not in the future")
-    return v
-
-
-class LineFaultIn(BaseModel):
-    lat: float = Field(ge=-90, le=90)
-    lon: float = Field(ge=-180, le=180)
-    time: datetime | None = None
-    circuit: str = Field(min_length=1, max_length=80)
-    kind: str = Field(default="fault", min_length=1, max_length=40)
-
-    _time_ok = field_validator("time")(_recent)
-
-
-PHONE_RE = re.compile(r"^\+?[0-9]{7,15}$")
-
-
-class ReportIn(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
-    lat: float = Field(ge=-90, le=90)
-    lon: float = Field(ge=-180, le=180)
-    text: str = Field(min_length=1, max_length=500)
-    phone: str | None = Field(default=None, max_length=30)
-    time: datetime | None = None
-
-    _time_ok = field_validator("time")(_recent)
-
-    @field_validator("phone")
-    @classmethod
-    def _phone(cls, v: str | None):
-        if v is None or v == "":
-            return None
-        cleaned = re.sub(r"[\s().-]", "", v)
-        if not PHONE_RE.match(cleaned):
-            raise ValueError("phone must be 7 to 15 digits, with an optional leading +")  # never echo the value
-        return cleaned
-
-
-def _signal_weather() -> dict | None:
-    """Sample mode has no live weather feed; hand-posted signals use the scenario's weather."""
-    return sample.scenario_weather() if get_settings().mode == "sample" else None
-
-
-def _signal_result(conn, r: dict) -> dict:
-    out = dict(r)
-    if r["event_id"]:
-        ev = conn.execute("SELECT score, recommendation FROM events WHERE id = ?", (r["event_id"],)).fetchone()
-        out.update(score=ev["score"], recommendation=ev["recommendation"])
-    return out
-
-
-@api.post("/signals/line-fault", status_code=201)
-def post_line_fault(body: LineFaultIn):
-    when = _utc_iso(body.time) if body.time else iso(utcnow())
-    with connect() as conn:
-        r = process_line_fault(conn, body.lat, body.lon, when, body.circuit, body.kind,
-                               is_sample=get_settings().mode == "sample", weather=_signal_weather())
-        return _signal_result(conn, r)
-
-
-@api.post("/signals/report", status_code=201)
-def post_report(body: ReportIn):
-    when = _utc_iso(body.time) if body.time else iso(utcnow())
-    with connect() as conn:
-        r = process_report(conn, body.lat, body.lon, when, body.text, body.phone,
-                           is_sample=get_settings().mode == "sample", weather=_signal_weather())
-        return _signal_result(conn, r)
+def _messages(conn, event_id: int | None = None, limit: int = 300) -> list[dict]:
+    q = (
+        "SELECT m.id, m.event_id, m.direction, m.purpose, m.body, m.status, m.created_at, m.phone, m.channel, "
+        "c.name AS contact_name, c.role AS contact_role FROM messages m LEFT JOIN contacts c ON c.id = m.contact_id"
+    )
+    args: tuple = ()
+    if event_id is not None:
+        q += " WHERE m.event_id = ?"
+        args = (event_id,)
+    rows = conn.execute(q + " ORDER BY m.id DESC LIMIT ?", (*args, limit)).fetchall()
+    return [{**dict(r), "phone": _mask(r["phone"])} for r in reversed(rows)]
 
 
 class ActionIn(BaseModel):
@@ -361,20 +405,45 @@ class ActionIn(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
-@api.post("/alerts/{event_id}/actions")
+@api.post("/alerts/{event_id}/actions", dependencies=[Depends(require_token)])
 def act_on_alert(event_id: int, body: ActionIn):
     allowed_from, new_status = TRANSITIONS[body.action]
     with connect() as conn:
         ev = _get_event(conn, event_id)
         if ev["status"] not in allowed_from:
             raise HTTPException(400, f"cannot {body.action} an alert that is {ev['status']}")
-        now = iso(utcnow())
-        conn.execute(
-            "INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, ?, ?, ?)",
-            (event_id, body.action, body.operator, body.note, now),
-        )
-        conn.execute("UPDATE events SET status = ?, updated_at = ? WHERE id = ?", (new_status, now, event_id))
+        clock = (scenario.clock_now(ev["sample_slug"]) if ev["is_sample"] else None) or utcnow()
+        if body.action == "acknowledge":
+            r = notify.acknowledge(conn, event_id=event_id, by=body.operator, role="operator", now=clock, note=body.note)
+            if not r["ok"]:
+                raise HTTPException(409, f"cannot acknowledge: {r['refused']}")
+        else:
+            conn.execute(
+                "INSERT INTO actions(event_id, action, operator, note, created_at) VALUES (?, ?, ?, ?, ?)",
+                (event_id, body.action, body.operator, body.note, iso(clock)),
+            )
+            conn.execute("UPDATE events SET status = ?, updated_at = ? WHERE id = ?", (new_status, iso(clock), event_id))
+            if body.action == "dismiss":
+                notify.clear_hold(conn, event_id)
+            else:
+                notify.release_hold(conn, event_id, clock)
+        fw1_feed.sync_event(conn, event_id, clock)
     return get_alert(event_id)
+
+
+@api.get("/alerts/{event_id}/cap.xml")
+def alert_cap(event_id: int, polygon: bool = False):
+    """The alert as CAP 1.2 (status Exercise for scenario, replay and sample events). `polygon=true` adds the
+    60-minute forecast outline, which runs the forecast (cached after the first call)."""
+    d = get_alert(event_id)
+    ring = None
+    if polygon:
+        try:
+            step = next(st for st in alert_forecast(event_id)["steps"] if st["ahead_min"] == 60)
+            ring = cap.ring_from_multipolygon(step["likely"]["coordinates"])
+        except Exception:  # the outline is a nice-to-have; the circle on the fire always goes out
+            log.exception("cap polygon unavailable for event %s", event_id)
+    return Response(cap.to_cap(d, area_ring=ring), media_type="application/cap+xml")
 
 
 _sim_cache: dict[tuple, dict] = {}
@@ -404,13 +473,51 @@ def simulate_alert(
             lat=ev["lat"], lon=ev["lon"], wind_kmh=key[2], wind_from_deg=key[3] % 360,
             temp_c=f.get("temp_c", 15.0), rh_pct=f.get("rh_pct", 50.0),
             curing_pct=f.get("curing_pct", default_curing(month)),
-            minutes=minutes, ignitions=[(r["lat"], r["lon"]) for r in dets],
+            minutes=minutes, ignitions=[(r["lat"], r["lon"]) for r in dets] or None, use_fuel=True, month=month,
         ))
         result["event_id"] = event_id
         result["observed_wind"] = {"from_deg": round(observed_dir), "kmh": round(observed_wind, 1)}
         result["overridden"] = wind_kmh is not None or wind_from_deg is not None
         _sim_cache[key] = result
     return _sim_cache[key]
+
+
+def _public(result: dict) -> dict:
+    return {k: v for k, v in result.items() if not k.startswith("_")}
+
+
+_forecast_cache: dict[tuple, dict] = {}
+
+
+@api.get("/scenario/{slug}/situation")
+def get_scenario_situation(slug: str, weather: str | None = None):
+    """The scenario as a Situation: the forecast's input, with provenance on every block."""
+    try:
+        return scenario_situation(slug, weather).model_dump(mode="json")
+    except FileNotFoundError:
+        raise HTTPException(404, "unknown scenario or weather variant") from None
+
+
+@api.get("/scenario/{slug}/forecast")
+def scenario_forecast(
+    slug: str,
+    minutes: int = Query(120, ge=10, le=240),
+    members: int = Query(24, ge=1, le=64),
+    weather: str | None = Query(None, description="named weather variant, e.g. 'front'"),
+):
+    key = (slug, weather, minutes, members)
+    if key not in _forecast_cache:
+        try:
+            sit = scenario_situation(slug, weather)
+        except FileNotFoundError:
+            raise HTTPException(404, "unknown scenario or weather variant") from None
+        _forecast_cache[key] = _public(forecast(sit, minutes, members)) | {"scenario": slug, "weather_variant": weather}
+    return _forecast_cache[key]
+
+
+@api.post("/forecast")
+def forecast_situation(sit: Situation, minutes: int = Query(120, ge=10, le=240), members: int = Query(24, ge=1, le=64)):
+    return _public(forecast(sit, minutes, members))
 
 
 @api.get("/layers/{name}")
@@ -420,6 +527,103 @@ def get_layer(name: str):
     return load_layer(name)
 
 
+FEEDS_DIR = DATA_DIR / "samples" / "feeds"
+FEED_NAMES = tuple(n for n in get_settings().source_intervals if n != "firms")
+
+
+@api.get("/feeds/{name}")
+def get_feed(name: str):
+    """Latest snapshot of a context feed. In sample mode or before the first poll, a labeled fixture."""
+    if name not in FEED_NAMES:
+        raise HTTPException(404, f"unknown feed; choose from {', '.join(FEED_NAMES)}")
+    if get_settings().mode != "sample":
+        with connect() as conn:
+            snap = load_snapshot(conn, name)
+        if snap:
+            return {"feed": name, "fixture": False, **snap}
+    path = FEEDS_DIR / f"{name}.json"
+    if not path.exists():
+        raise HTTPException(404, f"no data yet for {name}")
+    return {"feed": name, "fixture": True, "fetched_at": None, "data": json.loads(path.read_text())}
+
+
+def _grid_cells() -> list[dict]:
+    return get_feed("open_meteo")["data"]["cells"]
+
+
+RTMA_MAX_AGE_S = 2 * 3600  # RTMA-RU lags about 17 min; older than 2 h means the feed has stalled
+
+
+def _fresh_rtma() -> dict | None:
+    """Latest RTMA-RU snapshot, or None when absent, a fixture, or too old to prefer."""
+    if get_settings().mode == "sample":
+        return None
+    try:
+        feed = get_feed("rtma_ru")
+    except HTTPException:
+        return None
+    if feed["fixture"] or not feed["data"].get("valid_time"):
+        return None
+    age = (datetime.now(timezone.utc) - datetime.fromisoformat(feed["data"]["valid_time"])).total_seconds()
+    return feed["data"] if age <= RTMA_MAX_AGE_S else None
+
+
+def _vpd_kpa(temp_c: float, rh: float) -> float:
+    es = 0.6108 * math.exp(17.27 * temp_c / (temp_c + 237.3))
+    return round(es * (1 - rh / 100), 2)
+
+
+@api.get("/risk/grid")
+def risk_grid_route():
+    """Open-Meteo grid, with temperature, dew point, RH and VPD replaced by the
+    RTMA-RU analysis when it is fresh. Wind and forecast fields stay Open-Meteo. `source`
+    says which one the humidity came from."""
+    feed = get_feed("open_meteo")
+    cells = [dict(c) for c in feed["data"]["cells"]]
+    rtma = _fresh_rtma()
+    source = "open_meteo"
+    if rtma:
+        by = {(round(p["lat"], 3), round(p["lon"], 3)): p for p in rtma["points"]}
+        hit = 0
+        for c in cells:
+            p = by.get((round(c["lat"], 3), round(c["lon"], 3)))
+            if p:
+                c.update(temp_c=p["temp_c"], dew_c=p["dew_c"], rh=p["rh"],
+                         vpd_kpa=_vpd_kpa(p["temp_c"], p["rh"]), valid_time=rtma["valid_time"])
+                hit += 1
+        if hit:
+            source = "rtma_ru"
+    feats = [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [c["lon"], c["lat"]]},
+              "properties": {k: v for k, v in c.items() if k not in ("lat", "lon")}} for c in cells]
+    return {"type": "FeatureCollection", "features": feats, "fixture": feed["fixture"],
+            "fetched_at": feed["fetched_at"], "source": source}
+
+
+@api.get("/risk/lines-under-wind")
+def lines_under_wind():
+    """Transmission lines whose nearest grid cell forecasts gusts at or above the flag threshold in the next 12 h."""
+    feed = get_feed("open_meteo")
+    cells = feed["data"]["cells"]
+    thr = get_settings().wind_gust_flag_kmh
+    seg = segment_index()
+    out: dict[int, float] = {}
+    if cells and len(seg.owner):
+        cy = np.array([c["lat"] for c in cells])
+        cx = np.array([c["lon"] for c in cells])
+        cg = np.array([c["gust_max_12h_kmh"] if c["gust_max_12h_kmh"] is not None else -1.0 for c in cells])
+        mx, my = (seg.ax + seg.bx) / 2, (seg.ay + seg.by) / 2
+        for k in range(0, len(mx), 2000):
+            d = (mx[k:k + 2000, None] - cx[None]) ** 2 + (my[k:k + 2000, None] - cy[None]) ** 2
+            g = cg[d.argmin(axis=1)]
+            for o, gv in zip(seg.owner[k:k + 2000], g):
+                if gv >= thr:
+                    out[int(o)] = max(out.get(int(o), 0.0), float(gv))
+    feats = [{"type": "Feature", "geometry": load_layer("power_lines")["features"][o]["geometry"],
+              "properties": {**seg.props[o], "max_gust_kmh": round(g, 1)}} for o, g in out.items()]
+    return {"type": "FeatureCollection", "features": feats, "threshold_kmh": thr,
+            "fixture": feed["fixture"], "fetched_at": feed["fetched_at"]}
+
+
 @api.get("/health")
 def health():
     s = get_settings()
@@ -427,40 +631,48 @@ def health():
     sources = {}
     with connect() as conn:
         rows = {r["source"]: r for r in conn.execute("SELECT * FROM source_health")}
-    for name in ("firms", "open_meteo"):
+    for name, interval_s in s.source_intervals.items():
         r = rows.get(name)
         if s.mode == "sample":
-            sources[name] = {"status": "sample", "age_min": None, "last_ok": None, "last_error": None}
+            sources[name] = {"status": "sample", "age_min": None, "last_ok": None, "last_error": None,
+                             "interval_s": interval_s}
             continue
+        last_error = redact(r["last_error"]) if r else None
         if r is None or r["last_ok"] is None:
-            sources[name] = {"status": "down", "age_min": None, "last_ok": None,
-                             "last_error": r["last_error"] if r else None}
+            status = "skipped" if name in ("firms", "landsat_nrt") and not s.firms_map_key else "down"
+            sources[name] = {"status": status, "age_min": None, "last_ok": None, "last_error": last_error,
+                             "interval_s": interval_s}
             continue
-        age = (now - parse_iso(r["last_ok"])).total_seconds() / 60
-        status = "ok" if age < 15 else "stale" if age < 60 else "down"
-        sources[name] = {"status": status, "age_min": round(age), "last_ok": r["last_ok"], "last_error": r["last_error"]}
+        age_s = (now - parse_iso(r["last_ok"])).total_seconds()
+        # stale at 3 intervals, down at 12
+        status = "ok" if age_s < 3 * interval_s else "stale" if age_s < 12 * interval_s else "down"
+        sources[name] = {"status": status, "age_min": round(age_s / 60), "last_ok": r["last_ok"],
+                         "last_error": last_error, "interval_s": interval_s}
+    if (m := mesh.health()) is not None:
+        sources["mesh"] = m
     return {
         "mode": s.mode,
         "firms_key_configured": bool(s.firms_map_key),
+        "llm_configured": bool(s.openrouter_api_key),
         "replay_running": sample.replay_running(),
         "sources": sources,
     }
 
 
-@api.post("/ingest/run")
+@api.post("/ingest/run", dependencies=[Depends(require_admin)])
 async def ingest_run():
     if get_settings().mode == "sample":
         raise HTTPException(400, "ingest is disabled in sample mode; use /api/sample/replay")
     return await asyncio.to_thread(poll_firms_once)
 
 
-@api.post("/sample/replay")
+@api.post("/sample/replay", dependencies=[Depends(require_admin)])
 async def sample_replay(duration_s: float = Query(60, ge=5, le=600)):
     sample.start_replay(duration_s)
     return {"status": "started", "duration_s": duration_s, "fixtures": len(sample.load_fixtures())}
 
 
-@api.post("/sample/load")
+@api.post("/sample/load", dependencies=[Depends(require_admin)])
 async def sample_load():
     n = await asyncio.to_thread(sample.load_all_now)
     return {"status": "loaded", "fixtures": n}
@@ -474,9 +686,528 @@ def sample_fixtures():
     ]
 
 
-app.include_router(alerts_router)  # Respond: CAP, in-path, messages, notify (dry-run unless FIREWATCH_NOTIFY_LIVE=1)
-app.include_router(lite_router)  # Low-data: /lite page (no JS) and /api/lite/alerts
+SIGNAL_PAST = timedelta(hours=48)
+SIGNAL_FUTURE = timedelta(minutes=10)
+
+
+class SignalIn(BaseModel):
+    """`line_fault` is the co-op feed. `report` is the public report (a located text from someone: it counts as a
+    weak source, so it reaches Investigate alone and Escalate with a second source). Both are accepted here already."""
+
+    kind: Literal["line_fault", "report", "camera_smoke", "sensor_smoke"]
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    observed_at: str | None = None
+    source: str = Field(min_length=1, max_length=80)
+    value: str | None = Field(default=None, max_length=200)
+
+    @field_validator("source", "value")
+    @classmethod
+    def _strip(cls, v: str | None):
+        return v.strip() if isinstance(v, str) else v
+
+    @field_validator("observed_at")
+    @classmethod
+    def _recent(cls, v: str | None):
+        """Within the last 48 hours and at most 10 minutes ahead (clocks drift)."""
+        if v is None:
+            return v
+        try:
+            t = parse_iso(v)
+        except ValueError:
+            raise ValueError("observed_at must be ISO 8601") from None
+        t = t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        now = utcnow()
+        if t < now - SIGNAL_PAST or t > now + SIGNAL_FUTURE:
+            raise ValueError("observed_at must be within the last 48 hours and at most 10 minutes ahead")
+        return iso(t)
+
+    @model_validator(mode="after")
+    def _needs_text(self):
+        if self.source == "":
+            raise ValueError("source must not be blank")
+        if self.kind == "report" and not self.value:
+            raise ValueError("a report needs its text")
+        return self
+
+
+@api.post("/signals", dependencies=[Depends(require_token)])
+def post_signal(body: SignalIn, x_firewatch_operator_token: str = Header(default="")):
+    """Line faults (co-op feed), camera smoke, or a located public report. Attaches to an event and re-levels it.
+    Any texts this causes are real only with the operator token; without it they are held (see livesend.py)."""
+    observed = body.observed_at or iso(utcnow())
+    sample_mode = get_settings().mode == "sample"
+    with livesend.operator(x_firewatch_operator_token), connect() as conn:
+        eid = add_signal(conn, body.kind, body.lat, body.lon, observed, body.source, body.value, is_sample=sample_mode)
+        result = evaluate_event(conn, eid)
+    return {"event_id": eid, **result}
+
+
+class BurnIn(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+    start: datetime
+    end: datetime
+    called_in: datetime | None = None
+    caller: str = Field(min_length=1, max_length=80)
+    label: str | None = Field(default=None, max_length=120)
+
+    @field_validator("caller", "label")
+    @classmethod
+    def _strip(cls, v: str | None):
+        return v.strip() if isinstance(v, str) else v
+
+    @model_validator(mode="after")
+    def _window(self):
+        # A logged burn hides real fires near it, so its window is bounded.
+        utc = lambda t: t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        start, end = utc(self.start), utc(self.end)
+        if end <= start:
+            raise ValueError("end must be after start")
+        if end - start > timedelta(hours=24):
+            raise ValueError("a burn window can be at most 24 hours")
+        if start - utcnow() > timedelta(days=14):
+            raise ValueError("a burn can be logged at most 14 days ahead")
+        if not self.caller:
+            raise ValueError("caller must not be blank")
+        self.start, self.end = start, end
+        if self.called_in is not None:
+            self.called_in = utc(self.called_in)
+        return self
+
+
+def _burn_row(b) -> dict:
+    return {"id": b["id"], "lat": b["lat"], "lon": b["lon"], "start": b["start_at"], "end": b["end_at"],
+            "called_in": b["created_at"], "caller": b["caller"], "label": b["label"], "is_sample": bool(b["is_sample"])}
+
+
+@api.post("/burns", status_code=201, dependencies=[Depends(require_token)])
+def post_burn(body: BurnIn):
+    """Log a burn someone phoned in. It goes in the same table as text-registered burns (the permits), so confirm.py
+    treats it the same way: a detection inside its radius and window stays at Monitor until the fire shows escape."""
+    try:
+        radius = float(load_district().settings.get("burn_radius_km", 1.5))
+    except FileNotFoundError:
+        radius = 1.5
+    called_in = body.called_in or utcnow()
+    local_date = body.start.astimezone(ZoneInfo("America/Chicago")).date().isoformat()
+    with connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO burn_notices(contact_id, lat, lon, radius_km, burn_date, is_sample, created_at, start_at, end_at, caller, label) "
+            "VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (body.lat, body.lon, radius, local_date, int(get_settings().mode == "sample"), iso(called_in),
+             iso(body.start), iso(body.end), body.caller, body.label),
+        )
+        return _burn_row(conn.execute("SELECT * FROM burn_notices WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+@api.get("/burns", dependencies=[Depends(require_token)])  # caller names are personal data
+def list_burns():
+    """Logged burns (called in with a window), soonest first."""
+    with connect() as conn:
+        rows = conn.execute("SELECT * FROM burn_notices WHERE start_at IS NOT NULL ORDER BY start_at, id").fetchall()
+    return {"burns": [_burn_row(b) for b in rows]}
+
+
+@api.post("/sms/inbound")
+async def sms_inbound(request: Request):
+    """Twilio inbound webhook (form-encoded From/Body). Replies go out through the gateway, not TwiML."""
+    s = get_settings()
+    params = dict(parse_qsl((await request.body()).decode()))
+    if s.sms_gateway == "twilio":
+        url = f"{s.public_base_url.rstrip('/')}{request.url.path}"
+        if not notify.valid_twilio_signature(s.twilio_auth_token, url, params, request.headers.get("X-Twilio-Signature", "")):
+            raise HTTPException(403, "bad Twilio signature")
+    else:
+        require_admin(request.headers.get("X-Firewatch-Token", ""))
+    phone, text = params.get("From"), params.get("Body", "")
+    if not phone:
+        raise HTTPException(422, "From is required")
+
+    def handle():
+        with connect() as conn:
+            replay_now = scenario.running_now()
+            notify.handle_inbound(conn, phone, text, replay_now or utcnow(), is_sample=replay_now is not None or s.mode == "sample")
+
+    await asyncio.to_thread(handle)
+    return Response('<?xml version="1.0" encoding="UTF-8"?><Response/>', media_type="application/xml")
+
+
+class SimulatedSms(BaseModel):
+    from_: str = Field(alias="from", min_length=3, max_length=20)
+    body: str = Field(min_length=1, max_length=320)
+
+
+@api.post("/sms/simulate", dependencies=[Depends(require_token)])
+def sms_simulate(msg: SimulatedSms):
+    """Pretend a phone texted Firewatch (sample mode only, so it never texts real people)."""
+    if get_settings().mode != "sample":
+        raise HTTPException(400, "simulated texts are only allowed in sample mode")
+    with connect() as conn:
+        return notify.handle_inbound(conn, msg.from_, msg.body, scenario.running_now() or utcnow(), is_sample=True)
+
+
+@api.get("/messages", dependencies=[Depends(require_admin)])
+def list_messages(event_id: int | None = None, limit: int = Query(300, ge=1, le=2000)):
+    with connect() as conn:
+        return _messages(conn, event_id=event_id, limit=limit)
+
+
+@api.get("/contacts", dependencies=[Depends(require_admin)])
+def list_contacts():
+    with connect() as conn:
+        return [
+            {**dict(r), "phone": _mask(r["phone"])}
+            for r in conn.execute("SELECT * FROM contacts WHERE phone NOT LIKE 'web:%' ORDER BY ladder_rank IS NULL, ladder_rank, role, name")
+        ]
+
+
+@api.get("/mesh/nodes")
+def list_mesh_nodes():
+    """Every Meshtastic radio the server's radio has heard, with its last position and the contact who carries it."""
+    with connect() as conn:
+        return mesh.list_nodes(conn)
+
+
+_SIM_SMOKE_EVENTS = (
+    "SELECT g.event_id FROM signals g JOIN sensor_nodes n ON g.source = 'mesh:' || n.node_id WHERE n.simulated = 1"
+)
+_sensor_cache: dict = {}
+
+
+def _sensor_nodes(conn, nid: str | None = None) -> list[dict]:
+    q = ("SELECT s.*, m.last_heard, m.snr, m.battery_pct FROM sensor_nodes s LEFT JOIN mesh_nodes m ON m.node_id = s.node_id"
+         + (" WHERE s.node_id = ?" if nid else " ORDER BY s.kind, s.site, s.node_id"))
+    return [dict(r) for r in conn.execute(q, (nid,) if nid else ())]
+
+
+def _network(conn, now) -> tuple[list[dict], dict[str, list[dict]], dict[int, dict]]:
+    """Every field node with its history, and the network medians each node's health is compared against."""
+    nodes = _sensor_nodes(conn)
+    rows = {n["node_id"]: sensor_health.history(conn, n["node_id"], now) for n in nodes}
+    medians = {
+        sim: sensor_health.network_medians(conn, [n for n in nodes if n["simulated"] == sim], now, rows)
+        for sim in (0, 1)
+    }
+    return nodes, rows, medians
+
+
+def _node_out(n: dict, health: dict, latest: dict) -> dict:
+    return {
+        "node_id": n["node_id"], "kind": n["kind"], "tier": n["tier"], "site": n["site"], "label": n["label"],
+        "lat": n["lat"], "lon": n["lon"], "via": n["via"], "installed_at": n["installed_at"],
+        "simulated": bool(n["simulated"]), "last_heard": n["last_heard"], "snr": n["snr"],
+        "battery_pct": n["battery_pct"], "status": health["status"], "radio": health["radio"],
+        "sensors": health["sensors"], "actions": health["actions"], "latest": latest,
+    }
+
+
+@api.get("/sensors")
+def list_sensors():
+    """The field sensor network: sensor nodes, relays, and the station bridge, each with its health."""
+    now = utcnow()
+    if (hit := _sensor_cache.get("list")) and (now - hit[0]).total_seconds() < 20:
+        return hit[1]
+    with connect() as conn:
+        nodes, rows, medians = _network(conn, now)
+        out = []
+        for n in nodes:
+            h = sensor_health.assess(conn, n, now, medians[n["simulated"]], rows[n["node_id"]])
+            out.append(_node_out(n, h, sensors_latest(rows[n["node_id"]])))
+    by_id = {n["node_id"]: n for n in out}
+    links = [
+        {"type": "Feature", "properties": {"kind": "backbone" if n["kind"] == "relay" else "gateway"},
+         "geometry": {"type": "LineString", "coordinates": [[n["lon"], n["lat"]], [by_id[n["via"]]["lon"], by_id[n["via"]]["lat"]]]}}
+        for n in out if n["kind"] != "sensor" and n["via"] in by_id
+    ]
+    # One gateway line per plot, from the plot's middle to the relay it reports through.
+    plots: dict[int, list[dict]] = {}
+    for n in out:
+        if n["kind"] == "sensor":
+            plots.setdefault(n["site"], []).append(n)
+    for members in plots.values():
+        via = by_id.get(members[0]["via"])
+        if via:
+            lon = sum(m["lon"] for m in members) / len(members)
+            lat = sum(m["lat"] for m in members) / len(members)
+            links.append({"type": "Feature", "properties": {"kind": "gateway"},
+                          "geometry": {"type": "LineString", "coordinates": [[lon, lat], [via["lon"], via["lat"]]]}})
+    counts = {s: sum(n["status"] == s for n in out) for s in sensor_health.STATUSES}
+    result = {
+        "simulated": any(n["simulated"] for n in out), "counts": counts, "nodes": out,
+        "links": {"type": "FeatureCollection", "features": links},
+    }
+    _sensor_cache["list"] = (now, result)
+    return result
+
+
+def sensors_latest(rows: list[dict]) -> dict:
+    out: dict = {}
+    for r in reversed(rows):
+        for k in ("temp_c", "rh_pct", "pressure_hpa", "gas_kohm", "pm25", "pm10", "pack_v", "pack_ma", "solar_v", "solar_ma"):
+            if k not in out and r[k] is not None:
+                out[k] = r[k]
+        out.setdefault("reading_at", r["at"])
+    return out
+
+
+@api.get("/sensors/{node_id}")
+def get_sensor(node_id: str):
+    """One field node: its health checks with the action each calls for, latest readings, and a day of history."""
+    now = utcnow()
+    with connect() as conn:
+        found = _sensor_nodes(conn, node_id)
+        if not found:
+            raise HTTPException(404, "no such sensor node")
+        nodes, rows, medians = _network(conn, now)
+        n = found[0]
+        h = sensor_health.assess(conn, n, now, medians[n["simulated"]], rows[node_id])
+        hist = rows[node_id]
+    series = {
+        k: [[r["at"], r[k]] for r in hist if r[k] is not None]
+        for k in ("pm25", "gas_kohm", "pack_v", "temp_c", "rh_pct")
+    }
+    series["solar_w"] = [
+        [r["at"], round(r["solar_v"] * r["solar_ma"] / 1000, 2)] for r in hist if r["solar_v"] is not None and r["solar_ma"] is not None
+    ]
+    via = next((m for m in nodes if m["node_id"] == n["via"]), None)
+    return {
+        **_node_out(n, h, sensors_latest(hist)), "checks": h["checks"], "series": series,
+        "via_label": via["label"] if via else None,
+        "baseline": loads(n["baseline_json"]) or {},
+    }
+
+
+class PlumeIn(BaseModel):
+    node_id: str
+
+
+@api.post("/sensors/sim/plume", dependencies=[Depends(require_token)])
+def sensor_plume(body: PlumeIn):
+    """Blow simulated smoke over the plot a simulated node sits on; its rich nodes should raise a smoke signal."""
+    with connect() as conn:
+        try:
+            out = sensor_sim.plume(conn, body.node_id)
+        except KeyError:
+            raise HTTPException(404, "not a simulated sensor node") from None
+    _sensor_cache.clear()
+    return out
+
+
+@api.post("/sensors/sim/reset", dependencies=[Depends(require_admin)])
+def sensor_sim_reset():
+    """Reinstall the simulated network from today's plan, with a fresh day of history."""
+    with connect() as conn:
+        n = sensor_sim.seed(conn)
+    _sensor_cache.clear()
+    return {"nodes": n}
+
+
+@api.get("/district")
+def get_district():
+    try:
+        d = load_district()
+    except FileNotFoundError:
+        raise HTTPException(404, "no district configured") from None
+    return {"slug": d.slug, "settings": d.settings, "boundary": boundary_geojson(d.slug)}
+
+
+class PlanParams(BaseModel):
+    sites: int | None = Field(None, ge=1, le=60)
+    bare_per_site: int | None = Field(None, ge=0, le=16)
+    rich_per_site: int | None = Field(None, ge=0, le=16)
+    budget_usd: float | None = Field(None, ge=500, le=500_000)
+    rich_range_km: float | None = Field(None, gt=0, le=10)
+    bare_fetch_km: float | None = Field(None, gt=0, le=2)
+    site_min_sep_km: float | None = Field(None, ge=0.5, le=30)
+    pricing: Literal["stocked", "custom"] | None = None
+
+
+class CustomPlanIn(PlanParams):
+    geometry: dict
+
+
+_plan_cache: dict[str, dict] = {}
+
+
+def _plan(key: str, params: PlanParams, geometry: dict | None = None) -> dict:
+    cache_key = f"{key}|{params.model_dump_json()}|{hash(str(geometry)) if geometry else ''}"
+    if cache_key in _plan_cache:
+        return _plan_cache[cache_key]
+    try:
+        region = planner.resolve_region(key, geometry)
+        result = planner.plan_region(region, params.model_dump())
+    except KeyError:
+        raise HTTPException(404, f"unknown region {key}") from None
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    except climate.ClimateUnavailable as e:
+        raise HTTPException(503, f"climate data unavailable: {e}") from None
+    if len(_plan_cache) > 32:
+        _plan_cache.clear()
+    _plan_cache[cache_key] = result
+    return result
+
+
+@api.get("/planner/regions")
+def planner_regions():
+    """Districts and Kansas counties the region planner can lay out a sensor network for."""
+    return planner.list_regions()
+
+
+@api.get("/planner/plan")
+def planner_plan(
+    params: Annotated[PlanParams, Depends()],
+    region: str = Query(..., description="district:<slug> or county:<name>"),
+):
+    """Mixed bare/rich sensor plots, relays, and station bridge for a region, sited from geography and climate."""
+    return _plan(region, params)
+
+
+@api.post("/planner/plan")
+def planner_plan_custom(body: CustomPlanIn):
+    return _plan("custom", PlanParams(**body.model_dump(exclude={"geometry"})), body.geometry)
+
+
+class DecisionIn(BaseModel):
+    action: Literal["page", "no", "send"]
+    operator: str = Field(min_length=1, max_length=80)
+
+
+@api.post("/alerts/{event_id}/decision", dependencies=[Depends(require_token)])
+def alert_decision(event_id: int, body: DecisionIn, x_firewatch_operator_token: str = Header(default="")):
+    """PAGE / NO / SEND from the console; the same path as the duty officer texting it."""
+    with connect() as conn:
+        ev = _get_event(conn, event_id)
+        if not ev["response_json"] and not ev["ack_until"]:
+            raise HTTPException(409, "this alert has no response in progress")
+        now = scenario.clock_now(ev["sample_slug"]) if ev["is_sample"] else None
+        if livesend.real_sms_possible(bool(ev["is_sample"])):
+            livesend.precheck(x_firewatch_operator_token, conn, event_id)  # real texts: operator token, 2-minute cooldown
+        with livesend.operator(x_firewatch_operator_token):
+            notify.decide(conn, event_id, body.action, body.operator, now or utcnow())
+    return get_alert(event_id)
+
+
+@api.get("/alerts/{event_id}/options")
+def alert_options(event_id: int):
+    """The playbook: the decision in front of the dispatcher, three options (one recommended), and receipts."""
+    with connect() as conn:
+        return playbook.options(conn, _get_event(conn, event_id))
+
+
+class OptionIn(BaseModel):
+    operator: str = Field(min_length=1, max_length=80)
+
+
+@api.post("/alerts/{event_id}/options/{option_id}", dependencies=[Depends(require_token)])
+def choose_option(event_id: int, option_id: str, body: OptionIn, x_firewatch_operator_token: str = Header(default="")):
+    with connect() as conn:
+        ev = _get_event(conn, event_id)
+        if livesend.real_sms_possible(bool(ev["is_sample"])):
+            livesend.precheck(x_firewatch_operator_token, conn, event_id)  # real texts: operator token, 2-minute cooldown
+        try:
+            with livesend.operator(x_firewatch_operator_token):
+                return playbook.execute(conn, ev, option_id, body.operator)
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from None
+
+
+_map_fc: dict[tuple, dict] = {}
+MAP_AHEAD_MIN = 360
+MAP_STEP_MIN = 15
+MAP_MEMBERS = 12  # fewer runs than the playbook's 24: this is a picture, and a 6-hour run costs ~10 s cold
+
+
+def _alert_now(ev) -> tuple:
+    sit = playbook.situation_for_event(ev)
+    now_min = max(0.0, (playbook.now_for(ev) - sit.ignition.time).total_seconds() / 60)
+    return sit, now_min
+
+
+@api.get("/alerts/{event_id}/forecast")
+def alert_forecast(event_id: int):
+    """The fire's likely and worst-case outline and the wind at the fire, every 15 min from now to +6 h, for the
+    map's time slider."""
+    with connect() as conn:
+        ev = _get_event(conn, event_id)
+    sit, now_min = _alert_now(ev)
+    span = now_min
+    if ev["sample_slug"]:
+        try:  # a replay keeps one forecast for its whole run
+            span = max(span, float(scenario.load_scenario(ev["sample_slug"])["duration_min"]))
+        except KeyError:
+            pass
+    horizon = int(math.ceil((span + MAP_AHEAD_MIN) / MAP_STEP_MIN) * MAP_STEP_MIN)
+    key = (ev["sample_slug"] or ev["id"], ev["lat"], ev["lon"], ev["first_seen"], ev["last_seen"], ev["weather_json"], horizon)
+    if key not in _map_fc:
+        if len(_map_fc) > 16:
+            _map_fc.clear()
+        _map_fc[key] = forecast(sit, horizon, MAP_MEMBERS)
+    fc = _map_fc[key]
+    a = fc["_arrival"]
+    dom = a["domain"]
+    t50, t10 = _contours(a["t50"], dom), _contours(a["t10"], dom)
+    weather = sit.weather_steps()
+    steps = []
+    for ahead in range(0, MAP_AHEAD_MIN + 1, MAP_STEP_MIN):
+        m = now_min + ahead
+        if m > horizon:
+            break
+        at = sit.ignition.time + timedelta(minutes=m)
+        w = interp_weather(weather, m)
+        steps.append({"ahead_min": ahead, "at": at.isoformat(),
+                      "wind": {"from_deg": round(w.wind_from_deg) % 360, "kmh": round(w.wind_kmh, 1), "compass": compass(w.wind_from_deg)},
+                      "likely": {"type": "MultiPolygon", "coordinates": _rings(t50, m) if m > 0 else []},
+                      "worst": {"type": "MultiPolygon", "coordinates": _rings(t10, m) if m > 0 else []}})
+    return {"event_id": event_id, "now": (sit.ignition.time + timedelta(minutes=now_min)).isoformat(),
+            "steps": steps, "members": MAP_MEMBERS, "assumptions": fc["assumptions"], "provenance": fc["provenance"]}
+
+
+@api.get("/scenarios")
+def list_scenarios():
+    return scenario.list_scenarios()
+
+
+@api.get("/scenario/{slug}")
+def get_scenario(slug: str):
+    try:
+        return scenario.status(slug)
+    except KeyError:
+        raise HTTPException(404, "unknown scenario") from None
+
+
+@api.post("/scenario/{slug}/run", dependencies=[Depends(require_admin)])
+async def run_scenario(slug: str, seconds_per_minute: float | None = Query(None, ge=0.05, le=60)):
+    """Replay the scenario on a scaled clock (default 2 s per scenario minute)."""
+    try:
+        scenario.start(slug, seconds_per_minute)
+    except KeyError:
+        raise HTTPException(404, "unknown scenario") from None
+    return {"status": "started", "slug": slug}
+
+
+@api.post("/scenario/stop", dependencies=[Depends(require_admin)])
+async def stop_scenario():
+    """Stop the running replay where it is."""
+    return {"status": "stopped" if scenario.stop() else "not_running"}
+
+
+@api.post("/scenario/{slug}/load", dependencies=[Depends(require_admin)])
+async def load_scenario_now(slug: str):
+    """Run the whole scenario instantly (no animation)."""
+    try:
+        await asyncio.to_thread(scenario.run_now, slug)
+    except KeyError:
+        raise HTTPException(404, "unknown scenario") from None
+    return scenario.status(slug)
+
+
+api.include_router(routes_posts.public_router)
+api.include_router(routes_posts.admin_router, dependencies=[Depends(require_admin)])
 app.include_router(api)
+app.include_router(lite_router)
+app.include_router(mobile_router)
 
 
 @app.get("/")

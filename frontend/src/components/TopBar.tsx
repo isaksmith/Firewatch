@@ -1,23 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ClipboardList, Play, RefreshCw, Wifi } from 'lucide-react'
+import { Box, ClipboardList, Flame, MessageSquare, Play, RefreshCw, Square, Wifi } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { api, type SourceHealth } from '../api'
+import { Link, NavLink } from 'react-router-dom'
+import { api, type ScenarioSummary, type SourceHealth } from '../api'
 import { setLowData, useLowData } from '../lib/lowData'
 import { setOperator, useOperator } from '../lib/operator'
+import { TIERS, setTier, useTier, type Tier } from '../lib/tier'
 import { Mark } from './ui'
 
-const SOURCE_LABELS: Record<string, string> = { firms: 'FIRMS', open_meteo: 'WX' }
+const SOURCE_LABELS: Record<string, string> = { firms: 'FIRMS', open_meteo: 'WX', mesh: 'MESH' }
 
 const HEALTH_STYLE: Record<SourceHealth['status'], { dot: string; text: string }> = {
   ok: { dot: 'bg-ok', text: 'text-ok' },
   stale: { dot: 'bg-investigate', text: 'text-investigate' },
   down: { dot: 'bg-escalate blink', text: 'text-escalate' },
   sample: { dot: 'bg-sample', text: 'text-sample' },
+  skipped: { dot: 'bg-dim', text: 'text-dim' },
 }
 
 function SourceStatus({ name, h }: { name: string; h: SourceHealth }) {
   const st = HEALTH_STYLE[h.status]
-  const detail = h.status === 'sample' ? 'SAMPLE' : h.status === 'down' ? 'DOWN' : h.age_min != null ? `${h.age_min}M` : 'NO DATA'
+  const detail = h.status === 'skipped' ? 'OFF' : h.status === 'sample' ? 'SAMPLE' : h.status === 'down' ? 'DOWN' : h.age_min != null ? `${h.age_min}M` : 'NO DATA'
   const title = h.last_error ? `Last error: ${h.last_error}` : h.last_ok ? `Last OK ${h.last_ok}` : ''
   return (
     <span className="flex items-center gap-2" title={title}>
@@ -25,6 +28,25 @@ function SourceStatus({ name, h }: { name: string; h: SourceHealth }) {
       <span className={`h-1.5 w-1.5 ${st.dot}`} />
       <span className={`num text-[10px] tracking-[0.1em] ${st.text}`}>{detail}</span>
     </span>
+  )
+}
+
+function SourceChips({ sources }: { sources: Record<string, SourceHealth> }) {
+  const entries = Object.entries(sources)
+  const working = entries.filter(([, h]) => h.status === 'ok' || h.status === 'sample').length
+  const detail = entries.map(([k, h]) => `${k}: ${h.status}`).join('\n')
+  return (
+    <>
+      <span className="flex items-center gap-5">
+        {entries.filter(([k]) => k in SOURCE_LABELS).map(([k, h]) => <SourceStatus key={k} name={k} h={h} />)}
+      </span>
+      <span className="flex items-center gap-2" title={detail}>
+        <span className="label">Feeds</span>
+        <span className={`num text-[10px] tracking-[0.1em] ${working === entries.length ? 'text-ok' : 'text-investigate'}`}>
+          {working}/{entries.length}
+        </span>
+      </span>
+    </>
   )
 }
 
@@ -39,14 +61,49 @@ function Clock() {
   return (
     <span className="num flex items-center gap-3 text-[11px]">
       <span className="text-text">{z}Z</span>
-      <span className="hidden text-dim xl:inline">{ct}</span>
+      <span className="text-dim">{ct}</span>
     </span>
   )
 }
 
-const Divider = () => <span className="h-4 w-px bg-line-2" />
+const SCENARIO_LABEL: Record<string, string> = {
+  'cottonwood-creek': 'Demo fire',
+  'cottonwood-creek-packet': 'Packet: line fault',
+  'cottonwood-creek-packet-no-fault': 'Packet: no line fault',
+  'cottonwood-creek-packet-ngfs': 'Packet: no fault, NGFS',
+}
 
-export function TopBar({ burnOpen, onBurnLog }: { burnOpen: boolean; onBurnLog: () => void }) {
+const Divider = () => <span className="h-4 w-px shrink-0 bg-line-2" />
+
+export function TopBar({
+  onRunScenario,
+  onStopScenario,
+  scenarioRunning,
+  scenarioStopping,
+  scenarios,
+  scenarioSlug,
+  onPickScenario,
+  threeDId,
+  threeDSelected,
+  burnOpen,
+  onBurnLog,
+  boardOpen,
+  onToggleBoard,
+}: {
+  onRunScenario?: () => void
+  onStopScenario?: () => void
+  scenarioRunning?: boolean
+  scenarioStopping?: boolean
+  scenarios?: ScenarioSummary[]
+  scenarioSlug?: string
+  onPickScenario?: (slug: string) => void
+  threeDId?: number | null
+  threeDSelected?: boolean
+  burnOpen?: boolean
+  onBurnLog?: () => void
+  boardOpen?: boolean
+  onToggleBoard?: () => void
+}) {
   const { on: lowData } = useLowData()
   const qc = useQueryClient()
   const operator = useOperator()
@@ -57,15 +114,57 @@ export function TopBar({ burnOpen, onBurnLog }: { burnOpen: boolean; onBurnLog: 
   })
   const ingest = useMutation({ mutationFn: api.ingest, onSuccess: () => qc.invalidateQueries() })
   const mode = health.data?.mode
+  const { tier, online } = useTier()
 
   return (
-    <header className="flex h-10 shrink-0 items-center gap-4 overflow-hidden border-b border-line bg-void px-4 whitespace-nowrap">
-      <div className="flex items-center gap-2.5 text-text">
+    <header className="flex h-10 shrink-0 items-center gap-4 overflow-hidden border-b border-line bg-void pl-4 whitespace-nowrap">
+      {/* Always visible: the mark and the three pages. */}
+      <div className="flex shrink-0 items-center gap-2.5 text-text">
         <Mark size={16} />
-        <span className="num text-[13px] font-semibold tracking-[0.28em]">FIREWATCH</span>
+        <span className="num hidden text-[13px] font-semibold tracking-[0.28em] 2xl:inline">FIREWATCH</span>
       </div>
       <Divider />
-      <span className="label hidden 2xl:inline">Kansas AOI · Confirmation Layer</span>
+      <nav className="flex shrink-0 items-center gap-1">
+        {(
+          [
+            ['/', 'Console'],
+            ['/planner', 'FireNode planner'],
+            ...(online ? ([['/board', 'Board']] as const) : []),
+          ] as const
+        ).map(([to, label]) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={to === '/'}
+            className={({ isActive }) =>
+              `num px-2 py-[2px] text-[10px] tracking-[0.14em] uppercase ${isActive ? 'bg-raised text-text' : 'text-dim hover:text-muted'}`
+            }
+          >
+            {label}
+          </NavLink>
+        ))}
+      </nav>
+      <Divider />
+      {/* Everything else scrolls sideways when the window is too narrow; a mouse wheel scrolls it too. */}
+      <div
+        className="topbar-scroll flex h-full min-w-0 flex-1 items-center gap-4 overflow-x-auto overflow-y-hidden [&>*]:shrink-0"
+        onWheel={(e) => {
+          if (e.deltaX === 0 && e.deltaY !== 0) e.currentTarget.scrollLeft += e.deltaY
+        }}
+      >
+      <TierSwitch tier={tier} />
+      <Divider />
+      {threeDId != null && (
+        <Link
+          to={`/alerts/${threeDId}/3d`}
+          className="btn !h-6 shrink-0 !border-investigate/60 !text-investigate"
+          title={threeDSelected ? 'Open the 3D spread view for the selected alert' : 'Open the 3D spread view for the top alert. Select another alert first to see its own.'}
+        >
+          <Box size={12} /> 3D view
+          <span className="text-[10px] font-normal tracking-normal text-muted">{threeDSelected ? 'selected alert' : 'top alert'}</span>
+        </Link>
+      )}
+      <span className="label">Kansas AOI · Confirmation Layer</span>
       {mode === 'sample' && (
         <span className="num border border-sample/50 px-1.5 py-[1px] text-[10px] font-medium tracking-[0.14em] text-sample">
           SAMPLE REPLAY
@@ -76,48 +175,126 @@ export function TopBar({ burnOpen, onBurnLog }: { burnOpen: boolean; onBurnLog: 
           <span className="blink h-1.5 w-1.5 bg-ok" /> LIVE
         </span>
       )}
-      <Divider />
-      <div className="hidden items-center gap-5 lg:flex">
-        {health.data && Object.entries(health.data.sources).map(([k, v]) => <SourceStatus key={k} name={k} h={v} />)}
-        {health.isError && <span className="num text-[10px] tracking-[0.12em] text-escalate">BACKEND UNREACHABLE</span>}
+      <div className="flex items-center gap-5">
+        <Divider />
+        {health.data && online && <SourceChips sources={health.data.sources} />}
+        {!online && <span className="num text-[10px] tracking-[0.12em] text-degraded">INTERNET DOWN · FIRENODE ONLY</span>}
+        {health.isError && <span className="num text-[10px] tracking-[0.12em] text-escalate">Can't reach the Firewatch server. Showing the last update.</span>}
       </div>
 
-      <div className="ml-auto flex items-center gap-4">
-        <Clock />
-        <Divider />
-        <button onClick={onBurnLog} aria-pressed={burnOpen} className={`btn !h-6 ${burnOpen ? '!border-text' : ''}`}>
-          <ClipboardList size={11} /> Burn log
-        </button>
+      <div className="ml-auto flex items-center gap-4 pl-4">
         <button
           role="switch"
           aria-checked={lowData}
           onClick={() => setLowData(!lowData)}
           className={`btn !h-6 ${lowData ? '!border-degraded !text-degraded' : ''}`}
-          title="Use less data: no map pictures, slower updates"
+          aria-label={`Low data ${lowData ? 'on' : 'off'}`}
+          title={`Low data ${lowData ? 'on' : 'off'}. Use less data: no map pictures, slower updates`}
         >
-          <Wifi size={11} /> Low data {lowData ? 'on' : 'off'}
+          <Wifi size={11} /> <span>Low data {lowData ? 'on' : 'off'}</span>
         </button>
-        {lowData && (
-          <a href="/lite" className="text-[11.5px] text-sample underline underline-offset-2">
-            Open the one-bar page
-          </a>
-        )}
-        <Divider />
-        <label className="flex items-center gap-2">
-          <span className="label">OP</span>
-          <input value={operator} onChange={(e) => setOperator(e.target.value)} className="field w-28 !h-6 uppercase" aria-label="Operator name" />
-        </label>
-        {mode === 'sample' && (
-          <button onClick={() => replay.mutate()} disabled={replay.isPending || health.data?.replay_running} className="btn !h-6">
-            <Play size={11} /> {health.data?.replay_running ? 'Replaying' : 'Replay'}
+        {onBurnLog && (
+          <button onClick={onBurnLog} aria-pressed={burnOpen} aria-label="Burn log" title="Burn log" className={`btn !h-6 ${burnOpen ? '!border-text' : ''}`}>
+            <ClipboardList size={11} /> <span>Burn log</span>
           </button>
         )}
-        {mode === 'live' && (
+        <div className="flex items-center gap-4">
+          <Clock />
+          <Divider />
+          <label className="flex items-center gap-2">
+            <span className="label">OP</span>
+            <input value={operator} onChange={(e) => setOperator(e.target.value)} className="field w-28 !h-6 uppercase" aria-label="Operator name" />
+          </label>
+        </div>
+        {onToggleBoard && (
+          <button
+            type="button"
+            onClick={onToggleBoard}
+            aria-pressed={boardOpen}
+            aria-label="Community board"
+            title="Community board"
+            className={`btn !h-6 ${boardOpen ? '!border-sample !text-sample' : ''}`}
+          >
+            <MessageSquare size={11} /> <span>Board</span>
+          </button>
+        )}
+      </div>
+      </div>
+      {/* Always visible on the right: the demo controls. */}
+      <div className="flex shrink-0 items-center gap-4 border-l border-line px-4 empty:hidden">
+        {onRunScenario && scenarios && scenarios.length > 1 && (
+          <select
+            value={scenarioSlug}
+            onChange={(e) => onPickScenario?.(e.target.value)}
+            disabled={scenarioRunning}
+            aria-label="Scenario to replay"
+            title={scenarios.find((s) => s.slug === scenarioSlug)?.story}
+            className="field !h-6 max-w-44"
+          >
+            {scenarios.map((s) => (
+              <option key={s.slug} value={s.slug}>
+                {SCENARIO_LABEL[s.slug] ?? s.title}
+              </option>
+            ))}
+          </select>
+        )}
+        {onRunScenario && scenarioRunning && onStopScenario ? (
+          <button
+            onClick={onStopScenario}
+            disabled={scenarioStopping}
+            title="Stop the scenario where it is. Its alerts stay on screen; Run scenario starts it over."
+            className="btn !h-8 !border-escalate !px-3.5 !text-[12.5px] !text-escalate"
+          >
+            <Square size={13} fill="currentColor" /> {scenarioStopping ? 'Stopping' : 'Stop scenario'}
+          </button>
+        ) : (
+          onRunScenario && (
+            <button
+              onClick={onRunScenario}
+              disabled={scenarioRunning}
+              aria-label={scenarioRunning ? 'Scenario running' : 'Run scenario'}
+              className="btn btn-danger !h-8 !px-3.5 !text-[12.5px]"
+            >
+              <Flame size={14} /> {scenarioRunning ? 'Scenario running' : 'Run scenario'}
+            </button>
+          )
+        )}
+        {mode === 'sample' && (
+          <button
+            onClick={() => replay.mutate()}
+            disabled={replay.isPending || health.data?.replay_running}
+            className="btn !h-8 !px-3.5 !text-[12.5px]"
+          >
+            <Play size={14} /> {health.data?.replay_running ? 'Satellite replay running' : 'Satellite replay'}
+          </button>
+        )}
+        {mode === 'live' && online && (
           <button onClick={() => ingest.mutate()} disabled={ingest.isPending} className="btn !h-6">
             <RefreshCw size={11} className={ingest.isPending ? 'animate-spin' : ''} /> Ingest
           </button>
         )}
       </div>
     </header>
+  )
+}
+
+function TierSwitch({ tier }: { tier: Tier }) {
+  return (
+    <div role="radiogroup" aria-label="Tier to show" className="flex shrink-0 items-center border border-line">
+      {TIERS.map((t) => (
+        <button
+          key={t.key}
+          role="radio"
+          aria-checked={tier === t.key}
+          title={t.title}
+          onClick={() => setTier(t.key)}
+          className={`num px-2 py-[2px] text-[10px] tracking-[0.14em] uppercase ${
+            tier === t.key ? (t.key === 'offline' ? 'bg-degraded/20 text-degraded' : 'bg-raised text-text') : 'text-dim hover:text-muted'
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
   )
 }

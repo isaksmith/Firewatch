@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172c28">
+  <meta name="description" content="Explore the FireWatch sensor node, from its environmental sensors to its solar power and deployment mounts.">
+  <title>FireWatch — Node Explorer</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect rx='14' width='64' height='64' fill='%23172c28'/%3E%3Cpath d='M34 8C36 24 17 22 17 39a15 15 0 0030 0c0-10-7-16-7-16s1 10-6 13c5-12 0-28 0-28' fill='%23f3864b'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="importmap">{"imports":{"three":"./vendor/three/three.module.js","three/addons/":"./vendor/three/addons/"}}</script>
+</head>
+<body>
+  <header class="header">
+    <a href="./" class="brand" aria-label="FireWatch Node Explorer home"><span class="brand-mark" aria-hidden="true">⌁</span>FIREWATCH<span class="brand-divider"></span><span class="brand-sub">NODE EXPLORER</span></a>
+    <div class="header-right"><span class="status-dot"></span>Sensor design lab<span class="revision">REV 02</span></div>
+  </header>
+  <main class="app">
+    <aside class="controls" aria-label="Model configuration">
+      <div class="intro"><span class="eyebrow">GROUND SENSOR NETWORK</span><h1>Small node.<br>Layered intelligence.</h1><p>Explore the hardware behind the first signal.</p></div>
+      <section class="control-section">
+        <div class="section-heading"><h2>01 <span>Configuration</span></h2></div>
+        <fieldset><legend>Node tier</legend><div class="segments tier-options">
+          <label><input type="radio" name="tier" value="bare"><span>Bare</span></label>
+          <label><input type="radio" name="tier" value="rich" checked><span>Rich <small>+ PM</small></span></label>
+        </div></fieldset>
+        <p id="tier-note" class="field-note">Environmental sensing + optical particulate confirmation.</p>
+        <label class="field-label" for="mount">Deployment mount</label>
+        <select id="mount"><option value="band">Tree / pole band</option><option value="stake">Ground stake</option><option value="none">Node only</option></select>
+      </section>
+      <section class="control-section">
+        <div class="section-heading"><h2>02 <span>Explode assembly</span></h2><output id="explode-output" for="explode">0%</output></div>
+        <label class="sr-only" for="explode">Assembly explosion</label><input id="explode" type="range" min="0" max="100" value="0" step="1">
+        <div class="range-ends"><button id="assemble" class="text-button">Assembled</button><button id="explode-all" class="text-button">Exploded</button></div>
+        <p class="field-note">Separate the layers to look inside.</p>
+      </section>
+      <section class="control-section layers-section">
+        <div class="section-heading"><h2>03 <span>Visible layers</span></h2><button id="show-all" class="text-button">Show all</button></div>
+        <div id="layers" class="layers"></div>
+      </section>
+      <div class="control-footer"><span class="small-dot"></span>Concept model · Rev 02</div>
+    </aside>
+    <section id="stage" class="stage" aria-label="Interactive 3D model">
+      <div class="stage-heading"><div><span class="eyebrow">INTERACTIVE ASSEMBLY</span><h2 id="model-title">Rich node <span>/</span> Band mount</h2></div><span id="part-count" class="pill">Loading model</span></div>
+      <div id="canvas-host" class="canvas-host"></div>
+      <div id="loading" class="loading" role="status"><span class="spinner"></span><strong>Preparing your node</strong><span>Loading the detailed assembly…</span></div>
+      <div class="view-toolbar" aria-label="Camera controls"><button data-view="front">Front</button><button data-view="rear">Rear</button><button data-view="top">Top</button><span></span><button id="reset-view" title="Fit all visible parts">↺ <span>Reset view</span></button></div>
+      <div class="stage-footer"><span><span class="mouse-icon">↔</span>Drag to orbit <span class="hint-divider">/</span> Scroll to zoom <span class="hint-divider">/</span> Click a part to inspect</span><span id="pose-label">ASSEMBLED</span></div>
+      <div id="live-status" class="sr-only" role="status" aria-live="polite"></div>
+    </section>
+    <div id="details-resizer" class="details-resizer" role="separator" tabindex="0" aria-label="Resize component information panel" aria-orientation="vertical" aria-controls="component-details" aria-valuemin="240" aria-valuemax="700" aria-valuenow="290" title="Drag left to widen. Use arrow keys to resize; double-click to reset."><span></span></div>
+    <aside id="component-details" class="details" aria-label="Component information">
+      <div class="detail-top"><span class="eyebrow">HARDWARE SPOTLIGHT</span><div class="detail-actions"><button id="expand-details" class="text-button" aria-expanded="false" title="Expand information panel">Expand ↔</button><button id="clear-selection" class="text-button" hidden>Clear</button></div></div>
+      <div id="detail-content"></div>
+      <button id="focus-part" class="focus-button" hidden>Focus on this component <span>↗</span></button>
+      <div class="parts-heading"><h2>Explore components</h2><span>SELECT TO INSPECT</span></div>
+      <div id="component-list" class="component-list"></div>
+      <p class="design-note">A design concept for inspection and discussion. Mechanical fit and field performance still require validation.</p>
+    </aside>
+  </main>
+  <noscript>This interactive model requires JavaScript. Enable it, then reload the page.</noscript>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

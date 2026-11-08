@@ -1,0 +1,64 @@
+{
+  "02 | RICH \u2014 BAND MOUNT": {
+    "tier": "Rich",
+    "mount": "band",
+    "objects": 419,
+    "solar_mm": [
+      137,
+      222,
+      4
+    ],
+    "pm_present": true
+  },
+  "03 | BARE \u2014 BAND MOUNT": {
+    "tier": "Bare",
+    "mount": "band",
+    "objects": 317,
+    "solar_mm": [
+      112,
+      136,
+      2.7
+    ],
+    "pm_present": false
+  },
+  "04 | RICH \u2014 GROUND STAKE": {
+    "tier": "Rich",
+    "mount": "stake",
+    "objects": 411,
+    "solar_mm": [
+      137,
+      222,
+      4
+    ],
+    "pm_present": true
+  },
+  "05 | BARE \u2014 GROUND STAKE": {
+    "tier": "Bare",
+    "mount": "stake",
+    "objects": 309,
+    "solar_mm": [
+      112,
+      136,
+      2.7
+    ],
+    "pm_present": false
+  },
+  "assembly_interfaces": {
+    "rear_spacer_to_enclosure_gap_mm": 0,
+    "panel_contacts": {
+      "SM_V2 | Solar panel substrate | P105 / 5 W": {
+        "brace_to_panel_gap_mm": 0.0,
+        "axle_to_panel_clearance_mm": 0.553
+      },
+      "SM_V2 | Solar panel substrate | P126 / 2 W": {
+        "brace_to_panel_gap_mm": -0.0,
+        "axle_to_panel_clearance_mm": 1.203
+      }
+    },
+    "stake_grade_z_mm": 0,
+    "stake_tip_z_mm": -300,
+    "band_inner_radius_mm": 64,
+    "example_pole_radius_mm": 63.5
+  },
+  "result": "PASS for concept configuration and measured anchors; structural, soil, RF and weather qualification remain open"
+}

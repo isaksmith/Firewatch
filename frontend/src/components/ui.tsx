@@ -31,15 +31,41 @@ export function TrackGlyph({ rec, size = 12, active = false }: { rec: Recommenda
   )
 }
 
-export function ScoreReadout({ score, rec, size = 'md' }: { score: number; rec: Recommendation; size?: 'sm' | 'md' | 'lg' }) {
+export function ScoreReadout({ score, rec, size = 'md' }: { score: number | null; rec: Recommendation; size?: 'sm' | 'md' | 'lg' }) {
   const cls = { sm: 'text-[15px]', md: 'text-[22px]', lg: 'text-[44px]' }[size]
+  if (score == null) {
+    return (
+      <span className="num inline-flex flex-col leading-none" aria-label="No satellite score">
+        <span className={`${cls} font-semibold tracking-tight`} style={{ color: REC_META[rec].color }}>
+          —
+        </span>
+        {size === 'lg' && <span className="mt-1 text-[10px] tracking-[0.12em] text-dim">NO SATELLITE</span>}
+      </span>
+    )
+  }
   return (
-    <span className="num inline-flex items-baseline leading-none" aria-label={`Score ${score} of 100`}>
+    <span
+      className="num inline-flex items-baseline leading-none"
+      aria-label={`Score ${score} of 100`}
+      title="Satellite score: how much the hotspot looks like a wildfire rather than a planned burn. Not a percentage or a danger rating; the chance it's a real fire is in the FireCast panel."
+    >
       <span className={`${cls} font-semibold tracking-tight`} style={{ color: REC_META[rec].color }}>
         {String(score).padStart(2, '0')}
       </span>
       {size === 'lg' && <span className="ml-1 text-[11px] text-dim">/100</span>}
     </span>
+  )
+}
+
+/** Evidence weight: filled = counts toward Escalate, half = Investigate only, hollow = recorded, not counted. */
+export function EvidenceGlyph({ counts }: { counts: 'strong' | 'yes' | 'weak' | 'no' }) {
+  const c = counts === 'no' ? '#6b7684' : counts === 'weak' ? '#ffb21a' : '#ff4b2b'
+  return (
+    <svg width={10} height={10} viewBox="0 0 10 10" aria-hidden className="shrink-0">
+      <rect x={1} y={1} width={8} height={8} fill={counts === 'yes' || counts === 'strong' ? c : 'none'} stroke={c} strokeWidth={1.25} />
+      {counts === 'weak' && <rect x={1} y={5} width={8} height={4} fill={c} />}
+      {counts === 'strong' && <rect x={3.5} y={3.5} width={3} height={3} fill="#08090b" />}
+    </svg>
   )
 }
 
@@ -121,7 +147,6 @@ export function Mark({ size = 16 }: { size?: number }) {
   )
 }
 
-/** A toast with one Undo button; the action runs when the countdown ends. */
 export function UndoBar({ message, left, onUndo }: { message: string; left: number; onUndo: () => void }) {
   return (
     <div role="status" className="flex items-center justify-between gap-3 border border-line-2 border-l-2 border-l-ok bg-raised px-3 py-2 text-[12.5px]">

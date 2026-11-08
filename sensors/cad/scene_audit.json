@@ -1,0 +1,35 @@
+{
+  "blender": "5.2.3 LTS",
+  "objects": 164,
+  "mesh_objects": 111,
+  "unique_meshes": 47,
+  "triangles_before_modifiers": 4916,
+  "unit_scale": 0.0010000000474974513,
+  "carrier_mm": [
+    88.0,
+    72.0,
+    1.600000023841858
+  ],
+  "poses_mm": {
+    "1": {
+      "SM_FireWatch custom carrier | proposed 88 \u00d7 72 \u00d7 1.6": 36.0,
+      "SM_Removable insulating backplate": 7.0,
+      "SM_Protected 1S battery | ENVELOPE ONLY": 19.0,
+      "SM_Lid | service cover": 73.0
+    },
+    "100": {
+      "SM_FireWatch custom carrier | proposed 88 \u00d7 72 \u00d7 1.6": 206.0,
+      "SM_Removable insulating backplate": 92.0,
+      "SM_Protected 1S battery | ENVELOPE ONLY": 139.0,
+      "SM_Lid | service cover": 303.0
+    }
+  },
+  "contact_review_mm": {
+    "radio_to_carrier_gap_mm": 0.8,
+    "battery_to_backplate_gap_mm": 0.75,
+    "carrier_to_standoff_gap_mm": -0.3
+  },
+  "bare_excludes_pm": true,
+  "base_mesh_nonmanifold": [],
+  "result": "PASS for concept scene structure; not an electrical or manufacturing validation"
+}

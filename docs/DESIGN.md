@@ -1,41 +1,53 @@
-# Firewatch Confirmation Layer — Design
+# Firewatch — Design
 
-Companion to [PLAN.md](PLAN.md). The plan says *what* we build and *when*; this document says *how*, precisely enough that each workstream can build its piece without waiting on the others.
+Companion to [PLAN.md](PLAN.md). The plan says *what* we build and *why*; this document says *how*, precisely enough that each workstream can build its piece without waiting on the others.
 
-**Decided:** primary customer is a Kansas rural fire district dispatcher (Kansas Forest Service as statewide operator; utilities secondary). Frontend is React + MapLibre + deck.gl.
+**Decided:** the customer is the chief of a rural volunteer district (the Cottonwood Creek scenario: 450 sq mi, 18 volunteers, one bar of cell). Field interaction is SMS; the React + MapLibre console serves the station, the county, and the pitch.
 
 ---
 
 ## 1. Design principles
 
-1. **One alert per fire.** Operators see events, not pixels.
-2. **Every score explains itself.** No number appears without its top reasons.
-3. **Fail visible.** Missing data degrades the score and says so; it never hides an event.
-4. **Humans decide.** The system ranks, explains, and previews. It never dispatches.
-5. **Same code path for live and sample.** Sample mode feeds fixtures into the real pipeline, so the demo exercises the real system.
-6. **Same features in training and serving.** Every feature is computable from historical data, so the model sees in production what it saw in training.
+1. **One alert per fire.** Every signal (satellite pixel, line fault, text) attaches to one event; people see events.
+2. **Every decision explains itself.** No score or level appears without its reasons ("Line fault 1:50 on a High fire-danger day").
+3. **SMS first.** Anything a person in the field must do fits in a 160-character text and a one-digit reply. Nothing in the field needs data service.
+4. **No page on one weak signal.** Escalation needs two independent signals, or a strong multi-pass satellite score. False pages have a budget, and we measure it.
+5. **Fail visible.** Missing data degrades the decision and says so; a silent source shows as "no data," never "no fire."
+6. **Humans decide.** The system confirms, explains, and drafts; a person replies PAGE. Paging goes through county dispatch, not around it.
+7. **Same code path for live and sample.** Sample mode feeds fixtures (satellite passes, line faults, texts, replies) into the real pipeline.
+8. **Same features in training and serving** for the ML score.
 
 ## 2. Users and jobs
 
 | Persona | Situation | Job to be done |
 |---|---|---|
-| **County dispatcher** (primary) | Rural Kansas 911/dispatch center, handles all call types, fire is a fraction of the work | "Tell me, within minutes, which satellite detections in my county are worth a call to the chief, and why." |
-| **Fire chief / duty officer** | Volunteer district, decides whether to page out a crew | "Show me where this could be in an hour so I know who to page and what to protect." |
-| **Kansas Forest Service duty officer** | Statewide view, coordinates mutual aid on red-flag days | "Rank everything in the state; show me what my districts are doing with it." |
-| **Utility monitor** (secondary) | Watches transmission corridors | "Alert me when a likely wildfire is near or heading toward my lines." |
+| **Duty officer / chief** (primary) | Volunteer, at a day job, phone in pocket, one bar | "Text me only when it's probably real, tell me where and why, and let me page with one reply." |
+| **Volunteers** (18; ~5 free on a weekday) | Paged through county dispatch or a paging app | "Tell me where to go and what's coming." |
+| **Ranchers, lease pumpers, water-truck driver, disc owners** | Already in the district, often closest to the fire | Signal: "I can report smoke or a burn by text." Recipient: "Tell me early if it's coming my way and what would help." |
+| **County dispatcher** | Tones the district, handles all call types | "Give me a clear request to tone out, with a location." |
+| **Electric co-op** | Sees feeder faults and outages first | "Share lockouts on fire-weather days; it lowers our line-caused ignition risk." |
+| **Kansas Forest Service** | Statewide; grants and mutual aid | "One hosted instance for many districts; a statewide view on red-flag days." |
 
 ## 3. Domain model
 
 ```mermaid
 erDiagram
   DETECTION }o--|| EVENT : "clustered into"
+  SIGNAL }o--|| EVENT : "attached to"
   EVENT ||--o{ SCORE : "scored as (history)"
   EVENT ||--o{ ACTION : "acted on"
   EVENT ||--o| SIMULATION : "previewed by (cached)"
+  EVENT ||--o{ MESSAGE : "texts about"
+  CONTACT ||--o{ MESSAGE : "sent to / from"
+  CONTACT ||--o{ BURN_NOTICE : "registers"
 ```
 
 - **Detection:** one satellite hotspot pixel from one overpass.
-- **Event:** a cluster of detections believed to be one fire. This is the unit the user sees and acts on (the "alert").
+- **Signal:** any non-satellite evidence with a place and time: line fault, texted report, neighbor reply, camera smoke (section 4.5).
+- **Event:** detections and signals believed to be one fire. This is the unit people see and act on (the "alert").
+- **Contact:** a person in the district roster with a phone, a role, and usually a location.
+- **Message:** one SMS in or out, linked to an event when it's about one.
+- **Burn notice:** a registered controlled burn (area, day, who); a negative signal.
 - **Score:** a timestamped scoring of an event. Kept as history so the UI can show score trend.
 - **Action:** an operator's acknowledge / dismiss / escalate with a note.
 - **Simulation:** cached spread output for an event under a given wind.
@@ -100,10 +112,87 @@ CREATE TABLE actions (
 );
 
 CREATE TABLE source_health (
-  source        TEXT PRIMARY KEY,           -- firms_viirs, firms_goes, open_meteo, nws
+  source        TEXT PRIMARY KEY,           -- firms_viirs, firms_goes, open_meteo, nws, coop, sms
   last_ok       TEXT,
   last_error    TEXT,
   last_error_at TEXT
+);
+
+CREATE TABLE signals (
+  id           INTEGER PRIMARY KEY,
+  event_id     INTEGER REFERENCES events(id),
+  kind         TEXT NOT NULL,              -- line_fault | report | neighbor_reply | camera_smoke | ngfs
+  lat          REAL NOT NULL,
+  lon          REAL NOT NULL,
+  observed_at  TEXT NOT NULL,              -- when it happened (fault time, text received)
+  source       TEXT NOT NULL,              -- coop:<feeder id>, sms:<contact id or number>, camera:<node>
+  value        TEXT,                       -- reply digit, report text, fault type (lockout | momentary)
+  contact_id   INTEGER REFERENCES contacts(id),
+  is_sample    INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL
+);
+
+CREATE TABLE contacts (
+  id            INTEGER PRIMARY KEY,
+  name          TEXT NOT NULL,
+  phone         TEXT UNIQUE NOT NULL,      -- E.164
+  role          TEXT NOT NULL,             -- duty_officer | chief | volunteer | rancher | pumper | water_truck | disc | dispatch | mutual_aid
+  lat           REAL,                      -- home, pasture, or lease location
+  lon           REAL,
+  weekday_avail INTEGER NOT NULL DEFAULT 0,
+  ladder_rank   INTEGER,                   -- order in the duty escalation ladder
+  opted_in      INTEGER NOT NULL DEFAULT 1, -- STOP sets 0
+  registered    INTEGER NOT NULL DEFAULT 1, -- 0 for unknown numbers that texted in
+  mesh_id       TEXT UNIQUE                -- Meshtastic node ID (!a1b2c3d4) of the radio they carry
+);
+
+CREATE TABLE messages (
+  id           INTEGER PRIMARY KEY,
+  event_id     INTEGER REFERENCES events(id),
+  contact_id   INTEGER REFERENCES contacts(id), -- null for a number not in the roster
+  phone        TEXT NOT NULL,              -- phone number, or mesh node ID on the mesh channel
+  direction    TEXT NOT NULL,              -- out | in
+  purpose      TEXT,                       -- ask_neighbor | duty_fyi | duty_escalate | ladder | ladder_dispatch | page | page_dispatch | downwind | helper | mutual_aid_draft | mutual_aid | reply
+  body         TEXT NOT NULL,              -- ≤ 160 chars for outbound
+  status       TEXT NOT NULL,              -- sent | failed | received; mesh adds relayed | delivered
+  gateway_id   TEXT,                       -- Twilio SID; outbox-… in sample mode; mesh-<packet id>
+  is_sample    INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL,              -- the response clock (the scenario's own time during a replay)
+  channel      TEXT NOT NULL DEFAULT 'sms' -- sms | mesh
+);
+
+CREATE TABLE mesh_nodes (                  -- every Meshtastic radio the server's radio has heard
+  node_id      TEXT PRIMARY KEY,           -- !a1b2c3d4; contacts.mesh_id links a radio to a person
+  long_name    TEXT,
+  short_name   TEXT,
+  hw_model     TEXT,
+  lat          REAL,                       -- last GPS fix
+  lon          REAL,
+  position_at  TEXT,                       -- wall-clock time the fix arrived
+  battery_pct  INTEGER,
+  snr          REAL,
+  last_heard   TEXT NOT NULL
+);
+
+CREATE TABLE sensor_readings (             -- telemetry from mesh sensor nodes (5.8)
+  id       INTEGER PRIMARY KEY,
+  node_id  TEXT NOT NULL,
+  at       TEXT NOT NULL,                  -- wall-clock arrival time
+  temp_c   REAL,
+  rh_pct   REAL,
+  pm25     REAL,                           -- µg/m³, "environmental" (outdoor) correction
+  pm10     REAL
+);
+
+CREATE TABLE burn_notices (
+  id          INTEGER PRIMARY KEY,
+  contact_id  INTEGER NOT NULL REFERENCES contacts(id),
+  lat         REAL NOT NULL,
+  lon         REAL NOT NULL,
+  radius_km   REAL NOT NULL DEFAULT 1.5,
+  burn_date   TEXT NOT NULL,              -- local date
+  is_sample   INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL
 );
 ```
 
@@ -150,7 +239,7 @@ For each new detection `d`:
 
 1. Candidate events: status not `closed`, `last_seen` within 12 h of `d.acq_time`.
 2. Match radius `r = max(2 km, 0.5 × max(scan_km, track_km) + 1 km)`, which widens to ~2.5 km for GOES pixels.
-3. If any detection of a candidate event lies within `r` of `d` (haversine), join it. If `d` matches several events, merge them into the oldest.
+3. If any detection of a candidate event lies within `r` of `d` (haversine) **and within 12 h of `d`**, join it. If `d` matches several events, merge them into the oldest. Requiring the time match per detection keeps a week of neighboring Flint Hills pasture burns from chaining into one event.
 4. Otherwise create a new event.
 5. Recompute centroid (FRP-weighted), `first_seen`, `last_seen`, and place label.
 
@@ -207,6 +296,42 @@ McArthur Mk 4 grassland fire danger index (Noble et al., 1980), used both as a m
 
 *Verify constants against the source before relying on exact values.* NWS Wichita publishes its own grassland fire danger product; we display theirs when available but always compute ours for the model so historical and live values match.
 
+### 4.5 Signals and confirmation
+
+Satellite detections go through 4.1–4.4 and get an ML score (section 5). Every other kind of evidence arrives as a **signal** and attaches to an event the same way detections do: within 3 km and 6 h of the event's detections or signals. Otherwise it opens a new event at the signal's location.
+
+| Signal | Arrives via | Counts as independent evidence when |
+|---|---|---|
+| `line_fault` | Co-op adapter: `POST /api/signals` from a feed, or a poller on the co-op's public outage map (sample mode: fixture) | Fault type is a lockout (not a momentary), the location is in grass (not in town), **and** fire danger at the location is High or above (GFDI ≥ 12) |
+| `report` | Inbound SMS `FIRE <where>` (place text geocoded against roads and towns; the sender's roster location as fallback) | Always for Investigate; for Escalate only from a registered number |
+| `neighbor_reply` | Inbound SMS reply to an ask-the-neighbor text | Reply `1` (smoke). Reply `3` from the contact who registered a burn here today makes the event a registered burn. Reply `2` is recorded but doesn't lower the level, because the neighbor may not have a view. |
+| `camera_smoke` | Phase 3 camera node | Detector confidence above its threshold on two consecutive frames |
+| `ngfs` | `app/ngfs_signal.py`, after each NGFS poll (never `process_detections`) | Type is `Possible Wildland Fire` (null fails closed), at least two separate `acq_date_time` scans of the same `feature_tracking_id`, and no registered burn covers it. One signal per feature. Same source class as a satellite, never strong, so it cannot escalate alone |
+| `sensor_smoke` | Mesh sensor node telemetry (5.8) | A PM2.5 signal always counts: the smoke rule already ran before it was raised. A gas-only signal never counts: it adds weight to P(fire) and nothing else. All sensors together count as one kind. A sensor joins events within 8 km, not 3, because smoke drifts downwind; it doesn't move the event's location when a line fault or report has placed it, and it can't show a burn has escaped. |
+| Satellite | Section 4.1 | ML score ≥ 40 |
+
+**Level rules** (evaluated after every new detection, signal, or reply; each rule that fires becomes a reason):
+
+```
+independent = distinct kinds among qualifying evidence (satellite counts once however many passes)
+if registered_burn(event) and not escaped(event):      level = monitor     reason "Registered burn by <name> today"
+    (extreme day, no escape evidence: level = investigate, one quiet duty officer FYI, never escalate)
+elif sat_score >= 70 or independent >= 2:              level = escalate
+elif independent >= 1:                                 level = investigate
+else:                                                  level = monitor
+then apply guardrails (5.4): near a town or line → at least investigate; known heat source, not growing → monitor
+```
+
+- `registered_burn`: the event lies within a burn notice's radius on the notice's local date.
+- `escaped`: evidence only. Any of: a `report` from anyone (the burner's own FIRE text counts), a `neighbor_reply 1` from someone other than the burner, or fire outside the notice area. A strong satellite detection is not escape evidence. There is no weather-based escape.
+- **Extreme days.** On a Red Flag day, or at GFDI >= `burn_escape_gfdi`, a registered burn with no escape evidence goes to Investigate, never Escalate. That sends one quiet duty officer FYI and, as for any Investigate event, asks up to 3 nearby contacts. It never asks anyone to page. On other days it stays at Monitor and texts nobody.
+- **Late notices.** Only a notice that predates the event (`created_at <= first_seen`) can suppress it. A notice registered after the event began is treated as a claim and caps the event at Investigate.
+- The event's `score` column stays the satellite ML score (null when there is no satellite evidence). `recommendation` is the level above.
+
+**Ask the neighbor.** When an event first reaches Investigate, text up to 3 opted-in contacts with a location within 3 miles of the event, nearest first. Duty officers are skipped because they're already being told. Each contact gets at most one ask per event and at most 3 per day. Replies are matched to the open ask from that number in the last 2 hours.
+
+**Burn notices.** Inbound `BURN` registers a burn for today at the sender's roster location. `BURN <where>` registers it at a geocoded place, and `BURN TOMORROW` registers it for the next day. Firewatch confirms the registration by text, including the place it understood. This digitizes the "call dispatch before you burn" practice many Kansas counties already have.
+
 ## 5. Scoring
 
 ### 5.1 Output contract
@@ -251,28 +376,235 @@ Start at 30, add points, clip to 0–100. Each line becomes a reason.
 
 ### 5.3 Model (v1)
 
-- **Target:** `1` = matched to a WFIGS `WF` incident; `0` = matched to `RX` or inside the static-source mask. Unmatched events excluded (see PLAN section 5).
-- **Model:** `xgboost.XGBClassifier`, shallow trees (`max_depth` 3–4, ~200 rounds), class weights for imbalance; logistic regression baseline for comparison.
-- **Calibration:** isotonic or Platt on a validation fold; `score = round(100 × p)`.
-- **Split:** train on events through 2022, validate on 2023, test on 2024.
-- **Reasons:** `booster.predict(dmatrix, pred_contribs=True)` gives log-odds contributions per feature. Convert to score points by distributing `score − base_score` across features in proportion to their log-odds contributions, then map feature values to human labels.
-- **Artifact:** `backend/data/model/xgb-v1.json` + `features.json` (ordered feature list, fallbacks, training medians) + `metrics.json`.
+Built by `backend/ml/` (`download` → `build_dataset` → `train`); results in `backend/ml/report.md`.
+
+- **Target:** `1` = matched to a WFIGS `WF` incident; `0` = matched to `RX`, or an unreported Flint Hills fire in March–April (weak label, weighted so the weak set counts as much as the reported burns). Other unmatched events are excluded.
+- **Heat sources are not a model input.** Training on them with `dist_static_km` as a feature taught the model "far from a refinery = wildfire". They're handled by the guardrail below and only used to evaluate the full pipeline.
+- **Model:** `xgboost.XGBClassifier`, `max_depth` 3, 300 rounds, learning rate 0.05, weighted for class balance; logistic regression and rules-v0 as baselines on the same rows.
+- **Calibration:** Platt scaling on grouped out-of-fold margins, to an even wildfire/burn prior; `score = round(100 × p)`.
+- **Split:** train ≤ 2022, test 2023–2025; plus leave-one-year-out over the training years as a second view.
+- **Reasons:** `booster.predict(dmatrix, pred_contribs=True)` gives log-odds contributions per feature. Each is shown as points = contribution × Platt slope × 25 (the sigmoid's slope at 50), so one point ≈ one score point mid-scale. `doy_sin` + `doy_cos` are merged into one "time of year" reason.
+- **Artifact:** `backend/data/model/xgb_v1.json` + `meta.json` (ordered features, Platt a/b, evaluation, importance). `SCORER=auto|model|rules`; `auto` uses the model when present and the event isn't degraded.
 
 ### 5.4 Guardrails (applied after the model)
 
 | Rule | Effect |
 |---|---|
 | `dist_town_km` ≤ 1 or `dist_line_km` ≤ 0.5, and not a static source | Floor at `investigate` |
-| `dist_static_km` ≤ 0.5 and `frp_growth` < 2 | Cap at `monitor` |
+| `dist_static_km` ≤ 1 and `frp_growth` < 2 | Cap at `monitor` |
 | Event degraded (weather missing) | Score from rules scorer; badge "degraded" |
 
 When a guardrail changes the recommendation, `guardrail` is set and shown in the UI ("Raised to Investigate: within 1 km of Ashland").
 
 ### 5.5 Re-scoring and notification
 
-Rescore an event when a detection joins it, or hourly while open (weather changes). Notify (toast + sound in UI; SMS/email stretch) only when the recommendation **rises**: monitor → investigate, investigate → escalate. Never notify on a falling score.
+Rescore an event when a detection or signal joins it, when a reply arrives, or hourly while open (weather changes). Notify only when the level **rises** (monitor → investigate → escalate), or when an escalated fire's direction or threatened contacts change. Never notify on a falling level.
+
+### 5.6 Response planner and messaging
+
+**Escalation ladder** (timers in config):
+
+| Trigger | Message | If no reply |
+|---|---|---|
+| Event reaches Investigate | `duty_fyi` to the duty officer; ask-the-neighbor texts | Nothing; the duty officer may reply PAGE anyway |
+| Event reaches Escalate | `duty_escalate` to the duty officer: place, signals, wind, `Reply PAGE or NO` | After 3 min: the next contact by `ladder_rank` (chief). After 6 min: automated voice call to county dispatch with the same text. |
+| Reply `PAGE` | `page` request to county dispatch (SMS + email; voice in live mode), plus the district's paging app by email-to-page if configured; `downwind` texts | — |
+| 5 min after PAGE with fewer than 2 volunteers replying `R` (responding), or the 60-min footprint exceeds the district's capacity setting | `mutual_aid` draft to the chief: `Reply SEND to request <neighbor district> + county EM` | — |
+
+**Who gets a downwind text.** Run the spread estimate for 60 minutes at the event's observed wind. Text any opted-in rancher, pumper, water-truck driver, or disc owner whose location the fire reaches within 60 minutes, or who is within 2 miles. Order the texts by arrival time. The text includes direction, distance, and the estimated arrival rounded to 5 minutes, and always "Only if safe." Water-truck and disc owners get an ask (`Reply 1 if you can help`); ranchers get a heads-up.
+
+**Message templates** (≤ 160 characters, plain text, no links required):
+
+```
+duty_escalate  FIREWATCH ESC: grass fire likely {dist} mi {dir} of {town}. {signals}. Wind {wdir} {wmph} mph. Reply PAGE or NO
+duty_fyi       FIREWATCH: possible fire {dist} mi {dir} of {town} ({signal}). Asking neighbors. Reply PAGE to page now
+ask_neighbor   Firewatch: possible fire near {place}. See smoke? Reply 1 yes, 2 no, 3 it's my burn
+page           FIREWATCH PAGE for {district}: grass fire {dist} mi {dir} of {town}, {lat},{lon}. Wind {wdir} {wmph}. Confirmed by {signals}
+downwind       FIREWATCH: grass fire {dist} mi {dir} of you, wind {wdir} {wmph} mph, could reach you in ~{eta} min. {ask} Only if safe.
+mutual_aid     FIREWATCH: {n} responding for {district} fire {dist} mi {dir} of {town}. Reply SEND to request {neighbor} + county EM
+health         FIREWATCH 7AM: satellites OK, co-op feed {coop_status}, SMS OK. {n_burns} burns registered today
+```
+
+**Inbound parsing** (case-insensitive, first word): `FIRE` → report; `BURN` → burn notice; `1` / `2` / `3` → neighbor reply; `PAGE` / `NO` / `SEND` → duty decisions, accepted only from the ladder; `R` → responding; `STOP` / `START` → opt-out and opt-in (carrier requirement). Anything else gets a one-line help reply.
+
+**More than one fire.** A bare `PAGE`, `NO`, `SEND` or `R` answers the newest text that person got. When they also have another open fire, the decision and page texts carry the fire's number (`Reply PAGE 14 or NO 14.`, `Reply R 14 if responding`, and the mutual-aid draft names the place), and the reply can name it: `PAGE 14`, `PAGE FW-0014` or `R 14`. A number that isn't an open fire gets "no open fire 14" and changes nothing. With more than one fire open, the confirmation says which fire it acted on.
+
+**Gateway.** One `SmsGateway` interface with two implementations: `OutboxGateway` (sample mode: writes `messages` rows and shows them in the console's outbox) and `TwilioGateway` (live: sends, and receives on `POST /api/sms/inbound`, with the webhook signature verified). Outbound is rate-limited per contact (at most 1 message a minute; batched FYIs at most once every 15 minutes).
+
+### 5.7 Mesh radios (Meshtastic)
+
+For the places with no cell bar at all, volunteers and trucks can carry a Meshtastic LoRa radio (SenseCAP T1000-E: ~$51, card-sized, GPS, buzzer, IP65). One radio plugged into the server by USB (or reachable over TCP) is the gateway. Code: `backend/app/mesh.py`.
+
+- **Out.** `notify.send` texts a contact by SMS and, if the roster gives them a `mesh_id` and the gateway radio is connected, also sends the same text over the mesh as a direct message with an ACK requested. That's one `messages` row per channel. Mesh rows go from `sent` to `relayed` (another radio rebroadcast it), `delivered` (the recipient's radio acknowledged it), or `failed` (the firmware gave up). SMS has no equivalent "delivered to the device" signal. Mesh sends happen in sample mode too, since they only reach radios the roster links to a contact.
+- **In.** A direct message to the gateway radio goes through the same `handle_inbound` parser as an SMS (`PAGE`, `R`, `1`/`2`/`3`, `FIRE`, `BURN`, `STOP`). The reply goes back on the mesh only. Broadcast channel chatter is ignored. A radio with no roster contact counts like an unregistered number: it can open an Investigate, never an Escalate.
+- **Positions.** Position, node-info, and telemetry packets update `mesh_nodes`. A `FIRE` from a radio with a fix from the last 30 minutes is located at the radio, not at a roster address. So a volunteer or lease truck can report from the field, and volunteers, who have no roster location, show on the map. Each alert's response lists `crew`: roster contacts with a fresh fix, nearest the fire first.
+- **Health.** `/api/health` reports `mesh` as a source: `ok` if a packet arrived in the last 15 minutes, `stale` if connected but quiet, `down` if no radio is attached. The server retries the connection every 30 s.
+- **Range, honestly.** A body-worn T1000-E reaches about 2–5 km on flat ground and further from height. 450 sq mi needs relay radios (router role, solar) on the same elevators and water towers as the phase 3 cameras. Until then the mesh covers the station area and wherever radios happen to chain.
+
+### 5.8 Tower sensor nodes
+
+The tower relays carry sensors: a PMSA003I particulate sensor and an SHTC3 or BME280 temperature and humidity sensor on a RAK4631, in a vented radiation shield. Meshtastic firmware reads them and sends telemetry packets; `mesh.handle_packet` passes them to `backend/app/sensors.py`, which stores `sensor_readings`. Each tower node needs a fixed position set in Meshtastic: a node with no position records readings but raises no signals.
+
+- **Smoke rule.** For each PM2.5 reading: rise = PM2.5 − the node's baseline (median of its readings from 3 h to 20 min ago, or 10 µg/m³ with fewer than 3). It's smoke if rise ≥ `smoke_pm25_rise` (50), PM2.5/PM10 ≥ `smoke_fine_ratio` (0.6; dust is coarse), and, when at least 2 sensors more than 15 km away reported in the last 30 minutes, fewer than `smoke_regional_share` (50%) of them rose by half the threshold (otherwise it's regional haze). Then `add_signal("sensor_smoke", node position, source "mesh:<node>")`, at most once per node per `smoke_repeat_min` (60). Thresholds live in the district's `settings.json`.
+- **How much it counts** (`backend/app/sensor_model.py`, [Sensor smoke model v1](research/sensor-smoke-model-v1.md)). The rule decides whether; a fitted curve decides how much. The rise becomes a likelihood ratio, ×8.8 at 50 µg/m³ up to a ×20 cap, stored on the signal as `meta_json.pm_lr`. Measured against the Flint Hills 2022 PurpleAir campaign's expert local-smoke designations, the rule itself is worth ×9.8 (95% CI 5.6–19.8), not the assumed ×15. That measured value is the weight for any sensor signal without a model weight.
+- **Gas.** `environmentMetrics.gasResistance` (sent in MΩ, stored in kΩ as `gas_kohm`) and `barometricPressure` (`pressure_hpa`) are stored with each reading. Only the ratio to the node's own baseline is used, so the unit doesn't matter. A gas reading is down when the node's last two readings, within 60 min, are both at most half its baseline (same 3 h median). That weight comes from a curve fitted on controlled-burn recordings, capped at ×3 (`meta_json.gas_lr`).
+  - On a node whose PM2.5 rule fires, a gas drop adds its weight at `sensor_gas_weight` (0.5, in log terms).
+  - A gas drop alone attaches to an open event within 8 km as evidence that doesn't count as a source. It never opens an event.
+  - Pressure is stored and shown, not yet used.
+- **Local weather.** On live (non-sample) events, temperature and humidity from the nearest sensor within 15 km with a reading in the last 30 minutes replace the forecast's values before fire danger is computed; `weather.local_sensor` names the node. Sample events keep the scenario's weather, so a sensor on the demo table can't change the replay.
+- **Map.** `GET /api/mesh/nodes` includes each node's latest `sensors` readings; the map label shows PM2.5, °C, and RH, amber at PM2.5 ≥ 35.
+- **Power.** The PMSA003I fan draws 60–120 mA, more than a small panel supplies running nonstop. Set the air-quality telemetry interval to 5 minutes. Whether the firmware sleeps the fan between readings (through the sensor's SET pin) is unverified; check it on the first node before buying six.
+
+### 5.9 Playbook: a dynamic run card (`backend/app/playbook.py`)
+
+The full explanation of the decision model is in [How Firewatch recommends actions](RECOMMENDATIONS.md); the fitted danger multiplier in [Fire-day model v1](research/fire-day-model-v1.md). This section is the summary.
+
+A fire department's run card is a fixed table: "a grass fire in zone 4 gets Brush 1 and Tanker 1". The playbook makes it dynamic. For the decision in front of the dispatcher it shows three options side by side, one recommended, each with what it costs and exactly what it will do. After a choice it shows a receipt.
+
+**How the recommendation is chosen: expected loss** (`backend/app/decision.py`). Every candidate option is scored:
+
+> expected loss = P(fire) × acres burned before enough help is on scene + (1 − P(fire)) × false-alarm cost
+
+Everything is in acres, so the trade reads plainly: "a false page costs us about as much as 100 acres burned". The three lowest-loss options are shown, the lowest is recommended, and the card says at what P(fire) the runner-up would win (the break-even point).
+
+- **P(fire)** starts from a base rate set by the earliest signal, then multiplies the odds by a likelihood ratio for each piece of evidence:
+  - a line lockout: 3% (PG&E outage-to-ignition rate) × a danger multiplier from the fire-day model (per-day rate ratio ^0.5: Low-Mod ×0.52, High ×1, Very High ×1.6, Severe ×2.4, Extreme ×4.2)
+  - a satellite detection: 15% real-world prior; scorer v1's score `s` then counts as a factor of s/(100−s), because its scores are calibrated to an even wildfire/burn prior
+  - a neighbor seeing smoke ×20, "no smoke" ×0.4, "my burn" ×0.1; a registered text report ×10; an unregistered one ×2; camera smoke ×8; inside a registered burn that hasn't escaped ×0.05
+  - smoke sensors, once for all of them: the sensor smoke model's weight (section 5.8), or the rule's measured ×9.8 when a signal carries none
+- **Acres if it is a fire** comes from the median ensemble forecast at the time enough help is on scene:
+  - two trucks if the fire stays under `capacity_ha_60min` for 30 min after they arrive
+  - otherwise when mutual aid arrives: requested 5 min after the page, 35 min travel, or 25 min if the downwind stations got a heads-up
+- **False-alarm costs** in acre-equivalents: a page 100, a mutual-aid request 250, a heads-up text 3, a neighbor text 1.
+- **Candidates for "How should we respond?":** page now (it also sends the downwind heads-up), ask neighbors or wait for their answers, heads-up + ask, heads-up + recheck on the next pass, and watch. Once two sources agree, the wait-to-confirm options drop out and "heads-up only" takes their place.
+- **Candidates for "Do we need mutual aid?":** request now, wait for Brush 1's size-up, or don't.
+- **Every weight** is listed with its source in `decision.DEFAULTS`, returned as `model` by the API, and shown under "How this is decided". A district overrides any of them under `"decision"` in its `settings.json`. The weights are planning assumptions until outcomes are logged and the ratios re-fitted.
+- **On the scenario:**
+  - At minute 0 (line lockout on an Extreme day, P = 13%), heads-up + wait for neighbors wins.
+  - At minute 8 a neighbor sees smoke (P = 74%), and paging wins; that flips back below 33%.
+  - At minute 9, after the page, requesting mutual aid now wins (expected loss ~413 vs ~1,230 for waiting for the size-up).
+
+**What each option shows:**
+- when the district would be paged
+- acres if it is a fire, and when enough help is there
+- what it costs if it isn't
+- the expected loss
+- how many stations are warned ahead of the fire
+
+**Doing it:**
+- `POST /api/alerts/{id}/options/{option_id}` runs the option through the real paths (`notify.decide` for page and mutual aid, `ask_neighbors`, and heads-up texts).
+- It records `{option, by, at, followed_recommendation, texts sent by purpose}` in the response state.
+- A chosen option is marked done and can't be repeated.
+- `GET /api/alerts/{id}/options` returns the assessment, the current decision and the receipts. The receipts include automatic steps and decisions made by text (PAGE / SEND).
+- The console drawer shows this panel at the top. The old Acknowledge / Escalate buttons, which only changed a status label, are gone; "Not a fire: dismiss" remains.
+
+
+### 5.10 Region planner
+
+[sensors/README.md](../sensors/README.md) defines two ground-node tiers: **bare** (gas, temperature, humidity, pressure) and **rich** (bare plus a PMSA003I particulate sensor). The planner prices them at the README's reviewed low-end custom-board budgets for ~100 units, $136.44 bare and $203.60 rich, which cover electronics and enclosure but not deployment mounts. It can switch to the stocked-module prices, $175 and $240, for comparison. Its illustrative layout is seven bare and two rich nodes per 15-acre planning plot, or 70 bare and 20 rich for a county, "depending on site assessment", with separately powered relays and one station bridge. The region planner does the desk half of that site assessment for any fire district or Kansas county. It decides where the plots go, how the nodes sit in each plot, and which relays connect them to the station, using only public geography and climate data. Code: `backend/app/planner.py`, `backend/app/climate.py`; page `/planner`.
+
+1. **Grid.** The region is cut into 1 km cells, or coarser so that there are at most 2,500 cells.
+2. **Where fires start.** For each cell, a likelihood is built from four inputs, each normalized to the region's 95th percentile:
+   - Reported wildfires: NIFC WFIGS, 2014–2026, Gaussian kernel σ 4 km, weight 0.30.
+   - Satellite-detected burning: ten years of FIRMS events with industrial heat removed, σ 3 km, weight 0.25. Escaped pasture and debris burns are a leading Kansas cause.
+   - Transmission lines (e-fold 1 km) and substations (1.5 km), weight 0.25.
+   - Towns, weighted by population (e-fold 3 km), weight 0.20.
+
+   The sum is multiplied by fuel: 1.0 in the Flint Hills tallgrass, 0.7 elsewhere. **Consequence** is the share of fire-weather hours whose wind carries a fire from the cell toward a town within 12 km. Priority = likelihood × (0.6 + 0.4 × consequence).
+3. **Climate.** `climate.py` pulls ten years of hourly ERA5 data (Open-Meteo archive) for the region's 0.25° cell and keeps the hours with grass fire danger of High or worse (GFDI ≥ 12, the same bar a line fault must clear). From those hours it derives:
+   - a 16-sector wind rose and its main wind directions, where a second direction counts if it is at least 67.5° from the first and holds at least 10% of the hours;
+   - High+ hours by month;
+   - worst-week sun-hours in fire season and in winter;
+   - days below the PM sensor's −10 °C limit;
+   - the share of foggy fire-season mornings.
+
+   For Cottonwood Creek (the Coldwater stand-in): 221 High+ hours a year, 61% from the SSW and 36% from the NNW behind cold fronts, mostly in March and April. The cached summaries in `data/climate/` are committed so planning works offline.
+4. **Detection model.** A sensor only smells a fire it is downwind of, so a plot's catchment is a wedge upwind of it, weighted by the wind rose:
+   - **Rich nodes:** 3 km, ±20° plume half-width, 0.8 chance a node in the plume catches it.
+   - **Bare nodes:** the plot itself plus 0.4 km of fetch upwind, with a 0.3 chance per node of catching a fire there. Dryad's 100 m spacing is the only reference. That footprint is a small fraction of a 1 km cell, so bare nodes barely move the watched share (about 0.1–0.2% in Cottonwood Creek) and never move plots: they add confirmation inside the plot, while the rich nodes' smoke range decides placement. The page states this split under the summary.
+
+   These are planning guesses, because the README is explicit that no node has a proven detection radius. They are request parameters so the detection trial's numbers can replace them.
+5. **Siting.** The top 400 cells by priority are candidates. A cell crossed by a power line puts its plot on the line, at the co-op's right of way; otherwise the plot goes at the cell center. Plots are chosen greedily by marginal priority covered, at least 3 km apart. The page plots the coverage curve up to twice the requested count, so a county can see what each extra plot buys. A budget can replace the plot count; the planner then fits plots, relays, the station and 10% spares under it.
+6. **Plot layout.** Nodes go on a 4 × 4 lattice across the 15-acre square (~82 m spacing). The lattice grows to 5 × 5 or 6 × 6 when a plot has more than 16 nodes.
+   - Rich nodes take the corner farthest downwind of each fire-wind direction, one per direction. In Cottonwood Creek that puts one on the NE corner for SSW winds and one on the SE corner for post-frontal NNW winds.
+   - Bare nodes fill the next most-downwind positions.
+7. **Mesh.** Relay candidates are:
+   - town elevators and water towers (30 m, mains power);
+   - substations (30 m, mains);
+   - terrain high points at least 5 m above their surroundings (10 m mast, solar);
+   - a 10 m mast at the plot itself;
+   - as a last resort, a new 10 m mast on an 8 km grid across the region, so sparse western counties with few towns can still be routed.
+
+   A plot whose own mast can't see any of these, usually one in a creek draw, is listed as unreached with a survey warning.
+
+   Planning ranges come from `docs/research/hardware-pricing.txt`: tower to tower 25 km, tower to ground 7 km, mast to ground 5 km, ground to ground 3 km. Each link also needs line of sight over AWS terrain (about 150 m resolution), with 4/3-earth curvature and a Fresnel-zone margin that marks the link clear (60% or more) or marginal. A greedy Steiner tree connects the cheapest unconnected plot each round and pays only for new relays, within Meshtastic's default 3-hop limit. Plots aren't used as relays: the README says field nodes should prioritize sampling and power.
+8. **Power check.** Daily energy made (panel W × worst-week sun-hours × 0.6, the README's yield) is compared with need:
+   - **Need:** 1.5 Wh/day base load (an assumption until the bench trial measures it), plus 3 Wh/day for a rich node's PM sensor at 25% duty.
+   - **Output:** days on the pack when there's a deficit, and the highest PM duty the fire-season worst week supports.
+   - **Cottonwood Creek:** both tiers break even in fire season. In the worst winter week, a rich node runs a 0.2 Wh/day deficit that its 24.4 Wh pack covers for about 108 days.
+9. **Site checks.** Each plot gets the README's nuisance list applied to its location:
+   - a substation within 0.5 km means mains power, so the PM fan can run continuously;
+   - a town within 1 km moves the gas baseline (exhaust, heating);
+   - an industrial heat source within 5 km;
+   - Flint Hills burn-season haze;
+   - foggy mornings.
+10. **Explanations.** Following principle 2, every placement says why:
+    - **The ground:** the cell's risk rank within the region, and how much of its score each factor supplies (reported wildfires, satellite-seen burning, power lines, towns), plus tallgrass fuel and whether fire winds carry it toward a town.
+    - **The pick:** the share of the region's risk the plot adds, and the next-best spot's share. It also says how many riskier cells were passed over, and why: too close to an earlier plot, or with less risk upwind of them.
+    - **The layout:** whether the plot sits on a line right-of-way or at the cell center, and which corners the rich nodes take for which fire winds.
+    - **Each relay:** why that kind of mount was used, and which plots it carries.
+
+    The map shades risk in three classes by rank within the region (the top 5%, the next 15%, the next 30%), because scores are normalized per region. Hovering a cell shows its breakdown.
+
+**Output.** `GET /api/planner/plan?region=district:cottonwood-creek` returns:
+- the region, climate and power check;
+- plots with reasons, a risk breakdown, why each was picked and laid out, checks, node positions, gateway link and hop count;
+- relays with uplinks, why each was used, and the plots each carries;
+- a bill of materials at the selected node prices (custom board by default, `pricing=stocked` for stocked modules), plus the same plan's hardware at the other prices;
+- GeoJSON for the priority grid (with each cell's rank and factor shares), nodes and links;
+- the assumptions, and any warnings.
+
+For Cottonwood Creek's 446 sq mi, the default 10 plots (70 bare, 20 rich) need 5 relays and come to about $19,400 with spares. They watch about 17% of the priority-weighted ground. That's the honest number: plots add evidence where fires are most likely, and satellites, line faults and neighbor reports cover the rest.
+
+**Limits.**
+- OpenStreetMap has transmission lines only. The co-op's distribution feeders, where most line fires start, should replace them in a real assessment.
+- WFIGS misses most small fires.
+- Trees, grain bins and buildings aren't in the terrain model.
+
+The planner drafts a placement design. The radio survey and the supervised-burn detection trial in sensors/README.md confirm or move each site.
+
+### 5.11 Plain-language answers and channel updates (OpenRouter)
+
+A language model on OpenRouter writes two kinds of text. It never writes the alerts: those stay fixed templates, because the parser depends on their reply words (`PAGE 12`, `R 12`) and coordinates. Code: `backend/app/llm.py`, `ask.py`, `bulletin.py`. Off unless `OPENROUTER_API_KEY` is set. With no key, nothing changes.
+
+- **Questions.** A text or radio message that asks something ("where is the fire?", "is it coming our way", `STATUS`) and starts with no keyword gets an answer, not the HELP reply. The answer comes from the open fires within 25 mi of the sender (their radio's GPS fix, or their roster address). For each fire it uses the status, distance and bearing, wind and spread direction, the forecast's acres now and in an hour, and the worst-case arrival at the sender. It goes out as one text (purpose `answer`) on the channel the question came in on, a moment later on a worker thread. A question is never filed as a report, even when it names a fire. The model is told to answer with `FIRE` when someone says they can see one.
+- **Channel updates.** While a paged fire is open, the district's mesh channel gets a short update (purpose `channel_update`, one `messages` row per post) at these points:
+  - when crews are paged, when mutual aid goes out, or when an escalated fire is stood down;
+  - every `CHANNEL_UPDATE_MIN` (15) minutes after that;
+  - sooner if the wind swings 45 degrees or more, or the forecast size doubles and grows by at least 100 acres.
+
+  Updates go out only when the server's radio is up. A replay posts only while it plays on its clock, never when it is loaded all at once. Updates carry no names or addresses, since everyone on the channel reads them.
+- **Checks.** The model gets a block of facts and must answer from those facts alone. Its answer is turned into one line of ASCII (a curly quote would turn an SMS into 70-character segments) and cut at a sentence end to fit. It is then rejected if it uses any number that isn't in the facts (911 aside). If the call fails, times out (12 s), or the answer is rejected, a plain template goes out with the same facts. So the model changes the wording only, never whether a text goes out.
+- **Model.** `OPENROUTER_MODEL`, default `openrouter/free`. That router picks one of OpenRouter's free models for each request, so it costs nothing, but the quality of the wording varies from text to text. Some of those models refuse to answer with reasoning turned off; for them the call is retried once with reasoning on. A paid model such as `anthropic/claude-haiku-5.5` (about a tenth of a cent per answer) words things more reliably.
+
+### 5.12 FireNode health and the simulated network
+
+`backend/app/sensor_health.py` judges each field node (`sensor_nodes`: sensor, relay, or station bridge) from its telemetry alone. A check with no data says so instead of guessing. Radio health and sensor health are separate, and a node is healthy only when both are:
+
+- **Radio link.** No heartbeat for 30 min is Watch; for 2 h it's **Radio link down, cause unknown** (`offline`). An SNR under −12 dB is Watch.
+- **Stale sensors.** FireWatch firmware sends a per-sensor sample counter (`firewatchMetrics.envSeq`, `pmSeq` in the telemetry packet; stored as `env_seq`, `pm_seq`). If heartbeats keep arriving but a counter repeats for 3 reports, that sensor is **stale, may need replacement**. Its value-based checks are skipped, and a resent PM or gas sample can't raise a smoke signal. A node that sends no counters (stock Meshtastic) is never called stale.
+- **Battery.** Usable capacity = energy drawn overnight (pack V × current) ÷ the fall in charge it caused, against the pack's nominal Wh (bare 16.3, rich and relay 24.4). Below 70% is Replace, below 80% Watch. Power comes from Meshtastic power telemetry: channel 1 the pack, channel 2 the panel.
+- **Solar.** Yesterday's peak panel output against the network's median. Under 45% of it is Service (clean or re-aim); no output in daylight is Replace.
+- **Gas head.** Clean-air resistance against the value logged at commissioning: ±30% Watch, ±50% Replace.
+- **PM sensor (rich).** Zero for 3 h while other rich nodes read ≥ 2 µg/m³ means a blocked inlet or stopped fan (Service). Fan hours are estimated at 25% duty against an assumed 2-year service life.
+
+Service intervals are placeholders until the first field season sets real ones.
+
+**Simulator** (`backend/app/sensor_sim.py`, `SENSOR_SIM=true`). On start it installs the region planner's plan for the district: 10 plots of 7 bare and 2 rich nodes, the relays and the station bridge. It backfills 26 h of telemetry (a night and a day of solar charge and discharge), then sends a report from every node every 2 min through `mesh.handle_packet`, the same path a real radio's packets take. Eleven nodes get faults a field season would find: worn packs, a dirty panel, a dead panel lead, gas drift, a stalled environmental head, a stalled PM sensor, a blocked PM inlet, an old PM fan, a weak antenna, a silent node, and a relay low on charge. Everything is marked `simulated`: its smoke signals are sample events that show on the live map (the live alert list admits sample events whose signals came from simulated nodes) but never text anyone, its temperatures never replace the forecast, and its PM is compared only with other simulated nodes.
 
 ## 6. Spread simulation
+
+Every estimate from this model is shown as a worst case ("as little as", "up to", "soonest"). It runs fast: on the packet's weather it gives 7.7 mi at minute 62, against the packet's 2 to 3 mi. A downwind text warned too early costs little; one warned too late does not.
 
 ### 6.1 Inputs and outputs
 
@@ -289,8 +621,8 @@ Output:
     {"type": "Feature", "properties": {"minutes": 5, "area_ha": 12.4}, "geometry": {"type": "Polygon", "coordinates": []}}
   ]},
   "impacts": [
-    {"kind": "town", "name": "Ashland", "minutes": 38, "distance_km": 3.9},
-    {"kind": "power_line", "name": "345 kV", "minutes": 22}
+    {"kind": "power_line", "id": "way/171460121", "name": "Post Rock - South Hays", "minutes": 22},
+    {"kind": "town", "id": "node/151906796", "name": "Ashland", "minutes": 38}
   ],
   "wind_vector": {"from_deg": 200, "kmh": 48}
 }
@@ -298,7 +630,7 @@ Output:
 
 ### 6.2 Fire behavior
 
-Treat all fuel as cured grassland (true for most of Kansas in the dormant season). On screen: *"Simplified grass-fire estimate for planning. Not an operational fire behavior prediction."*
+The CSIRO grassland rate below is the rate for cured natural grass; each grid cell scales it by a fuel multiplier from land cover (6.4). On screen: *"Simplified grass-fire estimate for planning. Not an operational fire behavior prediction."*
 
 1. **Dead fuel moisture** (McArthur): \(MC = 9.58 - 0.205\,T + 0.138\,RH\) (%).
 2. **Moisture factor** (Cheney et al., 1998): \(\phi_M = e^{-0.108\,MC}\) for \(MC < 12\%\); for \(MC \ge 12\%\), \(\phi_M = 0.684 - 0.0342\,MC\) if \(U \le 10\) km/h, else \(0.547 - 0.0228\,MC\). Clamp at ≥ 0.
@@ -313,15 +645,106 @@ Treat all fuel as cured grassland (true for most of Kansas in the dormant season
 
 ### 6.3 Arrival-time grid
 
-- Grid: 12 × 12 km centered on the event (shift the center 3 km downwind so the head fire stays in frame), 60 m cells (200 × 200).
+- Grid: square, sized so the fastest plausible run stays in frame (half-width ≥ 6 km), shifted toward the mean downwind side. 200 × 200 cells for a single run, 400 × 400 for the ensemble.
 - Elevation sampled from Terrarium tiles at zoom 12 and resampled to the grid; slope computed per neighbor step.
 - Ignition: cells within the event's detection footprint set to arrival time 0.
-- Propagation: Dijkstra over a 16-neighbor stencil. Edge cost = step distance ÷ \(R(\theta, s)\). Stop at 60 min (or the requested duration).
+- Propagation: Dijkstra over a 16-neighbor stencil. Edge cost = step distance ÷ \(R(\theta, s) \times\) fuel multiplier of the destination cell. Cells with multiplier 0 never burn. Stop at 60 min (or the requested duration).
 - Isochrones every 5 min: threshold the arrival grid, trace contours (`skimage.measure.find_contours` or `contourpy`), convert grid coordinates to lon/lat, simplify to ~20 m tolerance.
 - Impacts: intersect each isochrone with towns, lines, and substations (`shapely`); report the first minute each asset is reached.
 - Performance target: < 500 ms per call. Cache by `(event_id, wind_kmh rounded to 2, wind_dir rounded to 5°)`.
 
 Sanity tests: zero wind on flat ground produces near-circular isochrones; doubling wind lengthens the head run; flipping wind direction mirrors the shape.
+
+### 6.4 Fuel map (`backend/app/sim/fuels.py`)
+
+- **Base layer:** NLCD 2021 land cover, 30 m, from the MRLC WCS, cached in `data/cache/nlcd/` as 15 km tiles (EPSG:5070).
+- **Cropland refinement:** where a USDA CDL tile has been prefetched (`python -m scripts.fetch_fuels`), NLCD cropland is split into winter wheat, row-crop residue and fallow. CDL is never fetched during a forecast: its service is slow and often returns 502.
+- **Multipliers** relative to cured natural grass, by season (dormant Nov–Apr / growing May–Jul / late Aug–Oct). These are planning assumptions, not measured values:
+
+| Class | Dormant | Growing | Late |
+|---|---|---|---|
+| Grass, pasture, CRP | 1.0 | 1.0 | 1.0 |
+| Shrub and sand sage | 0.9 | 0.9 | 0.9 |
+| Cropland, unrefined | 0.3 | 0.3 | 0.3 |
+| Winter wheat | 0.15 | 0.6 | 0.3 |
+| Row-crop residue | 0.4 | 0.1 | 0.3 |
+| Fallow | 0.25 | 0.25 | 0.25 |
+| Trees | 0.5 | 0.5 | 0.5 |
+| Wetland | 0.4 | 0.3 | 0.4 |
+| Roads, open developed | 0.3 | 0.3 | 0.3 |
+| Town | 0.05 | 0.05 | 0.05 |
+| Water, barren | 0 | 0 | 0 |
+
+- Each grid cell averages 3 × 3 land-cover samples.
+- Neither dataset separates CRP from grazed range, so all grass is treated as ungrazed (the worst case).
+- A 1-cell (100–200 m) gap can still be crossed by the stencil's knight moves, which roughly stands in for spotting across roads and creeks on a windy day.
+- If tiles are unavailable, the missing area is assumed to be grass, and `assumptions.fuel` says so.
+
+### 6.5 Changing weather and new ignitions
+
+- Weather is a series of hourly (or finer) values. Rates are recomputed every 10 minutes from the weather interpolated at the middle of the block, so a wind shift turns a flank into a new head.
+- **New point ignition** (`fire_age_min = 0`, e.g. a line fault): the fire accelerates toward its equilibrium rate, \(R(t) = R\,(1 - e^{-0.115\,t})\), with t in minutes (Canadian FBP open fuels). At 15 minutes the head has run about half as far as an established fire's.
+- **Established fire** (`fire_age_min = None`, e.g. first seen by satellite): it spreads at the full rate from the start.
+
+### 6.6 Ensemble forecast (`backend/app/sim/ensemble.py`)
+
+- 24 members on one domain. Each member scales the whole weather series by:
+  - a wind-speed factor (lognormal, σ 0.15)
+  - a direction offset (σ 15°)
+  - an RH offset (σ 3 pts)
+  - a fuel-load factor (lognormal, σ 0.15)
+  
+  Member 0 is unperturbed. The seed is fixed, so results are reproducible.
+- These spreads are assumptions sized to typical hourly forecast error, not calibrated values.
+- **Extreme-day runs.** A quarter of the members (6 of 24) use a second rule on dry, gusty days (dead fuel moisture under 8%, gusts of 60+ km/h): the head runs at least 20% of the gust speed, the grassfire rule of thumb (Cruz, Alexander & Kilinc 2022) applied to gusts. The back-test found the CSIRO rate 2–4× too slow on Starbuck 2017 and Ranger Road 2026, and the worst case missed them. With these runs the worst case widens on such days and the median barely moves. On moist nights (Anderson Creek) the condition isn't met and nothing changes.
+- Outputs:
+  - `isochrones`: median arrival
+  - `isochrones_early`: 10th-percentile arrival, i.e. "could be there this soon"
+  - `probability`: burned-by-end outlines at 10/50/90 % of members
+  - `checkpoints`: area and head distance at 15/30/60/90/120 min as p10/p50/p90
+  - `impacts`: per asset, the probability of being reached and arrival p10/p50/p90
+  - `fuel_mix`
+  - `provenance`: every input labeled observed / forecast / inferred / simulated / assumed
+- Runtime is about 0.7 s for 24 members at 400 × 400.
+
+### 6.6b Back-test
+
+`backend/ml/backtest.py` starts the forecast from a real fire's first FIRMS look, with the archive's hourly weather, and scores it against later looks. v1 results are in [Spread forecast back-test v1](research/spread-backtest-v1.md): on Anderson Creek 2016, 70–81% of the detections 15 h later fell inside the forecast (median / worst case), against 25% for the original constant-wind model. Starbuck 2017 was under-predicted by about 2× overnight.
+
+### 6.6c Fire forecast on the 2D map
+
+With an alert selected, the console map's **Fire forecast** layer (on by default) shows the fire's likely outline (ensemble median, filled) and worst case (10th-percentile arrival, dashed). A time slider runs from the fire's "now" to +6 h in 15-minute steps; "now" is the scenario clock, a sample's last detection, or the wall clock. A small arrow and label at the fire, repeated in the slider readout, give the forecast wind at that time ("↗ WSW 29 mph"), so you can see why the outline turns.
+
+- `GET /api/alerts/{id}/forecast` returns `steps[{ahead_min, at, likely, worst, wind{from_deg, kmh, compass}}]`.
+- It uses 12 runs rather than the playbook's 24, because a 6-hour run costs ~10 s cold; results are cached per alert.
+- Non-scenario alerts forecast with Open-Meteo's **hourly** weather at the fire (archive for past fires, forecast for live ones) instead of one reading held constant. If the fetch fails, the one reading is held constant and the provenance says so.
+
+### 6.7 Situation contract (`backend/app/situation.py`)
+
+The forecast and the recommendation layer read only a `Situation`, a pydantic model that ingestion fills in. Every block carries a `Provenance {source, kind, as_of}`.
+
+| Field | Required | Fallback |
+|---|---|---|
+| `ignition {lat, lon, time, points?, fire_age_min}` | yes | |
+| `weather {hours: [{time, wind_kmh, wind_from_deg, temp_c, rh_pct, gust_kmh?}]}` | yes | `from_open_meteo()` builds it from Open-Meteo |
+| `curing {pct}` | no | seasonal table (assumed) |
+| `red_flag` | no | unknown |
+| `burn_permits [{id, lat, lon, acres, start, end, status}]` | no | none |
+| `resources [{id, name, kind, lat, lon, crew, available, ready_min}]` | no | none |
+| `use_fuel_map`, `use_terrain` | no | true |
+
+API:
+- `GET /api/scenario/{slug}/situation[?weather=front]`: the replay scenario and its district, as a `Situation`
+- `GET /api/scenario/{slug}/forecast?minutes=120&members=24[&weather=front]`
+- `POST /api/forecast`, with a `Situation` as the JSON body
+
+`scenario_situation()` builds the `Situation` from the replay scenario (section 10) and its district:
+- ignition, `weather_hourly`, `curing_pct`, `red_flag` and the packet's weekend `burn_permits` come from the scenario
+- texted BURN notices in the timeline also become permits
+- apparatus at the station and mutual aid come from the district `settings.json`
+- the water truck and disc owners come from the roster
+
+`weather_variants.front` is a what-if in which a cold front swings the wind to the northwest at 4 pm.
 
 ## 7. API contract
 
@@ -370,10 +793,28 @@ Query: `minutes` (default 60, max 120), optional `wind_kmh`, `wind_from_deg`. Re
 
 ### Others
 
-- `GET /api/layers/{power_lines|substations|towns|static_sources|counties}` → GeoJSON (cached files).
+- `GET /api/layers/{power_lines|substations|towns|static_sources|flint_hills|wildfire_history|counties}` → GeoJSON (cached files).
+- `GET /api/planner/regions` → districts and the 105 Kansas counties. `GET /api/planner/plan?region=district:<slug>|county:<name>` plans a sensor network (section 5.10); optional `sites`, `budget_usd`, `bare_per_site`, `rich_per_site`, `rich_range_km`, `bare_fetch_km`, `site_min_sep_km`. `POST /api/planner/plan` takes the same fields plus a GeoJSON `geometry` for a custom area.
 - `GET /api/health` → `{"mode": "live", "sources": {"firms_viirs": {"last_ok": "...", "age_min": 4, "status": "ok"}, "open_meteo": {...}}}`. Status is `ok` (< 15 min), `stale` (< 60 min), or `down`.
 - `POST /api/ingest/run` → runs one poll immediately.
 - `POST /api/sample/replay` → clears sample events and streams fixtures in over `duration_s` (default 60).
+- `POST /api/signals` → `{kind, lat, lon, observed_at, source, value}`; used by the co-op adapter and by tests. Returns the event it attached to.
+- `POST /api/sms/inbound` → Twilio webhook (form-encoded `From`, `Body`); signature-checked when `SMS_GATEWAY=twilio`. `POST /api/sms/simulate` (`{from, body}`) does the same without a signature, in sample mode only, so the console can play a reply without texting anyone real.
+- `GET /api/messages?event_id=&limit=` → outbox and inbox, oldest first.
+- `GET /api/contacts` → the roster (phone numbers masked except the last 4 digits).
+- `GET /api/district` → district settings and boundary GeoJSON (drawn on the map).
+- `GET /api/sensors` → the FireNode network: every sensor node, relay and station bridge with its position, `status` (`ok | watch | service | replace | stale | offline`), `radio` (`ok | down`), `sensors` (`ok | stale | unknown | n/a`), the actions it needs, latest readings, status counts, and the radio links as GeoJSON. Cached 20 s.
+- `GET /api/sensors/{node_id}` → one node: every health check with its value, detail and action, latest readings, and 26 h series (battery V, solar W, PM2.5, gas kΩ, temperature, RH) for the panel's trends.
+- `POST /api/sensors/sim/plume` → `{node_id}`: blows simulated smoke over that node's plot for 20 min (simulated nodes only). `POST /api/sensors/sim/reset` reinstalls the simulated network.
+- `POST /api/alerts/{id}/decision` → `{action: page | no | send, operator}`; the console's equivalent of a duty officer's reply.
+- `GET /api/scenario/{slug}` → scenario timeline: baseline milestones, Firewatch milestones as they happen, the fire's growth curve, and size at first truck on scene. `POST /api/scenario/{slug}/run` replays it; `POST /api/scenario/{slug}/load` runs it instantly; `POST /api/scenario/stop` stops a running replay at its current minute and keeps its events.
+
+Two levels of protection, both using `X-Firewatch-Token`:
+
+- **Token routes** can text people or change an alert: `/signals`, `/sms/simulate`, `/burns`, `/alerts/{id}/actions`, `/alerts/{id}/decision`, `/alerts/{id}/options/{option}`, `/sensors/sim/plume`. They require the token when `API_TOKEN` is set.
+- **Admin routes** run replays and ingest or show personal data: `/scenario/{slug}/run`, `/scenario/{slug}/load`, `/scenario/stop`, `/sample/replay`, `/sample/load`, `/ingest/run`, `/sensors/sim/reset`, `/messages`, `/contacts`, and the board's admin routes. They require the token too, and fail closed: in live mode with `API_TOKEN` blank they return `503 set API_TOKEN to use admin routes`. In sample mode a blank token lets them through.
+
+The dashboard never holds the token. The Vite dev server reads `API_TOKEN` from the root `.env` at startup and adds the header to every proxied `/api` request; restart it after changing the token.
 
 ## 8. Frontend design
 
@@ -432,6 +873,14 @@ Behavior:
 - New escalations get a pulsing marker, a toast, and an optional sound until acknowledged.
 - The bottom strip is the "we filtered the noise" message: the count of suppressed detections and why. Clicking it enables "Show suppressed."
 - Source chips turn amber when `stale` and red when `down`, with a tooltip giving the last successful pull.
+
+**Tier views.** A Free / Paid / Offline switch in the top bar (`frontend/src/lib/tier.ts`) shows the console as each product tier would see it. It's a view setting stored in the browser, not access control; the server runs everything either way.
+
+- **Free** (FireWatchOS, FireCast, FireWatch Mobile): no FireNode layers, crew-on-mesh section or sensor-only alerts. The alert's decision panel is labelled FireCast.
+- **Paid** (adds FireCast Plus and FireNode): everything. The panel is labelled FireCast Plus and says "LLM not configured" when `/api/health` reports `llm_configured: false`.
+- **Offline** (paid, station internet down): no map tiles, live feeds, board or Ingest. The alert list keeps only alerts with evidence that arrives without the internet (`sensor_smoke`, `report`, `neighbor_reply`), and a banner says what still works.
+
+**FireNode layer.** Below zoom 12.5 each plot is one marker coloured by its worst node; zoomed in, shape gives the node type (circle bare, diamond rich, triangle relay, square bridge) and colour its health (red for radio down, stale sensors or a part to replace). A chip counts nodes by status; clicking a node opens its panel: the FireMesh link and FireSense indicators, actions, every check, 24 h trends and latest readings.
 
 ### 8.4 Alert detail drawer (`/alerts/:id`)
 
@@ -511,7 +960,17 @@ Rendering:
 - A cyan `SAMPLE` badge replaces `● LIVE` in the header, and every sample card shows a small "sample" tag.
 - "Replay sample" clears sample events and streams the fixtures in over 60 s so the demo shows alerts arriving and scores rising.
 
-### 8.7 Component map
+### 8.7 Respond panel, scenario clock, and the field page
+
+- **Signals in the drawer:** the reasons list includes non-satellite evidence with its time ("Co-op lockout, Feeder 4 · 1:50"; "Rancher J. Miller: smoke · 1:57"). Each line has its own glyph (bolt for line fault, speech bubble for a text, satellite for a pass).
+- **Message log in the drawer:** every text in and out for the event, in time order, with delivery status. In sample mode, inbound replies can be played from here.
+- **Decision bar:** PAGE / NO / SEND MUTUAL AID, mirroring the duty officer's text replies; disabled until the level allows it.
+- **Contacts on the map:** roster locations as small glyphs by role (only for the selected event, to keep the map quiet). In the 3D view, a contact turns red when the front reaches it, with its ETA in the impacts list.
+- **Scenario clock (sample mode):** a strip under the top bar showing `T+08 min since ignition`, the brief's baseline milestones (2:17 seen, 2:21 911, 2:34 roll, 2:52 on scene) as ghost ticks, Firewatch milestones as solid ticks as they happen, and fire size at the current time from the spread estimate.
+- **Phone mockups (pitch only):** a side panel rendering the outbox as three phone screens (duty officer, downwind rancher, water truck), so judges see exactly what lands on one bar of cell.
+- **Field page `/m/{token}`:** linked from texts when data works. Plain HTML under 50 KB: level, place, reasons, wind, and a static map image. No JavaScript is required.
+
+### 8.8 Component map
 
 ```
 App
@@ -521,11 +980,16 @@ App
 │   ├── MapView (BaseMap, EventMarkers, AssetLayers, CountyLayer)
 │   ├── SuppressedStrip
 │   └── AlertDrawer (ScoreHeader, ReasonBars, Conditions, NearbyAssets, DetectionTimeline, ActionBar, History)
-└── Spread3DPage
-    ├── TerrainMap (IsochroneLayers, WindParticles, AssetLayers)
-    ├── WindPanel (Override toggle, SpeedSlider, DirectionDial)
-    ├── ImpactsPanel
-    └── TimeBar (Play, Scrubber, SpeedToggle, Reset)
+├── Spread3DPage
+│   ├── TerrainMap (IsochroneLayers, WindParticles, AssetLayers)
+│   ├── WindPanel (Override toggle, SpeedSlider, DirectionDial)
+│   ├── ImpactsPanel
+│   └── TimeBar (Play, Scrubber, SpeedToggle, Reset)
+└── PlannerPage (/planner)
+    ├── Controls (Region, Plots or Budget, Bare/Rich per plot, detection ranges)
+    ├── Summary (counts, cost, CoverageCurve), ClimatePanel (WindRose, MonthBars), PowerRow[]
+    ├── SiteCard[] (why this ground, why this plot, layout, checks, gateway link), Relays (why, plots carried), Bill of materials, Assumptions
+    └── PlanMap (risk classes with hover breakdown, watched cells, plots, nodes at zoom ≥ 12, relays, links, station, reported wildfires; collapsible legend)
 ```
 
 ## 9. Configuration
@@ -542,7 +1006,42 @@ THRESHOLD_INVESTIGATE=40
 CURING_PCT_OVERRIDE=       # blank = seasonal default
 NWS_USER_AGENT=firewatch-demo (you@example.com)
 VITE_API_BASE=http://localhost:8000/api
+
+SCORER=auto                # auto | model | rules
+DISTRICT=cottonwood-creek  # backend/data/districts/<slug>/: boundary.geojson, roster.csv, settings.json
+SMS_GATEWAY=outbox         # outbox (records only) | twilio; sample events always use the outbox
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_FROM=
+PUBLIC_BASE_URL=           # used to check Twilio signatures and in console links
+API_TOKEN=                 # required in live mode for admin routes; when set, also on routes that can text people (section 7)
+MESH_GATEWAY=off           # off | serial | tcp: a Meshtastic radio attached to the server
+MESH_DEVICE=               # serial port (first Meshtastic port when blank) or the radio's host for tcp
+MESH_CHANNEL_INDEX=0
+SENSOR_SIM=false           # true = install and run the simulated FireNode network (section 5.12)
+OPENROUTER_API_KEY=        # blank = no model: questions get the HELP reply, no channel updates
+OPENROUTER_MODEL=openrouter/free  # a free model per request; or a paid one, e.g. anthropic/claude-haiku-5.5
+MESH_CHANNEL_UPDATES=true  # with a key and a radio, post situation updates while a paged fire is open
+CHANNEL_UPDATE_MIN=15
 ```
+
+`backend/data/districts/<slug>/settings.json` holds what a chief tunes:
+
+```json
+{
+  "name": "Cottonwood Creek Fire District",
+  "neighbor_district": "<neighboring district>",
+  "capacity_ha_60min": 150,
+  "ask_neighbor_radius_mi": 3,
+  "ladder_minutes": [3, 6],
+  "mutual_aid_after_min": 5,
+  "min_responding": 2,
+  "line_fault_min_gfdi": 12,
+  "false_page_budget_per_month": 2
+}
+```
+
+The roster is a CSV the chief already has in some form (`name, phone, role, lat, lon, weekday_avail, ladder_rank, mesh_id`). `mesh_id` is the Meshtastic node ID (`!a1b2c3d4`) of the radio the person carries, blank if none. Ranchers and pumpers can also join by texting `JOIN` plus a road or landmark.
 
 ## 10. Sample fixture format
 
@@ -568,6 +1067,38 @@ VITE_API_BASE=http://localhost:8000/api
 
 Each pass is one satellite overpass; during replay a pass is fed in at `replay_offset_s + offset_s` (scaled to the replay duration), so scores visibly change as passes arrive. `approximate` marks fixtures whose locations and detections are reconstructed rather than copied from the FIRMS archive; `synthetic` marks invented scenarios. Weather is stored in the fixture so the demo runs offline; for non-synthetic fixtures it comes from the Open-Meteo archive (`scripts/backfill_sample_weather.py`).
 
+**Scenario fixtures** (`data/scenarios/<slug>.json`) add timed signals and inbound texts alongside passes, plus the baseline timeline. Times are minutes after ignition (`t0`), so the scenario clock and the spread estimate share one axis. The packet is canonical: 1:50 pm CDT on Tuesday 17 March 2026 is 18:50Z (daylight time starts 8 March). The district is placed at Coldwater, KS (Comanche County), and the ignition is 11 mi NW of the station. Turnout and drive minutes come from the district settings.
+
+```json
+{
+  "slug": "cottonwood-creek",
+  "title": "Cottonwood Creek: red-flag Tuesday line-down grass fire",
+  "synthetic": true,
+  "district": "cottonwood-creek",
+  "t0": "2026-03-17T18:50:00Z",
+  "duration_min": 62,
+  "ignition": {"lat": 37.3821, "lon": -99.4681, "cause": "downed distribution line (lease service)"},
+  "weather": {"wind_kmh": 56, "gust_kmh": 90, "wind_dir_deg": 185, "rh_pct": 11, "temp_c": 25.6, "precip_72h_mm": 0, "thunder_24h": 0},
+  "weather_hourly": [{"time": "2026-03-17T17:00:00Z", "wind_kmh": 50, "wind_from_deg": 175, "temp_c": 24.0, "rh_pct": 14}],
+  "weather_variants": {"front": {"note": "...", "hours": []}},
+  "red_flag": true,
+  "curing_pct": 98,
+  "burn_permits": [{"id": "permit-sat", "lat": 37.384, "lon": -99.585, "status": "extinguished"}],
+  "baseline": {"milestones": [{"key": "visual", "t": 27}, {"key": "call", "t": 31}, {"key": "roll", "t": 44}, {"key": "on_scene", "t": 62}]},
+  "timeline": [
+    {"t": 0,  "type": "signal", "kind": "line_fault", "lat": 37.3821, "lon": -99.4681, "source": "coop:feeder-4", "value": "lockout"},
+    {"t": 8,  "type": "sms", "from": "+13165550131", "body": "1"},
+    {"t": 9,  "type": "sms", "from": "+13165550101", "body": "PAGE"},
+    {"t": 12, "type": "sms", "from": "+13165550102", "body": "SEND"},
+    {"t": 38, "type": "detections", "detections": [{"source": "VIIRS_NOAA20_NRT", "...": "..."}]}
+  ]
+}
+```
+
+Texts name a roster phone number (the reserved 555-01xx range). The packet's two pasture burns were over the weekend, so they are extinguished permits, not same-day BURN notices. A same-day burn on this red-flag day would count as escaped anyway (GFDI ≥ `burn_escape_gfdi`). The "registered burn texts nobody" rule is covered by unit tests on a milder day. The replay runs each scenario minute through the real code (`add_signal`, `handle_inbound`, `process_detections`, then `notify.tick`) on the scenario's clock: `POST /api/scenario/{slug}/run` animates it at 2 s per minute, and `POST /api/scenario/{slug}/load` runs it instantly.
+
+**Several fires at once.** A scenario can list `fires`, each with a `key`, `label`, `ignition` and `t_start` (minutes after `t0`); see `cottonwood-creek-three-fires.json`, the packet fire three times over 12 minutes apart. An event belongs to the fire whose ignition is nearest, and its forecast (playbook, page plan, downwind warnings, 3D view) starts from that fire's ignition at its own start time. A scripted text writes `{B}` where the fire's number goes (`"body": "PAGE {B}"`), filled in when the replay runs. `GET /api/scenario/{slug}` adds `fires`: each fire's Firewatch timeline, its "today" chain (the scenario baseline shifted to the fire's start unless the fire gives its own), growth curve and size at first truck on scene; the top-level fields stay those of the first fire. The console strip shows one lane per fire.
+
 ## 11. Testing
 
 Kept small and aimed at the things that would embarrass us in a demo:
@@ -577,6 +1108,13 @@ Kept small and aimed at the things that would embarrass us in a demo:
 - **Spread:** zero-wind symmetry, wind elongation, direction mirroring, < 500 ms runtime.
 - **API:** invalid action transition returns 400; `/health` reports `down` when a source has never succeeded.
 - **End to end:** `MODE=sample`, replay, and assert all fixtures appear with expected recommendations.
+- **Confirmation rules:** a line fault alone on a High day → Investigate; on a Low day → Monitor; line fault + neighbor `1` → Escalate; a satellite hotspot inside today's burn notice → Monitor; the same hotspot 2 km outside → escalates normally.
+- **Response planner:** downwind contacts are chosen by spread arrival and ordered by ETA; an upwind contact gets nothing; no contact gets two asks for one event; STOP is honored.
+- **Ladder:** no PAGE reply in 3 min → the chief is texted; PAGE from a number outside the ladder is ignored.
+- **Messages:** every rendered template is ≤ 160 characters for the longest town name in the district.
+- **Scenario:** the Cottonwood Creek replay reaches Escalate at T+8 and PAGE at T+9, and the first truck is on scene at T+38 (packet: T+62). The three-fire replay pages each fire 9 minutes after it starts, by number, and each fire's forecast starts from its own ignition.
+- **Two open fires:** texts about the second fire carry its number; `PAGE <n>` pages the named fire, not the newest; a bare `PAGE` still answers the newest; an unknown number changes nothing.
+- **Model text:** a question is answered from the nearest fire's facts and never filed as a report; a failed call or an answer with an invented number falls back to the template; a page posts one channel update, then one per 15 minutes; with no key or no radio nothing calls OpenRouter. Tests never use a real key.
 
 ## 12. Data attribution (shown in the app footer and slides)
 

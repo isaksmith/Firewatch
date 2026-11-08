@@ -1,13 +1,6 @@
 import type { StyleSpecification } from 'maplibre-gl'
 
-export const BASEMAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
-
-/** Low-data mode: no tiles at all, just a dark background under the local Kansas layers. */
-export const BLANK_STYLE: StyleSpecification = {
-  version: 8,
-  sources: {},
-  layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#0a0c0f' } }],
-}
+export const BASEMAP_STYLE = 'https://tiles.openfreemap.org/styles/dark'
 
 export const KANSAS_VIEW = { longitude: -98.3, latitude: 38.5, zoom: 6.2 }
 
@@ -29,7 +22,7 @@ export const TERRAIN_SOURCE = {
   encoding: 'terrarium' as const,
   tileSize: 256,
   maxzoom: 15,
-  attribution: 'Terrain: AWS Terrain Tiles (Mapzen)',
+  attribution: 'Terrain Tiles (USGS and other sources)',
 }
 
 export const IMAGERY_TERRAIN_STYLE: StyleSpecification = {
@@ -37,10 +30,10 @@ export const IMAGERY_TERRAIN_STYLE: StyleSpecification = {
   sources: {
     imagery: {
       type: 'raster',
-      tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+      tiles: ['https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'],
       tileSize: 256,
-      maxzoom: 18,
-      attribution: 'Imagery: Esri, Maxar, Earthstar Geographics',
+      maxzoom: 16, // tiles verified at z16 over Kansas, z17 returns 404
+      attribution: 'USDA, USGS The National Map: Orthoimagery',
     },
     dem: TERRAIN_SOURCE,
   },
@@ -50,4 +43,11 @@ export const IMAGERY_TERRAIN_STYLE: StyleSpecification = {
   ],
   terrain: { source: 'dem', exaggeration: 1.5 },
   sky: {},
+}
+
+/** Low data mode: no tiles at all, just a dark background under the local Kansas layers. */
+export const BLANK_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {},
+  layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#0a0c0f' } }],
 }

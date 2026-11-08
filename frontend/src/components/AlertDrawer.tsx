@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Box, Download, ShieldAlert, X } from 'lucide-react'
+import { AlertTriangle, Box, ShieldAlert, X } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { BASE, api, type ActionName, type AlertDetail, type DataAge, type InPathPlace } from '../api'
-import { REC_META, agoLabel, centralTime, compass, kmhToMph, latLon, pad3, seenLabel, trackId } from '../lib/format'
-import { useLowData } from '../lib/lowData'
+import { api, type ActionName, type AlertDetail, type Message } from '../api'
+import { REC_META, centralTime, compass, kmhToMph, latLon, pad3, seenLabel, trackId } from '../lib/format'
 import { useOperator } from '../lib/operator'
-import { useUndoable } from '../lib/undoable'
-import { KV, RecTag, ScoreReadout, SectionHeader, StatusTag, UndoBar } from './ui'
+import { useTier } from '../lib/tier'
+import { DecisionPanel } from './DecisionPanel'
+import { EvidenceGlyph, KV, RecTag, ScoreReadout, SectionHeader, StatusTag } from './ui'
 
 const QUICK_NOTES = ['Paged VFD', 'Known Rx burn', 'Industrial site', 'Called landowner']
 
@@ -25,8 +25,7 @@ const isTyping = (e: KeyboardEvent) => {
 }
 
 export function AlertDrawer({ id, onClose }: { id: number; onClose: () => void }) {
-  const { on: lowData } = useLowData()
-  const q = useQuery({ queryKey: ['alert', id], queryFn: () => api.alert(id), refetchInterval: lowData ? false : 15_000 })
+  const q = useQuery({ queryKey: ['alert', id], queryFn: () => api.alert(id), refetchInterval: 3_000 })
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -37,7 +36,7 @@ export function AlertDrawer({ id, onClose }: { id: number; onClose: () => void }
   }, [onClose])
 
   return (
-    <aside className="flex w-[400px] shrink-0 flex-col border-l border-line bg-panel">
+    <aside className="absolute inset-0 z-20 flex w-full flex-col bg-panel md:static md:inset-auto md:z-auto md:w-[400px] md:shrink-0 md:border-l md:border-line">
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-line pr-2 pl-4">
         <span className="label !text-muted">
           Track <span className="text-text">{trackId(id)}</span>
@@ -59,137 +58,6 @@ function Section({ title, right, children }: { title: string; right?: ReactNode;
       <SectionHeader right={right}>{title}</SectionHeader>
       <div className="px-4 py-3">{children}</div>
     </section>
-  )
-}
-
-const EXPECTED_MIN: Record<string, number> = { Satellite: 15, Weather: 90 }
-const expectedFor = (label: string) => EXPECTED_MIN[label.split(' (')[0]]
-
-function DataAgeSection({ a }: { a: AlertDetail }) {
-  const rows: DataAge[] = a.data_age ?? []
-  const path = useQuery({ queryKey: ['in-path', a.id], queryFn: () => api.inPath(a.id) })
-  // Sample alerts carry a scenario clock; the server tells us what "now" is.
-  const [wall, setWall] = useState(() => Date.now())
-  useEffect(() => {
-    const t = setInterval(() => setWall(Date.now()), 30_000)
-    return () => clearInterval(t)
-  }, [])
-  const now = a.is_sample && path.data ? new Date(path.data.now).getTime() : wall
-  if (rows.length === 0) return null
-  return (
-    <Section title="How fresh is the data">
-      <ul className="space-y-1.5">
-        {rows.map((r) => {
-          const mins = r.last_seen ? (now - new Date(r.last_seen).getTime()) / 60000 : null
-          const limit = expectedFor(r.label)
-          const gap = r.last_seen == null || (limit != null && mins != null && mins > limit)
-          return (
-            <li key={`${r.label}-${r.source}`} className="flex items-baseline justify-between gap-3 text-[12.5px]">
-              <span className="min-w-0">{r.label}</span>
-              <span className={`num shrink-0 text-[12px] ${gap ? 'text-degraded' : 'text-ok'}`}>
-                {r.last_seen ? agoLabel(r.last_seen, now) : 'no time on record'}
-                {gap && r.last_seen && <span className="ml-1.5 border border-degraded/60 px-1 text-[9.5px]">GAP</span>}
-              </span>
-            </li>
-          )
-        })}
-      </ul>
-    </Section>
-  )
-}
-
-function whenLabel(p: InPathPlace): string {
-  if (p.status === 'reached') return `reached at ${p.reached_local ?? p.eta_local ?? ''}`
-  if (p.eta_min != null) return `in ${p.eta_min} min (${p.eta_local ?? p.arrival_local ?? ''})`
-  return p.arrival_local ? `about ${p.arrival_local}` : 'not expected soon'
-}
-
-function PathSection({ id }: { id: number }) {
-  const q = useQuery({ queryKey: ['in-path', id], queryFn: () => api.inPath(id) })
-  if (q.isLoading) return null
-  const places = q.data?.places ?? []
-  return (
-    <Section title="Who is in the path">
-      {q.isError && <p className="text-[12px] text-dim">Could not load the path.</p>}
-      {q.data && places.length === 0 && <p className="text-[12px] text-dim">Nothing known in the path yet.</p>}
-      <ul className="space-y-2">
-        {places.map((p) => (
-          <li key={p.id} className="flex items-baseline justify-between gap-3 text-[12.5px]">
-            <span className="min-w-0">{p.label}</span>
-            <span className={`num shrink-0 text-[12px] ${p.status === 'reached' ? 'text-escalate' : 'text-investigate'}`}>{whenLabel(p)}</span>
-          </li>
-        ))}
-      </ul>
-    </Section>
-  )
-}
-
-const CHANNEL_LABEL: Record<string, string> = { push: 'App push', sms: 'Text message', pager: 'County pager', mesh: 'Mesh radio' }
-
-function Count({ text }: { text: string }) {
-  return <span className={`num text-[10.5px] ${text.length > 160 ? 'text-escalate' : 'text-dim'}`}>{text.length} of 160 characters</span>
-}
-
-function SendSection({ id }: { id: number }) {
-  const msgs = useQuery({ queryKey: ['messages', id], queryFn: () => api.messages(id) })
-  const undoable = useUndoable(5)
-  const send = useMutation({ mutationFn: () => api.notify(id) })
-  const m = msgs.data
-  const live = send.data?.live === true
-  return (
-    <Section title="Messages">
-      {msgs.isError && <p className="text-[12px] text-dim">Could not load the messages.</p>}
-      {m && (
-        <div className="space-y-3">
-          <div>
-            <div className="label mb-1">{m.escalated ? 'Text to the chief' : 'Quiet notice to the chief'}</div>
-            <p className="border border-line bg-void px-3 py-2 text-[12.5px] leading-snug">{m.escalated ? m.chief : m.quiet}</p>
-            <Count text={m.escalated ? m.chief : m.quiet} />
-          </div>
-          {m.escalated &&
-            m.landowners.map((l) => (
-              <div key={l.id}>
-                <div className="label mb-1">Text to {l.name}</div>
-                <p className="border border-line bg-void px-3 py-2 text-[12.5px] leading-snug">{l.text}</p>
-                <Count text={l.text} />
-              </div>
-            ))}
-          {m.escalated && m.landowners.length === 0 && <p className="text-[12px] text-dim">No landowners to text right now.</p>}
-        </div>
-      )}
-      <div className="mt-4 space-y-2">
-        {undoable.left !== null ? (
-          <UndoBar message="Sending the practice alerts." left={undoable.left} onUndo={undoable.undo} />
-        ) : (
-          <button disabled={!m || send.isPending} onClick={() => undoable.start(() => send.mutate())} className="btn !h-11 w-full !text-[12px]">
-            {send.data ? (live ? 'Send alerts again' : 'Send alerts again (practice)') : 'Send alerts (practice)'}
-          </button>
-        )}
-        {send.isError && <p className="text-[12px] text-escalate">Could not send: {(send.error as Error).message}</p>}
-        {send.data && (
-          <div role="status">
-            <p className={`mb-1 text-[12px] ${live ? 'text-escalate' : 'text-sample'}`}>
-              {live ? 'These alerts were really sent.' : 'Practice only. Nothing was sent to anyone.'}
-            </p>
-            <ul className="space-y-1">
-              {send.data.results.map((r, i) => (
-                <li key={i} className="flex items-baseline justify-between gap-3 border-t border-line py-1 text-[12px]">
-                  <span>
-                    {CHANNEL_LABEL[r.channel] ?? r.channel} <span className="text-dim">to {r.to}</span>
-                  </span>
-                  <span className={`num shrink-0 ${r.error ? 'text-escalate' : r.status === 'dry_run' ? 'text-sample' : 'text-ok'}`}>
-                    {r.error ? `failed: ${r.error}` : r.status === 'dry_run' ? 'practice' : r.status}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        <a href={`${BASE}/alerts/${id}/cap.xml`} download className="flex h-9 items-center gap-2 text-[12.5px] text-sample underline underline-offset-2">
-          <Download size={13} /> Download CAP file
-        </a>
-      </div>
-    </Section>
   )
 }
 
@@ -219,11 +87,12 @@ function DrawerBody({ a }: { a: AlertDetail }) {
           </div>
           <div className="mt-3 text-[16px] leading-snug font-semibold">{a.place_label}</div>
           <div className="num mt-1 text-[10.5px] tracking-[0.04em] text-dim">{latLon(a.lat, a.lon)}</div>
+          {a.level_reason && <div className="mt-2 text-[12px] leading-snug text-muted">{a.level_reason}</div>}
           <div className="mt-3">
             <KV k="First seen" v={seenLabel(a.first_seen, a.is_sample)} />
             <KV k="Last seen" v={centralTime(a.last_seen, a.is_sample)} />
             <div className="grid grid-cols-2 gap-x-6">
-              <KV k="Scorer" v={a.scorer ?? '—'} />
+              <KV k="Scorer" v={a.scorer ?? 'no satellite'} />
               <KV k="Data" v={a.is_sample ? 'SAMPLE' : 'LIVE'} accent={a.is_sample ? '#5cc8ff' : '#3ddc97'} />
             </div>
           </div>
@@ -238,32 +107,58 @@ function DrawerBody({ a }: { a: AlertDetail }) {
           )}
         </div>
 
-        <Section title="Why this score" right={<span className="num text-[10px] text-dim">TREND {a.score_trend.join(' → ')}</span>}>
-          <ul className="space-y-2">
-            {a.reasons.slice(0, 6).map((r) => (
-              <li key={r.feature} className="grid grid-cols-[36px_1fr_72px] items-center gap-3">
-                <span className={`num text-right text-[12px] font-semibold ${r.contribution >= 0 ? 'text-text' : 'text-ok'}`}>
-                  {r.contribution > 0 ? '+' : ''}
-                  {r.contribution}
-                </span>
-                <span className="text-[12.5px] leading-snug text-text">{r.label}</span>
-                <span className="relative h-[6px] bg-line">
-                  <span
-                    className="absolute inset-y-0 left-0"
-                    style={{
-                      width: `${(Math.abs(r.contribution) / maxAbs) * 100}%`,
-                      background: r.contribution >= 0 ? meta.color : '#3ddc97',
-                    }}
-                  />
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Section>
+        <DecisionPanel eventId={a.id} />
 
-        <DataAgeSection a={a} />
-        <PathSection id={a.id} />
-        <SendSection id={a.id} />
+        {a.evidence.length > 0 && (
+          <Section
+            title="Evidence"
+            right={<span className="num text-[10px] text-dim">2 SOURCES = ESCALATE</span>}
+          >
+            <ul className="space-y-2">
+              {a.evidence.map((e, i) => (
+                <li key={i} className="flex gap-2.5">
+                  <span className="pt-[3px]">
+                    <EvidenceGlyph counts={e.counts} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className={`text-[12.5px] ${e.counts === 'no' ? 'text-muted' : 'text-text'}`}>{e.label}</span>
+                    {e.note && <span className="block text-[11px] text-dim">{e.note}</span>}
+                  </span>
+                  <span className="num shrink-0 pt-[2px] text-[10px] text-dim">{centralTime(e.at)}</span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
+        {a.response && <ResponseSection a={a} />}
+
+        {a.messages.length > 0 && <TextsSection messages={a.messages} />}
+
+        {a.reasons.length > 0 && (
+          <Section title="FireCast score" right={<span className="num text-[10px] text-dim">TREND {a.score_trend.join(' → ')}</span>}>
+            <ul className="space-y-2">
+              {a.reasons.slice(0, 6).map((r) => (
+                <li key={r.feature} className="grid grid-cols-[36px_1fr_72px] items-center gap-3">
+                  <span className={`num text-right text-[12px] font-semibold ${r.contribution >= 0 ? 'text-text' : 'text-ok'}`}>
+                    {r.contribution > 0 ? '+' : ''}
+                    {r.contribution}
+                  </span>
+                  <span className="truncate text-[12.5px] text-text">{r.label}</span>
+                  <span className="relative h-[6px] bg-line">
+                    <span
+                      className="absolute inset-y-0 left-0"
+                      style={{
+                        width: `${(Math.abs(r.contribution) / maxAbs) * 100}%`,
+                        background: r.contribution >= 0 ? meta.color : '#3ddc97',
+                      }}
+                    />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
 
         <Section title="Conditions" right={w.source ? <span className="num text-[10px] text-dim">{w.source.toUpperCase()}</span> : undefined}>
           {w.wind_kmh != null ? (
@@ -280,6 +175,9 @@ function DrawerBody({ a }: { a: AlertDetail }) {
                 <KV k="Gust" v={`${Math.round(kmhToMph(w.gust_kmh ?? 0))} MPH`} />
                 <KV k="RH" v={`${Math.round(w.rh_pct ?? 0)}%`} accent={(w.rh_pct ?? 100) < 25 ? '#ffb21a' : undefined} />
                 <KV k="Temp" v={`${Math.round(w.temp_c ?? 0)}°C`} />
+                {w.dew_point_c != null && <KV k="Dew pt" v={`${Math.round(w.dew_point_c)}°C`} />}
+                {w.pressure_hpa != null && <KV k="Pressure" v={`${Math.round(w.pressure_hpa)} HPA`} />}
+                {w.vpd_kpa != null && <KV k="VPD" v={`${w.vpd_kpa.toFixed(1)} KPA`} />}
                 <KV k="Rain 72H" v={`${w.precip_72h_mm ?? 0} MM`} />
               </div>
             </>
@@ -306,28 +204,32 @@ function DrawerBody({ a }: { a: AlertDetail }) {
         </Section>
 
         <Section title="Detections" right={<span className="num text-[10px] text-dim">{a.detections.length} HITS</span>}>
-          <table className="num w-full text-[11px]">
-            <thead>
-              <tr className="text-left">
-                {['Sat', 'Sensor', 'Time', 'FRP', 'Conf'].map((h, i) => (
-                  <th key={h} className={`label !text-[9px] pb-1.5 font-medium ${i >= 3 ? 'text-right' : ''}`}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {a.detections.map((d) => (
-                <tr key={d.id} className="border-t border-line">
-                  <td className="py-1 text-text">{d.satellite}</td>
-                  <td className="text-muted">{d.source.split('_')[0]}</td>
-                  <td className="text-muted">{centralTime(d.acq_time)}</td>
-                  <td className="text-right text-text">{d.frp_mw?.toFixed(0) ?? '–'} MW</td>
-                  <td className={`text-right uppercase ${d.confidence === 'high' ? 'text-text' : 'text-dim'}`}>{d.confidence}</td>
+          {a.detections.length === 0 ? (
+            <p className="text-[12px] text-dim">No satellite pass has seen this yet.</p>
+          ) : (
+            <table className="num w-full text-[11px]">
+              <thead>
+                <tr className="text-left">
+                  {['Sat', 'Sensor', 'Time', 'FRP', 'Conf'].map((h, i) => (
+                    <th key={h} className={`label !text-[9px] pb-1.5 font-medium ${i >= 3 ? 'text-right' : ''}`}>
+                      {h}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {a.detections.map((d) => (
+                  <tr key={d.id} className="border-t border-line">
+                    <td className="py-1 text-text">{d.satellite}</td>
+                    <td className="text-muted">{d.source.split('_')[0]}</td>
+                    <td className="text-muted">{centralTime(d.acq_time)}</td>
+                    <td className="text-right text-text">{d.frp_mw?.toFixed(0) ?? '–'} MW</td>
+                    <td className={`text-right uppercase ${d.confidence === 'high' ? 'text-text' : 'text-dim'}`}>{d.confidence}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </Section>
 
         <Section title="Log">
@@ -357,11 +259,190 @@ function DrawerBody({ a }: { a: AlertDetail }) {
   )
 }
 
+const PURPOSE_LABEL: Record<string, string> = {
+  ask_neighbor: 'Ask neighbor',
+  duty_fyi: 'Duty FYI',
+  duty_escalate: 'Duty: page?',
+  ladder: 'Ladder',
+  ladder_dispatch: 'Ladder: dispatch',
+  page: 'Page',
+  page_dispatch: 'Page dispatch',
+  downwind: 'Downwind warning',
+  helper: 'Ask for equipment',
+  mutual_aid_draft: 'Mutual-aid draft',
+  mutual_aid: 'Mutual aid',
+  reply: 'Auto-reply',
+  answer: 'Answer',
+  channel_update: 'Channel update',
+}
+
+/** Who an outbound text went to; a channel update has no contact, only the broadcast address. */
+const recipient = (m: Message) => m.contact_name ?? (m.purpose === 'channel_update' ? 'district channel' : m.phone ?? '?')
+
+function ResponseSection({ a }: { a: AlertDetail }) {
+  const r = a.response!
+  const { fireNode } = useTier()
+  const t = (iso: string | null | undefined) => (iso ? centralTime(iso) : '—')
+  return (
+    <Section title="Response" right={<span className="num text-[10px] text-dim">{r.texts_sent} TEXTS OUT</span>}>
+      {r.awaiting && !r.decision && (
+        <div className="mb-3 flex items-center gap-2 border border-line border-l-2 border-l-investigate bg-investigate/5 px-3 py-2 text-[11.5px]">
+          <span className="blink h-1.5 w-1.5 bg-investigate" />
+          Waiting on <span className="font-semibold">{r.awaiting}</span>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-x-6">
+        <KV k="Asked" v={t(r.investigate_at)} />
+        <KV k="Confirmed" v={t(r.escalate_at)} />
+        <KV k="Paged" v={r.page_at ? t(r.page_at) : r.decision === 'no' ? 'STOOD DOWN' : '—'} accent={r.page_at ? '#ff4b2b' : undefined} />
+        <KV k="Responding" v={String(r.responders.length)} />
+      </div>
+      {r.decision_by && (
+        <div className="num mt-1 text-[10.5px] text-dim">
+          {r.decision?.toUpperCase()} BY {r.decision_by.toUpperCase()}
+        </div>
+      )}
+      {r.plan && (
+        <div className="mt-3 border border-line bg-void px-3 py-2 text-[11.5px]">
+          <div className="flex justify-between">
+            <span className="label">Next hour</span>
+            <span className="num text-text">
+              UP TO {r.plan.acres_60} AC · WIND {r.plan.wind.from} {r.plan.wind.mph} MPH
+            </span>
+          </div>
+          {r.plan.downwind.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {r.plan.downwind.map((d) => (
+                <li key={d.contact_id} className="flex justify-between">
+                  <span>{d.name}</span>
+                  <span className="num text-investigate">AS SOON AS {d.eta_min} MIN</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {r.plan.helpers.length > 0 && (
+            <div className="mt-2 text-[11px] text-muted">
+              Equipment asked: {r.plan.helpers.map((h) => h.name).join(', ')}
+            </div>
+          )}
+        </div>
+      )}
+      {fireNode && r.crew.length > 0 && (
+        <div className="mt-3 border border-line bg-void px-3 py-2 text-[11.5px]">
+          <div className="flex justify-between">
+            <span className="label">Crew on FireMesh</span>
+            <span className="num text-[10px] text-dim">LIVE GPS</span>
+          </div>
+          <ul className="mt-2 space-y-1">
+            {r.crew.map((c) => {
+              const responding = r.responders.some((x) => x.contact_id === c.contact_id)
+              return (
+                <li key={c.contact_id} className="flex justify-between gap-3">
+                  <span className="min-w-0 truncate">
+                    {c.name}
+                    {responding && <span className="num ml-2 text-[10px] text-ok">RESPONDING</span>}
+                  </span>
+                  <span className="num shrink-0 text-text">
+                    {c.mi} MI {c.from_fire} <span className="text-dim">{c.position_min_ago < 1 ? 'NOW' : `${c.position_min_ago}M`}</span>
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+      {r.mutual_aid && (
+        <div className="mt-3 text-[11.5px]">
+          <span className="label mr-2">Mutual aid</span>
+          {r.mutual_aid.sent_at ? (
+            <span className="text-text">
+              requested {t(r.mutual_aid.sent_at)} by {r.mutual_aid.sent_by}
+            </span>
+          ) : (
+            <span className="text-investigate">drafted: {r.mutual_aid.reason}</span>
+          )}
+        </div>
+      )}
+    </Section>
+  )
+}
+
+/** Collapse a page that went to 18 people into one row. */
+function groupMessages(messages: Message[]) {
+  const out: { m: Message; n: number; names: string[] }[] = []
+  for (const m of messages) {
+    const last = out[out.length - 1]
+    if (
+      last &&
+      m.direction === 'out' &&
+      last.m.direction === 'out' &&
+      last.m.purpose === m.purpose &&
+      last.m.body === m.body &&
+      last.m.channel === m.channel
+    ) {
+      last.n += 1
+      last.names.push(recipient(m))
+    } else {
+      out.push({ m, n: 1, names: [recipient(m)] })
+    }
+  }
+  return out
+}
+
+const MESH_STATUS: Record<string, { label: string; cls: string }> = {
+  delivered: { label: 'DELIVERED', cls: 'text-ok' },
+  relayed: { label: 'RELAYED', cls: 'text-investigate' },
+  failed: { label: 'NOT DELIVERED', cls: 'text-escalate' },
+  sent: { label: 'SENT', cls: 'text-dim' },
+}
+
+function MeshTag({ m }: { m: Message }) {
+  const st = m.direction === 'out' ? MESH_STATUS[m.status] : undefined
+  return (
+    <span className="flex gap-1.5">
+      <span className="border border-ok/50 px-1 text-ok">MESH</span>
+      {st && <span className={st.cls}>{st.label}</span>}
+    </span>
+  )
+}
+
+function TextsSection({ messages }: { messages: Message[] }) {
+  const groups = groupMessages(messages)
+  const anyMesh = messages.some((m) => m.channel === 'mesh')
+  return (
+    <Section title="Texts" right={<span className="num text-[10px] text-dim">{anyMesh ? 'SMS + FIREMESH' : 'SMS'} · 160 CHAR</span>}>
+      <ol className="space-y-2.5">
+        {groups.map(({ m, n, names }) => {
+          const inbound = m.direction === 'in'
+          return (
+            <li key={m.id} className={`flex flex-col ${inbound ? 'items-start' : 'items-end'}`}>
+              <div className="num mb-0.5 flex gap-2 text-[9.5px] tracking-[0.06em] text-dim">
+                <span>{centralTime(m.created_at)}</span>
+                {m.channel === 'mesh' && <MeshTag m={m} />}
+                <span className={inbound ? 'text-sample' : 'text-muted'}>
+                  {inbound ? `FROM ${(m.contact_name ?? m.phone ?? '').toUpperCase()}` : `${(PURPOSE_LABEL[m.purpose ?? ''] ?? m.purpose ?? '').toUpperCase()} → ${n > 1 ? `${n} PEOPLE` : names[0].toUpperCase()}`}
+                </span>
+              </div>
+              <div
+                title={n > 1 ? names.join(', ') : undefined}
+                className={`max-w-[92%] border px-2.5 py-1.5 text-[11.5px] leading-snug ${
+                  inbound ? 'border-sample/40 bg-sample/5 text-text' : 'border-line-2 bg-void text-muted'
+                }`}
+              >
+                {m.body}
+              </div>
+            </li>
+          )
+        })}
+      </ol>
+    </Section>
+  )
+}
+
 function ActionBar({ a }: { a: AlertDetail }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const operator = useOperator()
-  const { on: lowData } = useLowData()
   const [note, setNote] = useState('')
   const act = useMutation({
     mutationFn: (action: ActionName) => api.act(a.id, action, operator, note),
@@ -372,19 +453,14 @@ function ActionBar({ a }: { a: AlertDetail }) {
     },
   })
   const open = ['new', 'acknowledged', 'escalated'].includes(a.status)
-  const can = {
-    acknowledge: open && a.status === 'new',
-    escalate: open && a.status !== 'escalated',
-    dismiss: open,
-    reopen: !open,
-  }
+  const can = { dismiss: open, reopen: !open }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e) || e.metaKey || e.ctrlKey || e.altKey || act.isPending) return
       const key = e.key.toLowerCase()
-      if (key === 'v' && !lowData) navigate(`/alerts/${a.id}/3d`)
-      const map: Record<string, ActionName> = { a: 'acknowledge', e: 'escalate', d: 'dismiss', r: 'reopen' }
+      if (key === 'v') navigate(`/alerts/${a.id}/3d`)
+      const map: Record<string, 'dismiss' | 'reopen'> = { d: 'dismiss', r: 'reopen' }
       const action = map[key]
       if (action && can[action]) act.mutate(action)
     }
@@ -394,15 +470,9 @@ function ActionBar({ a }: { a: AlertDetail }) {
 
   return (
     <div className="shrink-0 border-t border-line-2 bg-void">
-      {lowData ? (
-        <div className="num flex h-9 w-full items-center justify-center gap-2 border-b border-line text-[11px] text-dim">
-          <Box size={13} /> Not available in low-data mode
-        </div>
-      ) : (
-        <Link to={`/alerts/${a.id}/3d`} className="btn !h-9 w-full !border-x-0 !border-t-0 !border-b-line">
-          <Box size={13} /> 3D spread preview <span className="kbd ml-1">V</span>
-        </Link>
-      )}
+      <Link to={`/alerts/${a.id}/3d`} className="btn !h-9 w-full !border-x-0 !border-t-0 !border-b-line">
+        <Box size={13} /> 3D spread preview <span className="kbd ml-1">V</span>
+      </Link>
       <div className="space-y-2 p-3">
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="ADD NOTE…" className="field w-full" />
         <div className="flex flex-wrap gap-1">
@@ -417,17 +487,9 @@ function ActionBar({ a }: { a: AlertDetail }) {
           ))}
         </div>
         {open ? (
-          <div className="grid grid-cols-[1fr_1.3fr_1fr] gap-1.5">
-            <button disabled={!can.acknowledge || act.isPending} onClick={() => act.mutate('acknowledge')} className="btn !h-9">
-              Ack <span className="kbd">A</span>
-            </button>
-            <button disabled={!can.escalate || act.isPending} onClick={() => act.mutate('escalate')} className="btn btn-danger !h-9">
-              Escalate <span className="kbd">E</span>
-            </button>
-            <button disabled={act.isPending} onClick={() => act.mutate('dismiss')} className="btn !h-9 !text-muted">
-              Dismiss <span className="kbd">D</span>
-            </button>
-          </div>
+          <button disabled={act.isPending} onClick={() => act.mutate('dismiss')} className="btn !h-9 w-full !text-muted" title="Close this alert: not a fire, or a known burn">
+            Not a fire: dismiss <span className="kbd">D</span>
+          </button>
         ) : (
           <button onClick={() => act.mutate('reopen')} disabled={act.isPending} className="btn !h-9 w-full">
             Reopen <span className="kbd">R</span>

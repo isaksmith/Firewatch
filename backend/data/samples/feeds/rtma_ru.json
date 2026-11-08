@@ -1,0 +1,10 @@
+{
+ "count": 3,
+ "valid_time": "2026-07-14T21:45:00+00:00",
+ "key": "SAMPLE_rtma2p5_ru.t2145z.2dvaranl_ndfd.grb2",
+ "points": [
+  {"lat": 38.4, "lon": -98.6, "temp_c": 34.2, "dew_c": 5.1, "rh": 16.0, "p_hpa": 936.5},
+  {"lat": 38.4, "lon": -98.0, "temp_c": 33.6, "dew_c": 6.3, "rh": 18.3, "p_hpa": 938.0},
+  {"lat": 37.8, "lon": -98.3, "temp_c": 35.0, "dew_c": 4.2, "rh": 13.6, "p_hpa": 941.2}
+ ]
+}

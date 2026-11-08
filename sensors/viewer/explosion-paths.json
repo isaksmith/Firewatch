@@ -1,0 +1,122 @@
+{
+  "description": "Original compact Blender offsets, no fan-out. Device-local paths rotate with mounted geometry.",
+  "assemblies": {
+    "body": {
+      "extract": [
+        0,
+        0,
+        0
+      ]
+    },
+    "backplate": {
+      "extract": [
+        0,
+        0,
+        85
+      ]
+    },
+    "battery": {
+      "extract": [
+        0,
+        -12,
+        120
+      ]
+    },
+    "carrier": {
+      "extract": [
+        0,
+        0,
+        170
+      ]
+    },
+    "pm_adapter": {
+      "extract": [
+        0,
+        0,
+        187
+      ]
+    },
+    "lid": {
+      "extract": [
+        0,
+        0,
+        230
+      ]
+    },
+    "shield": {
+      "extract": [
+        0,
+        0,
+        256
+      ]
+    },
+    "gas_base": {
+      "extract": [
+        -18,
+        0,
+        15
+      ]
+    },
+    "gas_head": {
+      "extract": [
+        -18,
+        0,
+        130
+      ]
+    },
+    "gas_hood": {
+      "extract": [
+        -18,
+        0,
+        165
+      ]
+    },
+    "pm_base": {
+      "extract": [
+        24,
+        0,
+        15
+      ]
+    },
+    "pm_sensor": {
+      "extract": [
+        24,
+        0,
+        130
+      ]
+    },
+    "pm_hood": {
+      "extract": [
+        24,
+        0,
+        165
+      ]
+    },
+    "solar": {
+      "extract": [
+        -160,
+        0,
+        80
+      ],
+      "mountedExtract": [
+        0,
+        0,
+        0
+      ]
+    },
+    "mount": {
+      "extract": [
+        0,
+        0,
+        0
+      ]
+    },
+    "wiring": {
+      "extract": [
+        0,
+        0,
+        0
+      ]
+    }
+  }
+}

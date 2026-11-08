@@ -1,0 +1,165 @@
+{
+  "origin": {
+    "pack": "cwc",
+    "lat": 37.2689,
+    "lon": -99.3268
+  },
+  "vectors": [
+    {
+      "input": {
+        "pack": "cwc",
+        "kind": "alert",
+        "level": "investigate",
+        "id": 12,
+        "score": 45,
+        "lat": 37.3821,
+        "lon": -99.4681,
+        "time": "2026-03-17T18:51:00Z",
+        "toward_deg": null,
+        "mph": null,
+        "flags": [
+          "red_flag",
+          "exercise"
+        ]
+      },
+      "code": "FW1.cwc.ai.c.19.vg.-139.2c7f...5.5by",
+      "decoded_time_iso": "2026-03-17T18:51:00Z"
+    },
+    {
+      "input": {
+        "pack": "cwc",
+        "kind": "alert",
+        "level": "escalate",
+        "id": 12,
+        "score": 88,
+        "lat": 37.3821,
+        "lon": -99.4681,
+        "time": "2026-03-17T19:05:00Z",
+        "toward_deg": 0,
+        "mph": 3.0,
+        "flags": [
+          "red_flag",
+          "homes_in_path",
+          "exercise",
+          "two_sources"
+        ]
+      },
+      "code": "FW1.cwc.ae.c.2g.vg.-139.2c7t.0.6.n.c0n",
+      "decoded_time_iso": "2026-03-17T19:05:00Z"
+    },
+    {
+      "input": {
+        "pack": "cwc",
+        "kind": "alert",
+        "level": "escalate",
+        "id": 12,
+        "score": 91,
+        "lat": 37.3902,
+        "lon": -99.4655,
+        "time": "2026-03-17T19:20:00Z",
+        "toward_deg": 10,
+        "mph": 7.5,
+        "flags": [
+          "red_flag",
+          "homes_in_path",
+          "exercise",
+          "mutual_aid",
+          "two_sources"
+        ]
+      },
+      "code": "FW1.cwc.ae.c.2j.xp.-12j.2c88.2.f.v.rfs",
+      "decoded_time_iso": "2026-03-17T19:20:00Z"
+    },
+    {
+      "input": {
+        "pack": "cwc",
+        "kind": "clear",
+        "level": "monitor",
+        "id": 12,
+        "score": 20,
+        "lat": 37.3902,
+        "lon": -99.4655,
+        "time": "2026-03-17T23:40:00Z",
+        "toward_deg": null,
+        "mph": null,
+        "flags": [
+          "exercise"
+        ]
+      },
+      "code": "FW1.cwc.cm.c.k.xp.-12j.2cfg...4.2rs",
+      "decoded_time_iso": "2026-03-17T23:40:00Z"
+    },
+    {
+      "input": {
+        "pack": "cwc",
+        "kind": "notfire",
+        "level": "monitor",
+        "id": 1295,
+        "score": 0,
+        "lat": 37.15,
+        "lon": -99.2001,
+        "time": "2026-03-17T17:10:00Z",
+        "toward_deg": 355,
+        "mph": 0.5,
+        "flags": []
+      },
+      "code": "FW1.cwc.xm.zz.0.-x1.z7.2c4m.1z.1.0.r3n",
+      "decoded_time_iso": "2026-03-17T17:10:00Z"
+    }
+  ],
+  "must_reject": [
+    "FW1.cwc.ae.c.2g.vg.-139.2c7t.0.6.n.c00",
+    "FW1.cwc.ae.c",
+    "FW2.cwc.ae.c.2g.vg.-139.2c7t.0.6.n.c0n",
+    ""
+  ],
+  "signing": {
+    "note": "TEST-ONLY key. The seed is public, so no app or server may ever trust this key outside tests.",
+    "algorithm": "Ed25519 (RFC 8032) over the ASCII 12-field code; sig is base64url without padding (86 chars)",
+    "test_only_seed_hex": "9ab41ebf4756111491158d0587bb4560127d41abb7a2b993f3d6d5b0c6006def",
+    "test_only_public_key": "fy0uxhhsa-FgT4vDyl_RCGMrWRxugNGwxeqldRwWFqo",
+    "vectors": [
+      {
+        "code": "FW1.cwc.ai.c.19.vg.-139.2c7f...5.5by",
+        "signed": "FW1.cwc.ai.c.19.vg.-139.2c7f...5.5by.TLXHZm9x3ux-2wbXbDapogvtma1eWx8S4qIgMWmg6umGY5MGiE3bdhPaFypyvIFg6GtYtDxCbu1e_i_oAtE6CQ"
+      },
+      {
+        "code": "FW1.cwc.ae.c.2g.vg.-139.2c7t.0.6.n.c0n",
+        "signed": "FW1.cwc.ae.c.2g.vg.-139.2c7t.0.6.n.c0n.gUSlwGdebYtxZBioQuYhjkAT-KUcx3QYiJS4YYzIK8Wkhft-gIw8JIEt89Q7pbNHlVgn8hXDzmOtiooHcNV9AQ"
+      },
+      {
+        "code": "FW1.cwc.ae.c.2j.xp.-12j.2c88.2.f.v.rfs",
+        "signed": "FW1.cwc.ae.c.2j.xp.-12j.2c88.2.f.v.rfs.5D2Xl7fLtUB9oY-2sEC15_JmmE313Jo7kVCnXMLvgshgOWbbFoKWT83BccNAU-YTGIyxOxcO73TIHhPvAsA0BQ"
+      },
+      {
+        "code": "FW1.cwc.cm.c.k.xp.-12j.2cfg...4.2rs",
+        "signed": "FW1.cwc.cm.c.k.xp.-12j.2cfg...4.2rs.SC-OhOEcUEWQKkiw-s2GtnOrx2fG-pzf253BHSpR-1VVmJCoDzqZ0MKdJoBVzA68zajiW05MwsnBCbF20SPTDA"
+      },
+      {
+        "code": "FW1.cwc.xm.zz.0.-x1.z7.2c4m.1z.1.0.r3n",
+        "signed": "FW1.cwc.xm.zz.0.-x1.z7.2c4m.1z.1.0.r3n.xSf274q-cPDopJ_yqNhRvLUVbTKmXOHSBWsAw8ruXt8KfhT7UipBm3NM_faUppTDOb1IthpqgdQRHz3ufN3EDw"
+      }
+    ],
+    "must_reject_signed": [
+      {
+        "why": "one character of sig changed",
+        "code": "FW1.cwc.ae.c.2g.vg.-139.2c7t.0.6.n.c0n.gUSlwGdebYtxZBioQuYhjkAT-KUcx3QYiJS4YYzIA8Wkhft-gIw8JIEt89Q7pbNHlVgn8hXDzmOtiooHcNV9AQ"
+      },
+      {
+        "why": "valid sig from a key that is not trusted",
+        "code": "FW1.cwc.ae.c.2g.vg.-139.2c7t.0.6.n.c0n.IfWhrEl1_mPdWGfXUo0oE7nXu6el0KwdnD8gutsVmc9r7A3jrUJ1Rro3OBEWScbtGdwgLP4cmkJHPS19zQD3BQ"
+      },
+      {
+        "why": "valid sig moved onto a code with a changed field",
+        "code": "FW1.cwc.ae.c.2r.vg.-139.2c7t.0.6.n.zqz.gUSlwGdebYtxZBioQuYhjkAT-KUcx3QYiJS4YYzIK8Wkhft-gIw8JIEt89Q7pbNHlVgn8hXDzmOtiooHcNV9AQ"
+      }
+    ],
+    "pack": {
+      "code": "cwc",
+      "version": "2026-11-07.1",
+      "sha256": "807dadd24a61d36101eafe1bb6ac76ff158a50ee54b0ae3c6f3815b6e1b44dd7",
+      "message": "fwpack/1|cwc|2026-11-07.1|807dadd24a61d36101eafe1bb6ac76ff158a50ee54b0ae3c6f3815b6e1b44dd7",
+      "sig": "TZlsQZecb0O8cMzzbl8AKTyOHMsqafiXI0m0hzO4SRQX0HD7B-Avo5fkmAEwDFNBHZlWNP-JmFcnIxorYFR4BA"
+    }
+  }
+}

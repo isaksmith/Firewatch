@@ -1,0 +1,300 @@
+{
+  "slug": "cottonwood-creek",
+  "title": "Cottonwood Creek: red-flag Tuesday line-down grass fire",
+  "story": "A gust snaps a cross-arm on a 40-year-old line serving an oil lease 11 mi NW of the station, and the line drops into CRP grass at 1:50 pm on a red-flag Tuesday in mid-March (south wind 30-40 mph, gusts past 55, RH 11%, 78 F, five weeks without rain). Today nobody sees smoke until 2:17, 911 is called at 2:21, the page goes out at 2:23, Brush 1 rolls at 2:34 and arrives at 2:52 to a fire 2-3 mi long. Two neighbors burned pasture over the weekend under county permits, so smoke on the horizon is normal this month.",
+  "district": "cottonwood-creek",
+  "synthetic": true,
+  "t0": "2026-03-17T18:50:00Z",
+  "t0_local": "1:50 pm CDT, Tue Mar 17 2026",
+  "duration_min": 62,
+  "ignition": {
+    "lat": 37.3821,
+    "lon": -99.4681,
+    "cause": "downed distribution line (lease service)"
+  },
+  "weather": {
+    "wind_kmh": 56,
+    "gust_kmh": 90,
+    "wind_dir_deg": 185,
+    "rh_pct": 11,
+    "temp_c": 25.6,
+    "precip_72h_mm": 0,
+    "thunder_24h": 0
+  },
+  "baseline": {
+    "source": "Competitor packet (today's chain, no Firewatch)",
+    "milestones": [
+      {
+        "key": "visual",
+        "t": 27,
+        "label": "First visual (rancher)"
+      },
+      {
+        "key": "call",
+        "t": 31,
+        "label": "911 call"
+      },
+      {
+        "key": "roll",
+        "t": 44,
+        "label": "Trucks roll"
+      },
+      {
+        "key": "on_scene",
+        "t": 62,
+        "label": "On scene"
+      }
+    ]
+  },
+  "timeline": [
+    {
+      "t": 0,
+      "type": "signal",
+      "kind": "line_fault",
+      "lat": 37.3821,
+      "lon": -99.4681,
+      "source": "coop:feeder-4",
+      "value": "lockout",
+      "note": "Co-op SCADA: feeder 4 recloser locks out"
+    },
+    {
+      "t": 8,
+      "type": "sms",
+      "from": "+13165550131",
+      "body": "1",
+      "note": "Wes Kittle, 1 mi E: sees smoke"
+    },
+    {
+      "t": 9,
+      "type": "sms",
+      "from": "+13165550101",
+      "body": "PAGE",
+      "note": "Duty officer pages from her phone"
+    },
+    {
+      "t": 10,
+      "type": "sms",
+      "from": "+13165550111",
+      "body": "R",
+      "note": "Volunteer responding"
+    },
+    {
+      "t": 11,
+      "type": "sms",
+      "from": "+13165550151",
+      "body": "R",
+      "note": "Lease water truck heading there"
+    },
+    {
+      "t": 12,
+      "type": "sms",
+      "from": "+13165550102",
+      "body": "SEND",
+      "note": "Chief sends the mutual-aid request"
+    },
+    {
+      "t": 13,
+      "type": "sms",
+      "from": "+13165550113",
+      "body": "R",
+      "note": "Second volunteer responding"
+    },
+    {
+      "t": 38,
+      "type": "detections",
+      "note": "VIIRS NOAA-20 afternoon pass sees the fire",
+      "detections": [
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.3897,
+          "lon": -99.4646,
+          "brightness_k": 352.1,
+          "frp_mw": 28.4,
+          "confidence": "nominal",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        },
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.3965,
+          "lon": -99.4615,
+          "brightness_k": 367.0,
+          "frp_mw": 61.7,
+          "confidence": "high",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        },
+        {
+          "source": "VIIRS_NOAA20_NRT",
+          "satellite": "N20",
+          "lat": 37.4033,
+          "lon": -99.4585,
+          "brightness_k": 359.8,
+          "frp_mw": 44.2,
+          "confidence": "high",
+          "scan_km": 0.39,
+          "track_km": 0.36,
+          "daynight": "D"
+        }
+      ]
+    }
+  ],
+  "placement_note": "Fictional district placed at Coldwater, KS (Comanche County), per the packet's Clark/Comanche/Barber model, so real terrain and land cover are used.",
+  "red_flag": true,
+  "curing_pct": 98,
+  "weather_hourly": [
+    {
+      "time": "2026-03-17T17:00:00Z",
+      "wind_from_deg": 175,
+      "wind_kmh": 50,
+      "gust_kmh": 80,
+      "temp_c": 24.0,
+      "rh_pct": 14
+    },
+    {
+      "time": "2026-03-17T18:00:00Z",
+      "wind_from_deg": 180,
+      "wind_kmh": 56,
+      "gust_kmh": 88,
+      "temp_c": 25.5,
+      "rh_pct": 12
+    },
+    {
+      "time": "2026-03-17T19:00:00Z",
+      "wind_from_deg": 185,
+      "wind_kmh": 60,
+      "gust_kmh": 90,
+      "temp_c": 25.6,
+      "rh_pct": 11
+    },
+    {
+      "time": "2026-03-17T20:00:00Z",
+      "wind_from_deg": 185,
+      "wind_kmh": 61,
+      "gust_kmh": 92,
+      "temp_c": 25.6,
+      "rh_pct": 11
+    },
+    {
+      "time": "2026-03-17T21:00:00Z",
+      "wind_from_deg": 190,
+      "wind_kmh": 56,
+      "gust_kmh": 86,
+      "temp_c": 25.0,
+      "rh_pct": 12
+    },
+    {
+      "time": "2026-03-17T22:00:00Z",
+      "wind_from_deg": 195,
+      "wind_kmh": 50,
+      "gust_kmh": 77,
+      "temp_c": 23.9,
+      "rh_pct": 13
+    },
+    {
+      "time": "2026-03-17T23:00:00Z",
+      "wind_from_deg": 200,
+      "wind_kmh": 42,
+      "gust_kmh": 64,
+      "temp_c": 22.0,
+      "rh_pct": 16
+    }
+  ],
+  "weather_variants": {
+    "front": {
+      "note": "Same ignition and day, but a dry cold front arrives around 4 pm and swings the wind from south to northwest. The long east flank becomes a new head fire. Hypothetical weather, for testing time-varying wind.",
+      "hours": [
+        {
+          "time": "2026-03-17T17:00:00Z",
+          "wind_from_deg": 175,
+          "wind_kmh": 50,
+          "gust_kmh": 80,
+          "temp_c": 24.0,
+          "rh_pct": 14
+        },
+        {
+          "time": "2026-03-17T18:00:00Z",
+          "wind_from_deg": 180,
+          "wind_kmh": 56,
+          "gust_kmh": 88,
+          "temp_c": 25.5,
+          "rh_pct": 12
+        },
+        {
+          "time": "2026-03-17T19:00:00Z",
+          "wind_from_deg": 185,
+          "wind_kmh": 60,
+          "gust_kmh": 90,
+          "temp_c": 25.6,
+          "rh_pct": 11
+        },
+        {
+          "time": "2026-03-17T20:00:00Z",
+          "wind_from_deg": 185,
+          "wind_kmh": 61,
+          "gust_kmh": 92,
+          "temp_c": 25.6,
+          "rh_pct": 11
+        },
+        {
+          "time": "2026-03-17T21:00:00Z",
+          "wind_from_deg": 260,
+          "wind_kmh": 40,
+          "gust_kmh": 70,
+          "temp_c": 22.0,
+          "rh_pct": 14
+        },
+        {
+          "time": "2026-03-17T22:00:00Z",
+          "wind_from_deg": 320,
+          "wind_kmh": 58,
+          "gust_kmh": 95,
+          "temp_c": 17.0,
+          "rh_pct": 18
+        },
+        {
+          "time": "2026-03-17T23:00:00Z",
+          "wind_from_deg": 330,
+          "wind_kmh": 52,
+          "gust_kmh": 85,
+          "temp_c": 14.0,
+          "rh_pct": 22
+        }
+      ]
+    }
+  },
+  "burn_permits": [
+    {
+      "id": "permit-sat",
+      "lat": 37.384,
+      "lon": -99.585,
+      "acres": 160,
+      "start": "2026-03-14T15:00:00Z",
+      "end": "2026-03-14T23:00:00Z",
+      "status": "extinguished",
+      "provenance": {
+        "source": "competitor packet: weekend pasture burns under county permits",
+        "kind": "simulated"
+      }
+    },
+    {
+      "id": "permit-sun",
+      "lat": 37.3,
+      "lon": -99.56,
+      "acres": 240,
+      "start": "2026-03-15T15:00:00Z",
+      "end": "2026-03-15T23:00:00Z",
+      "status": "extinguished",
+      "provenance": {
+        "source": "competitor packet: weekend pasture burns under county permits",
+        "kind": "simulated"
+      }
+    }
+  ],
+  "confirm_red_flag": false,
+  "confirm_red_flag_note": "The forecast and the playbook read red_flag; the confirmation rules don't, so this replay keeps its neighbor-confirm chain (escalate at T+8, page at T+9). The packet replays (cottonwood-creek-packet*.json) apply the Red Flag line-fault rule and escalate at minute 0. Merge decision to review: one story should be picked for the pitch."
+}

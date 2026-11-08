@@ -2,14 +2,26 @@
 
 Use these exactly. All numbers are **sample data for a concept**; every screen shows a small footer: "Concept screen. Sample data from the Cottonwood Creek scenario."
 
+> **Geography update (canonical).** The place and positions below replace the earlier map. They come from `backend/data/scenarios/cottonwood-creek.json` and `backend/data/districts/cottonwood-creek/` on this branch. The screens, PNGs and PDF decks in this folder still show the old map positions (road labels such as "Rd K", "CR 12", and the old family names) and **need a redraw** before they go in the deck. The story times in this file are unchanged. The Butler County version of the scenario is dropped.
+
 ## Place (fictional, modeled on Clark / Comanche / Barber counties KS)
-- Town and station: **Cottonwood** (pop. 900), Cottonwood Creek Fire District, 450 sq mi.
-- Roads on a 1-mile section grid. East-west county roads are numbered (CR 10, CR 12, CR 14, CR 16), and run 1 mile apart northward. North-south roads are lettered (Rd H, Rd J, Rd K, Rd L), also 1 mile apart. Gravel.
-- Station at CR 10 & Rd P (southeast). **Ignition: Rd K, half a mile south of CR 12**, 11 miles northwest of the station, beside an oil-lease power line in CRP grass.
-- **Miller ranch house:** Rd K, 3 miles north of ignition (just north of CR 14 and CR 16 are further). Families: Miller (house), Hale (cattle on CR 14 east), Ortiz lease (water truck at the tank battery on CR 12 & Rd J).
-- **Permitted burns today (the decoys):**
-  - **Henderson pasture burn:** 4 mi east of ignition near CR 12 & Rd O. Called in to county dispatch at 10:40 for 11:00–16:00.
-  - **Ortiz pasture burn:** 6 mi southwest near CR 8 & Rd G. Called in at 11:15 for 12:00–17:00.
+- The district is Cottonwood Creek Fire District, 450 sq mi, placed on a stand-in square centered on Coldwater (Comanche County) so real terrain and land cover are used.
+- **Station 1 (Coldwater stand-in):** 37.2689, -99.3268.
+- **Ignition:** 37.3821, -99.4681, beside a 40-year-old oil-lease power line in CRP grass, about 11 miles northwest of the station. Co-op feeder 4 recloser locks out at 1:50 pm.
+- **Neighbors to text (roster positions):**
+  - Wes Kittle (rancher), 37.3821, -99.4512, about 1 mile east of the ignition
+  - June Pfannenstiel (rancher), 37.3611, -99.4783
+  - Dale Hutchins (rancher), 37.3991, -99.4603
+  - Marla Ostrander (rancher), 37.4076, -99.4565
+  - Gary Pruitt (rancher), 37.3621, -99.3537
+  - Cody Brandt (lease pumper), 37.3841, -99.4910
+  - Luis Orozco (lease pumper), 37.4421, -99.5477
+  - Ray Delk (lease water truck), 37.3981, -99.4631
+  - Harlan Shafer (disc), 37.4031, -99.4601
+  - Tom Wiebe (disc), 37.4111, -99.4482
+- **Mutual-aid stand-ins:** Protection FD 37.2006, -99.4835; Wilmore FD 37.3364, -99.2093; Mullinville FD 37.5872, -99.4757; Greensburg FD 37.6028, -99.2932; Ashland FD 37.1886, -99.7657.
+- **Permitted burns today (the decoys), from the scenario file:** a 160-acre pasture burn at 37.384, -99.585 (Saturday permit) and a 240-acre burn at 37.3, -99.56 (Sunday permit). Both are marked extinguished in the file. The story in this document has two called-in burns that morning; match the times to the scenario file when the screens are redrawn.
+- Roads are described on the redrawn map from real OpenStreetMap data, not the old invented section grid.
 
 ## Weather (Tuesday, mid-March)
 Red Flag Warning since 6:00 am. South wind 35 mph, gusts 55, humidity 11%, 78°F, no rain in 5 weeks. Wind from the south, so the **fire head runs north**.

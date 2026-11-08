@@ -1,0 +1,62 @@
+{
+ "lat": 38.25,
+ "lon": -96.5,
+ "elevation_m": 410.0,
+ "source": "ERA5 reanalysis via Open-Meteo archive, hourly 2016-2025",
+ "fire_gfdi": 12.0,
+ "fire_hours_per_year": 124.3,
+ "very_high_hours_per_year": 12.2,
+ "fire_hours_by_month": [
+  2.8,
+  7.5,
+  46.9,
+  54.2,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.0,
+  0.1,
+  7.8,
+  5.0
+ ],
+ "fire_wind_rose": [
+  0.0032,
+  0.0,
+  0.0016,
+  0.0008,
+  0.0,
+  0.0008,
+  0.0032,
+  0.0386,
+  0.3347,
+  0.2767,
+  0.066,
+  0.0306,
+  0.033,
+  0.0507,
+  0.1022,
+  0.0579
+ ],
+ "fire_wind_kmh_median": 34.1,
+ "fire_wind_modes": [
+  {
+   "from_deg": 202.5,
+   "from": "SSW",
+   "share": 0.747
+  },
+  {
+   "from_deg": 315.0,
+   "from": "NW",
+   "share": 0.247
+  }
+ ],
+ "sun_hours": {
+  "fire_season_mean": 4.52,
+  "fire_season_worst_week": 2.07,
+  "winter_worst_week": 1.0,
+  "december_mean": 2.29
+ },
+ "pm_too_cold_days_per_year": 12.7,
+ "fire_season_fog_morning_share": 0.091
+}

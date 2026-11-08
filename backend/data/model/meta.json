@@ -1,0 +1,345 @@
+{
+ "name": "xgb-v1",
+ "trained_at": "2026-11-06T23:59:03Z",
+ "features": [
+  "frp_max",
+  "frp_sum",
+  "brightness_max",
+  "conf_high_frac",
+  "pixel_km2_min",
+  "n_detections",
+  "n_satellites",
+  "minutes_active",
+  "frp_growth",
+  "is_night",
+  "local_hour",
+  "doy_sin",
+  "doy_cos",
+  "wind_kmh",
+  "gust_kmh",
+  "rh_pct",
+  "temp_c",
+  "precip_72h_mm",
+  "thunder_24h",
+  "gfdi",
+  "elevation_m",
+  "slope_deg",
+  "dist_line_km",
+  "dist_substation_km",
+  "dist_town_km",
+  "in_flint_hills",
+  "nearby_events_24h"
+ ],
+ "platt": {
+  "a": 0.8217114873885673,
+  "b": 0.07034515681439642
+ },
+ "rows": 1338,
+ "events_by_kind": {
+  "rx": 90,
+  "rx_weak": 400,
+  "static": 400,
+  "wf": 224
+ },
+ "years": [
+  2016,
+  2025
+ ],
+ "evaluation": {
+  "train_rows": 942,
+  "test_counts": {
+   "static": 240,
+   "rx_weak": 184,
+   "wf": 130,
+   "rx": 82
+  },
+  "by_year_cv": {
+   "xgboost": {
+    "wildfire_vs_burns": {
+     "roc_auc": 0.846,
+     "pr_auc": 0.911,
+     "n": 942
+    },
+    "wildfire_vs_reported_rx": {
+     "roc_auc": 0.775,
+     "pr_auc": 0.928,
+     "n": 424
+    }
+   },
+   "logistic": {
+    "wildfire_vs_burns": {
+     "roc_auc": 0.793,
+     "pr_auc": 0.877,
+     "n": 942
+    },
+    "wildfire_vs_reported_rx": {
+     "roc_auc": 0.71,
+     "pr_auc": 0.904,
+     "n": 424
+    }
+   }
+  },
+  "models": {
+   "xgboost": {
+    "wildfire_vs_burns": {
+     "roc_auc": 0.837,
+     "pr_auc": 0.76,
+     "n": 396
+    },
+    "first_pass_only": {
+     "roc_auc": 0.851,
+     "pr_auc": 0.78,
+     "n": 200
+    },
+    "wildfire_vs_reported_rx": {
+     "roc_auc": 0.72,
+     "pr_auc": 0.834,
+     "n": 212
+    },
+    "flint_hills_spring": {
+     "roc_auc": 0.797,
+     "pr_auc": 0.596,
+     "n": 271
+    },
+    "outcomes": {
+     "wf": {
+      "n": 130,
+      "monitor": 0.23846153846153847,
+      "investigate": 0.24615384615384617,
+      "escalate": 0.5153846153846153
+     },
+     "rx": {
+      "n": 82,
+      "monitor": 0.4634146341463415,
+      "investigate": 0.3780487804878049,
+      "escalate": 0.15853658536585366
+     },
+     "rx_weak": {
+      "n": 184,
+      "monitor": 0.8152173913043478,
+      "investigate": 0.16304347826086957,
+      "escalate": 0.021739130434782608
+     },
+     "static": {
+      "n": 240,
+      "monitor": 0.9916666666666667,
+      "investigate": 0.004166666666666667,
+      "escalate": 0.004166666666666667
+     }
+    }
+   },
+   "logistic": {
+    "wildfire_vs_burns": {
+     "roc_auc": 0.872,
+     "pr_auc": 0.821,
+     "n": 396
+    },
+    "first_pass_only": {
+     "roc_auc": 0.883,
+     "pr_auc": 0.818,
+     "n": 200
+    },
+    "wildfire_vs_reported_rx": {
+     "roc_auc": 0.784,
+     "pr_auc": 0.875,
+     "n": 212
+    },
+    "flint_hills_spring": {
+     "roc_auc": 0.862,
+     "pr_auc": 0.745,
+     "n": 271
+    },
+    "outcomes": {
+     "wf": {
+      "n": 130,
+      "monitor": 0.2076923076923077,
+      "investigate": 0.24615384615384617,
+      "escalate": 0.5461538461538461
+     },
+     "rx": {
+      "n": 82,
+      "monitor": 0.5609756097560976,
+      "investigate": 0.34146341463414637,
+      "escalate": 0.0975609756097561
+     },
+     "rx_weak": {
+      "n": 184,
+      "monitor": 0.8586956521739131,
+      "investigate": 0.11956521739130435,
+      "escalate": 0.021739130434782608
+     },
+     "static": {
+      "n": 240,
+      "monitor": 0.9916666666666667,
+      "investigate": 0.004166666666666667,
+      "escalate": 0.004166666666666667
+     }
+    }
+   },
+   "rules-v0": {
+    "wildfire_vs_burns": {
+     "roc_auc": 0.787,
+     "pr_auc": 0.681,
+     "n": 396
+    },
+    "first_pass_only": {
+     "roc_auc": 0.791,
+     "pr_auc": 0.676,
+     "n": 200
+    },
+    "wildfire_vs_reported_rx": {
+     "roc_auc": 0.603,
+     "pr_auc": 0.749,
+     "n": 212
+    },
+    "flint_hills_spring": {
+     "roc_auc": 0.792,
+     "pr_auc": 0.675,
+     "n": 271
+    },
+    "outcomes": {
+     "wf": {
+      "n": 130,
+      "monitor": 0.45384615384615384,
+      "investigate": 0.4,
+      "escalate": 0.14615384615384616
+     },
+     "rx": {
+      "n": 82,
+      "monitor": 0.5853658536585366,
+      "investigate": 0.4146341463414634,
+      "escalate": 0.0
+     },
+     "rx_weak": {
+      "n": 184,
+      "monitor": 0.8967391304347826,
+      "investigate": 0.10326086956521739,
+      "escalate": 0.0
+     },
+     "static": {
+      "n": 240,
+      "monitor": 1.0,
+      "investigate": 0.0,
+      "escalate": 0.0
+     }
+    }
+   }
+  }
+ },
+ "importance": [
+  {
+   "feature": "in_flint_hills",
+   "mean_abs_contribution": 0.9955
+  },
+  {
+   "feature": "gust_kmh",
+   "mean_abs_contribution": 0.4311
+  },
+  {
+   "feature": "dist_town_km",
+   "mean_abs_contribution": 0.3525
+  },
+  {
+   "feature": "wind_kmh",
+   "mean_abs_contribution": 0.3115
+  },
+  {
+   "feature": "doy_cos",
+   "mean_abs_contribution": 0.3025
+  },
+  {
+   "feature": "rh_pct",
+   "mean_abs_contribution": 0.2964
+  },
+  {
+   "feature": "slope_deg",
+   "mean_abs_contribution": 0.2672
+  },
+  {
+   "feature": "elevation_m",
+   "mean_abs_contribution": 0.2668
+  },
+  {
+   "feature": "frp_max",
+   "mean_abs_contribution": 0.2356
+  },
+  {
+   "feature": "doy_sin",
+   "mean_abs_contribution": 0.2202
+  },
+  {
+   "feature": "nearby_events_24h",
+   "mean_abs_contribution": 0.2124
+  },
+  {
+   "feature": "precip_72h_mm",
+   "mean_abs_contribution": 0.2047
+  },
+  {
+   "feature": "frp_sum",
+   "mean_abs_contribution": 0.1993
+  },
+  {
+   "feature": "dist_substation_km",
+   "mean_abs_contribution": 0.165
+  },
+  {
+   "feature": "gfdi",
+   "mean_abs_contribution": 0.164
+  },
+  {
+   "feature": "is_night",
+   "mean_abs_contribution": 0.1488
+  },
+  {
+   "feature": "dist_line_km",
+   "mean_abs_contribution": 0.1389
+  },
+  {
+   "feature": "local_hour",
+   "mean_abs_contribution": 0.1388
+  },
+  {
+   "feature": "brightness_max",
+   "mean_abs_contribution": 0.0802
+  },
+  {
+   "feature": "temp_c",
+   "mean_abs_contribution": 0.0794
+  },
+  {
+   "feature": "pixel_km2_min",
+   "mean_abs_contribution": 0.0561
+  },
+  {
+   "feature": "frp_growth",
+   "mean_abs_contribution": 0.0507
+  },
+  {
+   "feature": "minutes_active",
+   "mean_abs_contribution": 0.0347
+  },
+  {
+   "feature": "n_detections",
+   "mean_abs_contribution": 0.0341
+  },
+  {
+   "feature": "conf_high_frac",
+   "mean_abs_contribution": 0.0144
+  },
+  {
+   "feature": "n_satellites",
+   "mean_abs_contribution": 0.0
+  },
+  {
+   "feature": "thunder_24h",
+   "mean_abs_contribution": 0.0
+  }
+ ],
+ "lead_time": {
+  "matched_wildfires": 209,
+  "median_detection_minus_discovery_min": 8,
+  "share_detected_before_discovery": 0.474,
+  "share_within_1h_after": 0.22
+ }
+}

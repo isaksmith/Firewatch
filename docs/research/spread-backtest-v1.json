@@ -1,0 +1,728 @@
+[
+ {
+  "first_hour": null,
+  "slug": "anderson-creek-2016",
+  "title": "Anderson Creek fire, Woods Co. OK into Barber Co. KS (March 2016)",
+  "t0": "2016-03-23 04:34Z",
+  "start_pixels": 58,
+  "start_clusters": 1,
+  "first_sensors": [
+   "modis"
+  ],
+  "origin": [
+   37.0381,
+   -99.0577
+  ],
+  "weather": {
+   "wind_kmh": [
+    22,
+    47
+   ],
+   "wind_from_first_last": [
+    185,
+    236
+   ],
+   "rh_min": 10
+  },
+  "fuel": "NLCD 2021 (30 m) + USDA CDL 2024 cropland (partial)",
+  "cell_m": 1021.6,
+  "horizon_min": 920,
+  "looks": [
+   {
+    "look": "2016-03-23 08:28Z",
+    "hours": 3.9,
+    "detections": 431,
+    "sensors": [
+     "viirs-snpp"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.657,
+    "v2_reached_worst": 0.81,
+    "v1_reached": 0.592,
+    "head_observed_km": 12.1,
+    "head_v2_km": [
+     5.8,
+     10.6,
+     14.7
+    ],
+    "head_v1_km": 9.5
+   },
+   {
+    "look": "2016-03-23 08:49Z",
+    "hours": 4.2,
+    "detections": 72,
+    "sensors": [
+     "modis"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.611,
+    "v2_reached_worst": 0.847,
+    "v1_reached": 0.514,
+    "head_observed_km": 12.6,
+    "head_v2_km": [
+     4.2,
+     10.6,
+     16.7
+    ],
+    "head_v1_km": 10.6
+   },
+   {
+    "look": "2016-03-23 18:13Z",
+    "hours": 13.7,
+    "detections": 90,
+    "sensors": [
+     "modis"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.811,
+    "v2_reached_worst": 0.822,
+    "v1_reached": 0.511,
+    "head_observed_km": 21.8,
+    "head_v2_km": [
+     22.4,
+     35.8,
+     44.2
+    ],
+    "head_v1_km": 38.8
+   },
+   {
+    "look": "2016-03-23 19:48Z",
+    "hours": 15.2,
+    "detections": 2553,
+    "sensors": [
+     "modis",
+     "viirs-snpp"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.751,
+    "v2_reached_worst": 0.828,
+    "v1_reached": 0.248,
+    "head_observed_km": 24.1,
+    "head_v2_km": [
+     29.1,
+     40.9,
+     50.9
+    ],
+    "head_v1_km": 43.6
+   }
+  ]
+ },
+ {
+  "first_hour": null,
+  "slug": "starbuck-2017",
+  "title": "Starbuck fire, Beaver Co. OK into Clark Co. KS (March 2017)",
+  "t0": "2017-03-06 19:22Z",
+  "start_pixels": 289,
+  "start_clusters": 3,
+  "first_sensors": [
+   "viirs-snpp"
+  ],
+  "origin": [
+   37.0028,
+   -100.2668
+  ],
+  "weather": {
+   "wind_kmh": [
+    8,
+    49
+   ],
+   "wind_from_first_last": [
+    238,
+    273
+   ],
+   "rh_min": 6
+  },
+  "fuel": "NLCD 2021 (30 m) + USDA CDL 2024 cropland (partial); some tiles unavailable, assumed grass",
+  "cell_m": 1054.5,
+  "horizon_min": 850,
+  "looks": [
+   {
+    "look": "2017-03-06 20:16Z",
+    "hours": 0.9,
+    "detections": 106,
+    "sensors": [
+     "modis"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.453,
+    "v2_reached_worst": 0.708,
+    "v1_reached": 0.387,
+    "head_observed_km": 9.4,
+    "head_v2_km": [
+     2.2,
+     3.5,
+     6.4
+    ],
+    "head_v1_km": 3.8
+   },
+   {
+    "look": "2017-03-07 04:03Z",
+    "hours": 8.7,
+    "detections": 75,
+    "sensors": [
+     "modis"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.067,
+    "v2_reached_worst": 0.187,
+    "v1_reached": 0.067,
+    "head_observed_km": 57.0,
+    "head_v2_km": [
+     18.1,
+     25.5,
+     36.1
+    ],
+    "head_v1_km": 50.8
+   },
+   {
+    "look": "2017-03-07 07:43Z",
+    "hours": 12.3,
+    "detections": 866,
+    "sensors": [
+     "viirs-snpp"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.231,
+    "v2_reached_worst": 0.598,
+    "v1_reached": 0.263,
+    "head_observed_km": 55.4,
+    "head_v2_km": [
+     20.5,
+     30.6,
+     39.1
+    ],
+    "head_v1_km": 67.5
+   },
+   {
+    "look": "2017-03-07 08:18Z",
+    "hours": 12.9,
+    "detections": 52,
+    "sensors": [
+     "modis"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.173,
+    "v2_reached_worst": 0.731,
+    "v1_reached": 0.173,
+    "head_observed_km": 49.7,
+    "head_v2_km": [
+     20.9,
+     31.0,
+     40.4
+    ],
+    "head_v1_km": 72.1
+   },
+   {
+    "look": "2017-03-07 09:23Z",
+    "hours": 14.0,
+    "detections": 535,
+    "sensors": [
+     "viirs-snpp"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.32,
+    "v2_reached_worst": 0.682,
+    "v1_reached": 0.236,
+    "head_observed_km": 53.7,
+    "head_v2_km": [
+     22.5,
+     31.5,
+     40.7
+    ],
+    "head_v1_km": 78.9
+   }
+  ]
+ },
+ {
+  "first_hour": {
+   "discovered": "17:19Z",
+   "first_look": "19:17Z",
+   "lead_min": 118,
+   "ignition": [
+    36.8131,
+    -100.5016
+   ],
+   "wind_at_start": "42 km/h from 227\u00b0",
+   "acres_60": {
+    "p10": 816,
+    "p50": 1306,
+    "p90": 3387
+   },
+   "packet_acres_60": 15000,
+   "reach_at_first_look_km": {
+    "seen": 37.3,
+    "forecast_p90_p50_p10": [
+     3.5,
+     9.9,
+     13.1
+    ]
+   }
+  },
+  "slug": "ranger-road-2026",
+  "title": "Ranger Road fire, Beaver Co. OK (February 17, 2026; 283,283 ac)",
+  "t0": "2026-02-17 19:17Z",
+  "start_pixels": 888,
+  "start_clusters": 1,
+  "first_sensors": [
+   "viirs_noaa20_sp",
+   "viirs_snpp_sp"
+  ],
+  "origin": [
+   36.9158,
+   -100.2935
+  ],
+  "weather": {
+   "wind_kmh": [
+    8,
+    56
+   ],
+   "wind_from_first_last": [
+    235,
+    258
+   ],
+   "rh_min": 14
+  },
+  "fuel": "NLCD 2021 (30 m) + USDA CDL 2024 cropland (partial); some tiles unavailable, assumed grass",
+  "cell_m": 1033.5,
+  "horizon_min": 840,
+  "looks": [
+   {
+    "look": "2026-02-17 19:46Z",
+    "hours": 0.5,
+    "detections": 55,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.564,
+    "v2_reached_worst": 0.673,
+    "v1_reached": 0.527,
+    "head_observed_km": 3.5,
+    "head_v2_km": [
+     1.4,
+     1.7,
+     2.2
+    ],
+    "head_v1_km": 1.5
+   },
+   {
+    "look": "2026-02-17 20:16Z",
+    "hours": 1.0,
+    "detections": 47,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.617,
+    "v2_reached_worst": 0.787,
+    "v1_reached": 0.553,
+    "head_observed_km": 3.5,
+    "head_v2_km": [
+     1.6,
+     2.2,
+     4.3
+    ],
+    "head_v1_km": 1.8
+   },
+   {
+    "look": "2026-02-17 20:27Z",
+    "hours": 1.2,
+    "detections": 443,
+    "sensors": [
+     "viirs_noaa21_nrt"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.792,
+    "v2_reached_worst": 0.91,
+    "v1_reached": 0.711,
+    "head_observed_km": 2.4,
+    "head_v2_km": [
+     3.5,
+     3.6,
+     7.5
+    ],
+    "head_v1_km": 3.2
+   },
+   {
+    "look": "2026-02-17 20:46Z",
+    "hours": 1.5,
+    "detections": 57,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.737,
+    "v2_reached_worst": 0.877,
+    "v1_reached": 0.614,
+    "head_observed_km": 3.6,
+    "head_v2_km": [
+     3.7,
+     5.4,
+     10.7
+    ],
+    "head_v1_km": 5.5
+   },
+   {
+    "look": "2026-02-17 21:16Z",
+    "hours": 2.0,
+    "detections": 72,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.556,
+    "v2_reached_worst": 0.875,
+    "v1_reached": 0.514,
+    "head_observed_km": 10.5,
+    "head_v2_km": [
+     4.6,
+     7.8,
+     15.5
+    ],
+    "head_v1_km": 8.2
+   },
+   {
+    "look": "2026-02-17 21:36Z",
+    "hours": 2.3,
+    "detections": 155,
+    "sensors": [
+     "modis_sp"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.555,
+    "v2_reached_worst": 0.852,
+    "v1_reached": 0.516,
+    "head_observed_km": 7.6,
+    "head_v2_km": [
+     4.5,
+     9.4,
+     17.6
+    ],
+    "head_v1_km": 10.1
+   },
+   {
+    "look": "2026-02-17 21:46Z",
+    "hours": 2.5,
+    "detections": 63,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.603,
+    "v2_reached_worst": 0.841,
+    "v1_reached": 0.619,
+    "head_observed_km": 4.7,
+    "head_v2_km": [
+     5.6,
+     10.8,
+     18.7
+    ],
+    "head_v1_km": 10.9
+   },
+   {
+    "look": "2026-02-17 22:16Z",
+    "hours": 3.0,
+    "detections": 65,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.431,
+    "v2_reached_worst": 0.662,
+    "v1_reached": 0.369,
+    "head_observed_km": 24.6,
+    "head_v2_km": [
+     6.9,
+     13.7,
+     22.0
+    ],
+    "head_v1_km": 13.4
+   },
+   {
+    "look": "2026-02-17 22:46Z",
+    "hours": 3.5,
+    "detections": 77,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.286,
+    "v2_reached_worst": 0.636,
+    "v1_reached": 0.234,
+    "head_observed_km": 17.9,
+    "head_v2_km": [
+     7.5,
+     16.5,
+     25.0
+    ],
+    "head_v1_km": 16.0
+   },
+   {
+    "look": "2026-02-17 23:16Z",
+    "hours": 4.0,
+    "detections": 84,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.262,
+    "v2_reached_worst": 0.607,
+    "v1_reached": 0.25,
+    "head_observed_km": 26.3,
+    "head_v2_km": [
+     10.3,
+     17.7,
+     28.2
+    ],
+    "head_v1_km": 18.4
+   },
+   {
+    "look": "2026-02-17 23:46Z",
+    "hours": 4.5,
+    "detections": 101,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.277,
+    "v2_reached_worst": 0.564,
+    "v1_reached": 0.218,
+    "head_observed_km": 38.2,
+    "head_v2_km": [
+     9.7,
+     18.6,
+     31.0
+    ],
+    "head_v1_km": 21.0
+   },
+   {
+    "look": "2026-02-18 00:16Z",
+    "hours": 5.0,
+    "detections": 86,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.267,
+    "v2_reached_worst": 0.5,
+    "v1_reached": 0.233,
+    "head_observed_km": 45.5,
+    "head_v2_km": [
+     11.0,
+     21.2,
+     33.8
+    ],
+    "head_v1_km": 23.4
+   },
+   {
+    "look": "2026-02-18 00:46Z",
+    "hours": 5.5,
+    "detections": 64,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.234,
+    "v2_reached_worst": 0.438,
+    "v1_reached": 0.219,
+    "head_observed_km": 49.0,
+    "head_v2_km": [
+     12.4,
+     22.2,
+     36.2
+    ],
+    "head_v1_km": 26.1
+   },
+   {
+    "look": "2026-02-18 01:16Z",
+    "hours": 6.0,
+    "detections": 34,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.441,
+    "v2_reached_worst": 0.559,
+    "v1_reached": 0.471,
+    "head_observed_km": 46.5,
+    "head_v2_km": [
+     12.3,
+     23.4,
+     37.9
+    ],
+    "head_v1_km": 28.5
+   },
+   {
+    "look": "2026-02-18 01:46Z",
+    "hours": 6.5,
+    "detections": 13,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.462,
+    "v2_reached_worst": 0.769,
+    "v1_reached": 0.385,
+    "head_observed_km": 38.2,
+    "head_v2_km": [
+     14.0,
+     24.5,
+     39.6
+    ],
+    "head_v1_km": 31.2
+   },
+   {
+    "look": "2026-02-18 02:16Z",
+    "hours": 7.0,
+    "detections": 2,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.5,
+    "v2_reached_worst": 1.0,
+    "v1_reached": 0.0,
+    "head_observed_km": 27.0,
+    "head_v2_km": [
+     14.2,
+     24.5,
+     41.2
+    ],
+    "head_v1_km": 33.7
+   },
+   {
+    "look": "2026-02-18 02:46Z",
+    "hours": 7.5,
+    "detections": 7,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.286,
+    "v2_reached_worst": 0.714,
+    "v1_reached": 0.143,
+    "head_observed_km": 46.6,
+    "head_v2_km": [
+     17.3,
+     25.6,
+     42.3
+    ],
+    "head_v1_km": 36.2
+   },
+   {
+    "look": "2026-02-18 02:57Z",
+    "hours": 7.7,
+    "detections": 81,
+    "sensors": [
+     "modis_sp"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.481,
+    "v2_reached_worst": 0.716,
+    "v1_reached": 0.37,
+    "head_observed_km": 46.6,
+    "head_v2_km": [
+     17.4,
+     25.8,
+     43.0
+    ],
+    "head_v1_km": 37.2
+   },
+   {
+    "look": "2026-02-18 03:16Z",
+    "hours": 8.0,
+    "detections": 5,
+    "sensors": [
+     "goes19"
+    ],
+    "goes": true,
+    "v2_reached_median": 0.2,
+    "v2_reached_worst": 0.2,
+    "v1_reached": 0.0,
+    "head_observed_km": 52.0,
+    "head_v2_km": [
+     17.6,
+     27.4,
+     43.8
+    ],
+    "head_v1_km": 38.7
+   },
+   {
+    "look": "2026-02-18 07:37Z",
+    "hours": 12.3,
+    "detections": 173,
+    "sensors": [
+     "viirs_snpp_sp"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.566,
+    "v2_reached_worst": 0.827,
+    "v1_reached": 0.353,
+    "head_observed_km": 49.3,
+    "head_v2_km": [
+     21.8,
+     34.5,
+     53.0
+    ],
+    "head_v1_km": 60.9
+   },
+   {
+    "look": "2026-02-18 07:58Z",
+    "hours": 12.7,
+    "detections": 155,
+    "sensors": [
+     "viirs_noaa20_sp"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.555,
+    "v2_reached_worst": 0.794,
+    "v1_reached": 0.381,
+    "head_observed_km": 49.8,
+    "head_v2_km": [
+     21.8,
+     35.2,
+     53.1
+    ],
+    "head_v1_km": 62.7
+   },
+   {
+    "look": "2026-02-18 08:47Z",
+    "hours": 13.5,
+    "detections": 129,
+    "sensors": [
+     "viirs_noaa21_nrt"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.527,
+    "v2_reached_worst": 0.69,
+    "v1_reached": 0.403,
+    "head_observed_km": 51.4,
+    "head_v2_km": [
+     19.8,
+     36.9,
+     56.5
+    ],
+    "head_v1_km": 66.9
+   },
+   {
+    "look": "2026-02-18 09:17Z",
+    "hours": 14.0,
+    "detections": 111,
+    "sensors": [
+     "viirs_snpp_sp"
+    ],
+    "goes": false,
+    "v2_reached_median": 0.523,
+    "v2_reached_worst": 0.622,
+    "v1_reached": 0.45,
+    "head_observed_km": 51.2,
+    "head_v2_km": [
+     22.2,
+     35.5,
+     54.5
+    ],
+    "head_v1_km": 69.7
+   }
+  ]
+ }
+]
